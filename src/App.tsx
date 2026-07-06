@@ -114,6 +114,27 @@ const thinkingBalanceOptions = [
 const emptyLedgerMessage =
   "まだ保存された思考レシートがありません。レシートを発行して帳簿に保存すると、ここに記録が表示されます。";
 
+const demoConversation: RawConversation = {
+  aiService: "ChatGPT",
+  url: "https://chatgpt.com/",
+  capturedAt: "2026/07/04 14:30",
+  conversationTitle: "作品コンセプトの整理",
+  messages: [
+    {
+      role: "user",
+      text: "「私とAIの確定申告」という作品を、A3ポスターで伝わる形に整理したいです。",
+    },
+    {
+      role: "assistant",
+      text: "AIとの会話を使いっぱなしにせず、思考レシートとして発行し、帳簿にため、月次決算や確定申告で振り返る体験構造にすると伝わりやすいです。",
+    },
+    {
+      role: "user",
+      text: "思考レシートを主役にし、紙とデジタルをつなぐサービスとして見せる方向で進めます。",
+    },
+  ],
+};
+
 const sampleThinkingLedgerReceipts: IssuedThinkingReceipt[] = [
   {
     receiptNo: "TR-SAMPLE-001",
@@ -701,6 +722,50 @@ function App() {
     }
   }
 
+  function loadDemoConversation() {
+    try {
+      localStorage.setItem(RAW_CONVERSATION_KEY, JSON.stringify(demoConversation));
+    } catch {
+      // 画面上のデモ体験は localStorage に保存できない環境でも続けます。
+    }
+
+    setConversationCandidate(classifyConversation(demoConversation));
+    setCandidateIssueMessage("");
+    setIssuedReceipt(null);
+    setLedgerMessage("");
+    setReceiptActionMessage("");
+    setConversationMessage("サンプル会話から、思考レシート候補を作成しました。");
+    setIsSettlementOpen(false);
+    setActiveTab("home");
+    scrollScreenToTop("smooth");
+  }
+
+  function resetDemoData() {
+    if (!window.confirm("デモデータをリセットしますか？")) return;
+
+    try {
+      localStorage.removeItem(RAW_CONVERSATION_KEY);
+      localStorage.removeItem(THINKING_LEDGER_KEY);
+    } catch {
+      // localStorage が使えない環境でも、画面上の状態はリセットします。
+    }
+
+    setConversationCandidate(null);
+    setConversationMessage("");
+    setCandidateIssueMessage("");
+    setIssuedReceipt(null);
+    setReceiptUrl("");
+    setQrCodeUrl("");
+    setQrMessage("");
+    setLedgerMessage("");
+    setReceiptActionMessage("");
+    setThinkingLedger([]);
+    setSaveMessage("");
+    setActiveTab("home");
+    scrollScreenToTop("auto");
+    showToast("デモデータをリセットしました。");
+  }
+
   function updateConversationCandidate(field: CandidateField, value: string) {
     setConversationCandidate((current) =>
       current ? { ...current, [field]: value } : current,
@@ -788,6 +853,28 @@ function App() {
                 <p>AIとの会話を読み込み、思考レシートとして発行します。</p>
               </section>
 
+              <section className="demo-start-card">
+                <div>
+                  <p className="eyebrow">デモを試す</p>
+                  <h3>サンプル会話から一周する</h3>
+                  <p>
+                    AIとの会話から思考レシートを発行し、帳簿・月次決算・確定申告までの流れを体験できます。
+                  </p>
+                </div>
+                <button className="secondary-action demo-action" type="button" onClick={loadDemoConversation}>
+                  <Sparkles size={17} />
+                  サンプル会話を読み込む
+                </button>
+              </section>
+
+              <ol className="experience-steps" aria-label="デモの流れ">
+                <li>会話を読み込む</li>
+                <li>候補を確認</li>
+                <li>発行</li>
+                <li>保存</li>
+                <li>振り返る</li>
+              </ol>
+
               <section className="extension-import-card extension-import-card-top">
                 <div className="import-card-heading">
                   <strong>会話データを読み込む</strong>
@@ -815,6 +902,12 @@ function App() {
                     onIssue={issueConversationCandidate}
                   />
                 )}
+                <details className="dev-tools">
+                  <summary>デモ用</summary>
+                  <button className="secondary-action" type="button" onClick={resetDemoData}>
+                    デモデータをリセット
+                  </button>
+                </details>
               </section>
             </>
           )}
@@ -916,7 +1009,6 @@ function ThoughtSettlementScreen({
         <div>
           <p className="eyebrow light">1年分のまとめ</p>
           <h2>私とAIの確定申告</h2>
-          <span className="status-pill">{ledgerStats.count}件の思考レシート</span>
         </div>
         <p>蓄積した記録から、自分とAIの関係を見つめ直します。</p>
       </section>
@@ -931,12 +1023,20 @@ function ThoughtSettlementScreen({
           </section>
 
           <section className="annual-report-card">
-            <SectionTitle icon={<BarChart3 size={18} />} title="年次申告項目" />
-            <div className="annual-report-grid">
-              <SettlementMetric label="総レシート数" value={`${ledgerStats.count}件`} />
-              <SettlementMetric label="もっとも使ったAI" value={ledgerStats.topService} />
-              <SettlementMetric label="もっとも多かったAIの役割" value={ledgerStats.topRole} />
-              <SettlementMetric label="思考残高の傾向" value={ledgerStats.topBalance} />
+            <SectionTitle icon={<BarChart3 size={18} />} title="総括メモ" />
+            <div className="annual-insight-list">
+              <SettlementBalance
+                title="AIに頼りやすかった場面"
+                body={`${ledgerStats.topTopic}のように、考えを形にする場面でAIを使う記録が目立ちます。`}
+              />
+              <SettlementBalance
+                title="AIから得ていたもの"
+                body={ledgerStats.aiAddedExamples[0] || "AIが足した視点はまだ少しずつ記録されています。"}
+              />
+              <SettlementBalance
+                title="思考残高の傾向"
+                body={ledgerStats.topBalance}
+              />
             </div>
           </section>
 
@@ -951,6 +1051,11 @@ function ThoughtSettlementScreen({
                 <p>まだ明確な判断は記録されていません</p>
               )}
             </div>
+          </section>
+
+          <section className="annual-report-card annual-report-card-primary">
+            <SectionTitle icon={<Sparkles size={18} />} title="今年のAIとの関係" />
+            <p className="annual-report-comment">{ledgerStats.yearSummary}</p>
           </section>
         </>
       )}
@@ -1427,24 +1532,20 @@ function SavedLedgerList({
   onAddSamples: () => void;
 }) {
   const [selectedReceiptNo, setSelectedReceiptNo] = useState<string | null>(null);
-  const stats = buildLedgerStats(receipts);
   const selectedReceipt =
     receipts.find((receipt) => receipt.receiptNo === selectedReceiptNo) ?? null;
 
   return (
     <section className="saved-ledger-list">
       <SectionTitle icon={<WalletCards size={18} />} title="帳簿の概要" />
-      <p className="screen-purpose">保存した思考レシートを一覧で確認できます。</p>
+      <p className="screen-purpose">
+        保存した思考レシートを一覧で確認できます。
+        {receipts.length > 0 && <span className="ledger-count-inline">保存済み{receipts.length}件</span>}
+      </p>
       {receipts.length === 0 ? (
         <LedgerEmptyState onAddSamples={onAddSamples} />
       ) : (
         <>
-          <div className="ledger-summary-grid">
-            <SettlementMetric label="保存済みレシート数" value={`${stats.count}件`} />
-            <SettlementMetric label="よく使ったAI" value={stats.topService} />
-            <SettlementMetric label="よく使った役割" value={stats.topRole} />
-          </div>
-
           <section className="saved-ledger-section">
             <h4>保存済みレシート一覧</h4>
             <div className="saved-ledger-items">
@@ -1510,6 +1611,7 @@ function AnalysisScreen({
   onAddSamples: () => void;
 }) {
   const monthlyStats = buildMonthlyLedgerStats(ledgerReceipts);
+  const monthlyDecisions = monthlyStats.decisions.slice(0, 3);
 
   return (
     <section className="stack">
@@ -1525,29 +1627,39 @@ function AnalysisScreen({
         <LedgerEmptyState onAddSamples={onAddSamples} />
       ) : (
         <>
-          <div className="settlement-metric-grid">
-            <SettlementMetric label="今月のレシート数" value={`${monthlyStats.count}件`} />
-            <SettlementMetric label="今月よく使ったAI" value={monthlyStats.topService} />
-            <SettlementMetric label="今月よく使った役割" value={monthlyStats.topRole} />
-            <SettlementMetric label="今月の思考残高" value={monthlyStats.topBalance} />
-          </div>
-
-          <section className="card soft-blue">
+          <section className="monthly-report-card">
             <SectionTitle icon={<Sparkles size={18} />} title="今月のまとめ" />
             <p className="reflection">{monthlyStats.summary}</p>
           </section>
 
+          <section className="monthly-report-card">
+            <SectionTitle icon={<Bot size={18} />} title="今月もっとも特徴的だったAIの使い方" />
+            <p className="monthly-insight">
+              {monthlyStats.featuredUse}
+            </p>
+          </section>
+
+          <section className="monthly-report-card">
+            <SectionTitle icon={<NotebookTabs size={18} />} title="代表的な相談テーマ" />
+            <p className="monthly-insight">{monthlyStats.representativeTopic}</p>
+          </section>
+
           <section className="section-block">
             <SectionTitle icon={<CheckCircle2 size={18} />} title="自分で決めたことの代表例" />
-            {monthlyStats.decisions.length === 0 ? (
+            {monthlyDecisions.length === 0 ? (
               <p className="saved-ledger-empty">今月の自己決定はまだ記録されていません。</p>
             ) : (
               <div className="ledger-detail-list">
-                {monthlyStats.decisions.slice(0, 3).map((decision) => (
+                {monthlyDecisions.map((decision) => (
                   <p key={decision}>{decision}</p>
                 ))}
               </div>
             )}
+          </section>
+
+          <section className="monthly-next-card">
+            <SectionTitle icon={<ChevronRight size={18} />} title="次月に向けた一言" />
+            <p>{monthlyStats.nextMonthNote}</p>
           </section>
         </>
       )}
@@ -2192,6 +2304,9 @@ function inferAiRole(text: string) {
 
 function inferAiAdded(assistantText: string, allText: string) {
   const additions: string[] = [];
+  if (hasAny(allText, ["思考レシート", "確定申告"]) && assistantText.includes("帳簿")) {
+    return "レシート・帳簿・確定申告という体験構造を整理した";
+  }
   if (hasAny(assistantText, ["改善案", "案を", "提案"])) additions.push("改善案の提示");
   if (assistantText.includes("コピー")) additions.push("コピーの整理");
   if (assistantText.includes("導線")) additions.push("導線の整理");
@@ -2244,7 +2359,9 @@ function normalizeDecisionText(text: string) {
 
 function inferFeelingAfter(allText: string, selfDecision: string) {
   if (selfDecision !== "まだ明確な判断は記録されていません") {
-    return hasAny(allText, ["案", "視点", "改善", "提案"]) ? "考えが広がった" : "すっきりした";
+    return hasAny(allText, ["案", "視点", "改善", "提案", "コンセプト", "体験構造"])
+      ? "考えが広がった"
+      : "すっきりした";
   }
   if (hasAny(allText, ["不安", "安心", "大丈夫"])) return "安心した";
   if (hasAny(allText, ["迷", "保留", "悩"])) return "まだ保留";
@@ -2505,6 +2622,11 @@ function buildLedgerStats(data: IssuedThinkingReceipt[]) {
       topBalance,
       decisionCount,
     }),
+    yearSummary: buildYearSummary({
+      topRole,
+      topBalance,
+      decisionCount,
+    }),
   };
 }
 
@@ -2553,6 +2675,9 @@ function buildMonthlyLedgerStats(data: IssuedThinkingReceipt[]) {
     ...stats,
     monthKey: currentMonthKey,
     summary: buildMonthlyLedgerSummary(stats),
+    featuredUse: buildMonthlyFeaturedUse(stats),
+    representativeTopic: stats.topTopic === "-" ? "まだ代表的な相談テーマはありません。" : stats.topTopic,
+    nextMonthNote: buildNextMonthNote(stats),
   };
 }
 
@@ -2562,6 +2687,23 @@ function buildMonthlyLedgerSummary(stats: ReturnType<typeof buildLedgerStats>) {
   }
 
   return `今月は${stats.topService}を「${stats.topRole}」として使う記録が多く、思考残高は「${stats.topBalance}」の傾向です。AIの提案を受け取りながら、自分で決めたことも残っています。`;
+}
+
+function buildMonthlyFeaturedUse(stats: ReturnType<typeof buildLedgerStats>) {
+  if (stats.count === 0) return "今月の特徴はまだ記録されていません。";
+  return `${stats.topRole}としてAIを使い、${stats.topTopic}について考えを整理する場面が目立ちました。`;
+}
+
+function buildNextMonthNote(stats: ReturnType<typeof buildLedgerStats>) {
+  if (stats.count === 0) {
+    return "まずは1枚、思考レシートを帳簿に保存するところから始められます。";
+  }
+
+  if (stats.topBalance === "AIの助けが多い") {
+    return "次月は、AIが出した案のうち何を自分で選んだかをもう少し残すと、判断の流れが見えやすくなります。";
+  }
+
+  return "次月も、AIが足した視点と自分で選んだ方向性を一緒に残すと振り返りやすくなります。";
 }
 
 function buildRelationshipComment({
@@ -2584,6 +2726,18 @@ function buildRelationshipComment({
   if (count === 0) return emptyLedgerMessage;
 
   return `あなたは${topService}を単なる答えを出す道具ではなく、「${topRole}」として考えを整理する相手として使う傾向があります。AIの視点を取り入れながらも、最後の方向性は自分で決める記録が${decisionCount}件残っています。思考残高は「${topBalance}」の傾向です。`;
+}
+
+function buildYearSummary({
+  topRole,
+  topBalance,
+  decisionCount,
+}: {
+  topRole: string;
+  topBalance: string;
+  decisionCount: number;
+}) {
+  return `今年のAIとの関係は、「${topRole}」として一緒に考えながら、最後は自分で判断する関係でした。自分で決めたことは${decisionCount}件残っており、思考残高は「${topBalance}」として記録されています。`;
 }
 
 function getCurrentMonthKey() {
