@@ -888,7 +888,9 @@ button {
 }
 
 .receipt-print-title,
-.receipt-print-tagline {
+.receipt-print-tagline,
+.receipt-print-label,
+.receipt-value-print {
   display: none;
 }
 
@@ -1328,6 +1330,90 @@ button {
   gap: 10px;
 }
 
+.annual-scope-note {
+  margin: -4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.annual-graph-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.annual-trend-chart {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.annual-trend-heading {
+  display: grid;
+  gap: 3px;
+}
+
+.annual-trend-heading strong {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.annual-trend-heading p,
+.annual-empty-chart {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
+.annual-bars {
+  display: grid;
+  gap: 8px;
+}
+
+.annual-bar-row {
+  display: grid;
+  grid-template-columns: minmax(76px, 0.8fr) minmax(80px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.annual-bar-row span {
+  min-width: 0;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.annual-bar-track {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.annual-bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #38bdf8);
+}
+
+.annual-bar-row em {
+  color: #475569;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+
 .annual-report-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1355,6 +1441,35 @@ button {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
+}
+
+.monthly-metric-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.monthly-metric-grid .settlement-metric {
+  min-height: 84px;
+  padding: 12px;
+  border-radius: 16px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.monthly-metric-grid .settlement-metric span {
+  font-size: 11px;
+}
+
+.monthly-metric-grid .settlement-metric strong {
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+
+.monthly-metric-grid .settlement-metric:first-child {
+  grid-column: span 2;
+  min-height: 72px;
+  background: #eff6ff;
+  border-color: rgba(37, 99, 235, 0.16);
 }
 
 .monthly-report-card,
@@ -2221,6 +2336,7 @@ button {
   .receipt-save-hint,
   .issued-receipt-panel > .primary-action,
   .issued-receipt-actions,
+  .dev-tools,
   .candidate-message,
   .qr-error {
     display: none !important;
@@ -2258,7 +2374,7 @@ button {
     display: block;
     box-sizing: border-box;
     margin: 0;
-    padding: 3.5mm;
+    padding: 3.5mm 3.8mm;
     border: 0;
     border-radius: 0;
     background: #ffffff !important;
@@ -2266,7 +2382,7 @@ button {
     box-shadow: none !important;
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
     font-size: 10.5px;
-    line-height: 1.45;
+    line-height: 1.5;
     break-inside: avoid;
     page-break-inside: avoid;
   }
@@ -2285,10 +2401,19 @@ button {
 
   .issued-receipt-header {
     display: grid;
-    gap: 1mm;
+    grid-template-columns: 18mm 1fr;
+    gap: 1mm 2mm;
     margin: 0 0 2mm;
     padding: 0 0 2mm;
     border-bottom: 1px dashed #000000;
+  }
+
+  .receipt-status-label {
+    display: none !important;
+  }
+
+  .receipt-print-label {
+    display: block;
   }
 
   .issued-receipt-header span,
@@ -2299,11 +2424,17 @@ button {
     overflow-wrap: anywhere;
   }
 
+  .issued-receipt-header strong {
+    text-align: right;
+  }
+
   .issued-receipt-body {
     display: grid;
-    gap: 1.6mm;
+    gap: 1.45mm;
     padding: 0 0 2mm;
     border-bottom: 1px dashed #000000;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .receipt-info-row {
@@ -2316,7 +2447,7 @@ button {
 
   .receipt-info-row span {
     display: block;
-    margin: 0 0 0.4mm;
+    margin: 0 0 0.35mm;
     color: #000000 !important;
     font-size: 9px;
     font-weight: 700;
@@ -2330,6 +2461,14 @@ button {
     line-height: 1.45;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
+  }
+
+  .receipt-value-screen {
+    display: none !important;
+  }
+
+  .receipt-value-print {
+    display: block !important;
   }
 
   .qr-panel {
@@ -2347,12 +2486,14 @@ button {
 
   .qr-panel img,
   .qr-placeholder {
-    width: 28mm;
-    height: 28mm;
+    width: 30mm;
+    height: 30mm;
     border-radius: 0;
     background: #ffffff !important;
     color: #000000 !important;
     image-rendering: pixelated;
+    break-inside: avoid;
+    page-break-inside: avoid;
   }
 
   .qr-description {

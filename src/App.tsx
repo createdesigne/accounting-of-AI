@@ -550,7 +550,7 @@ function App() {
     QRCode.toDataURL(url, {
       errorCorrectionLevel: "M",
       margin: 1,
-      width: 220,
+      width: 320,
     })
       .then((dataUrl: string) => {
         if (cancelled) return;
@@ -1023,6 +1023,29 @@ function ThoughtSettlementScreen({
           </section>
 
           <section className="annual-report-card">
+            <SectionTitle icon={<BarChart3 size={18} />} title="全体の傾向" />
+            <p className="annual-scope-note">thinkingLedger 全体をもとに集計しています。</p>
+            <div className="annual-graph-stack">
+              <AnnualTrendChart
+                title="AIに求めた役割の内訳"
+                description="AIを何のために使っていたかを見ます。"
+                items={ledgerStats.roleBreakdown}
+              />
+              <AnnualTrendChart
+                title="思考残高の傾向"
+                description="AIとの距離感がどこに寄っていたかを見ます。"
+                items={ledgerStats.balanceBreakdown}
+              />
+              <AnnualTrendChart
+                title="使用AIの割合"
+                description="主な相談相手になっていたAIを見ます。"
+                items={ledgerStats.serviceBreakdown}
+                maxItems={4}
+              />
+            </div>
+          </section>
+
+          <section className="annual-report-card">
             <SectionTitle icon={<BarChart3 size={18} />} title="総括メモ" />
             <div className="annual-insight-list">
               <SettlementBalance
@@ -1077,6 +1100,45 @@ function SettlementBalance({ title, body }: { title: string; body: string }) {
     <div className="settlement-balance-row">
       <strong>{title}</strong>
       <p>{body}</p>
+    </div>
+  );
+}
+
+function AnnualTrendChart({
+  title,
+  description,
+  items,
+  maxItems = 5,
+}: {
+  title: string;
+  description: string;
+  items: Array<{ label: string; count: number }>;
+  maxItems?: number;
+}) {
+  const visibleItems = items.slice(0, maxItems);
+  const maxCount = Math.max(...visibleItems.map((item) => item.count), 1);
+
+  return (
+    <div className="annual-trend-chart">
+      <div className="annual-trend-heading">
+        <strong>{title}</strong>
+        <p>{description}</p>
+      </div>
+      {visibleItems.length === 0 ? (
+        <p className="annual-empty-chart">まだ傾向を表示できる記録がありません。</p>
+      ) : (
+        <div className="annual-bars">
+          {visibleItems.map((item) => (
+            <div className="annual-bar-row" key={item.label}>
+              <span>{item.label}</span>
+              <div className="annual-bar-track" aria-hidden="true">
+                <i style={{ width: `${Math.max((item.count / maxCount) * 100, 8)}%` }} />
+              </div>
+              <em>{item.count}件</em>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1386,19 +1448,32 @@ function IssuedReceiptPanel({
     <section className="issued-receipt-panel">
       <h2 className="receipt-print-title">思考レシート</h2>
       <div className="issued-receipt-header">
-        <span>発行済み思考レシート</span>
+        <span className="receipt-status-label">発行済み思考レシート</span>
+        <span className="receipt-print-label">receiptNo</span>
         <strong>{receipt.receiptNo}</strong>
       </div>
       <div className="issued-receipt-body">
+        <ReceiptInfoRow label="発行日時" value={receipt.issuedAt} />
         <ReceiptInfoRow label="使用AI" value={receipt.aiService} />
         <ReceiptInfoRow label="会話日時" value={receipt.conversationDate} />
         <ReceiptInfoRow label="相談テーマ" value={receipt.topic} />
         <ReceiptInfoRow label="AIに求めた役割" value={receipt.aiRole} />
-        <ReceiptInfoRow label="AIが足したこと" value={receipt.aiAdded} />
-        <ReceiptInfoRow label="自分で決めたこと" value={receipt.selfDecision} />
-        <ReceiptInfoRow label="会話後の気持ち" value={receipt.feelingAfter} />
+        <ReceiptInfoRow
+          label="AIが足したこと"
+          value={receipt.aiAdded}
+          printValue={shortenForPrint(receipt.aiAdded)}
+        />
+        <ReceiptInfoRow
+          label="自分で決めたこと"
+          value={receipt.selfDecision}
+          printValue={shortenForPrint(receipt.selfDecision)}
+        />
+        <ReceiptInfoRow
+          label="会話後の気持ち"
+          value={receipt.feelingAfter}
+          printValue={shortenForPrint(receipt.feelingAfter, 28)}
+        />
         <ReceiptInfoRow label="思考残高" value={receipt.thinkingBalance} />
-        <ReceiptInfoRow label="発行日時" value={receipt.issuedAt} />
       </div>
 
       <div className="qr-panel">
@@ -1445,13 +1520,28 @@ function IssuedReceiptPanel({
   );
 }
 
-function ReceiptInfoRow({ label, value }: { label: string; value: string }) {
+function ReceiptInfoRow({
+  label,
+  value,
+  printValue,
+}: {
+  label: string;
+  value: string;
+  printValue?: string;
+}) {
   return (
     <div className="receipt-info-row">
       <span>{label}</span>
-      <strong>{value}</strong>
+      <strong className="receipt-value-screen">{value}</strong>
+      <strong className="receipt-value-print">{printValue ?? value}</strong>
     </div>
   );
+}
+
+function shortenForPrint(value: string, maxLength = 46) {
+  const compacted = compactText(value);
+  if (compacted.length <= maxLength) return compacted;
+  return `${compacted.slice(0, maxLength)}…`;
 }
 
 function LedgerEmptyState({ onAddSamples }: { onAddSamples: () => void }) {
@@ -1619,14 +1709,29 @@ function AnalysisScreen({
         <div>
           <p className="eyebrow">月次決算</p>
           <h2>今月のAIとの関係</h2>
-          <p className="screen-purpose">今月のAIとの関係を短く振り返ります。</p>
+          <p className="screen-purpose">今月の思考レシートから、AIとの関わり方を振り返ります。</p>
         </div>
       </div>
 
       {ledgerReceipts.length === 0 ? (
         <LedgerEmptyState onAddSamples={onAddSamples} />
+      ) : monthlyStats.count === 0 ? (
+        <section className="monthly-report-card">
+          <SectionTitle icon={<CalendarDays size={18} />} title="今月の記録" />
+          <p className="monthly-insight">
+            今月の思考レシートはまだありません。レシートを発行して帳簿に保存すると、月次決算に反映されます。
+          </p>
+        </section>
       ) : (
         <>
+          <div className="monthly-metric-grid">
+            <SettlementMetric label="今月のレシート数" value={`${monthlyStats.count}件`} />
+            <SettlementMetric label="よく使ったAI" value={monthlyStats.topService} />
+            <SettlementMetric label="よく使った役割" value={monthlyStats.topRole} />
+            <SettlementMetric label="多かった相談テーマ" value={monthlyStats.topTopic} />
+            <SettlementMetric label="思考残高" value={monthlyStats.topBalance} />
+          </div>
+
           <section className="monthly-report-card">
             <SectionTitle icon={<Sparkles size={18} />} title="今月のまとめ" />
             <p className="reflection">{monthlyStats.summary}</p>
@@ -2587,6 +2692,7 @@ function normalizeIssuedReceipt(receipt: unknown): IssuedThinkingReceipt | null 
 }
 
 function buildLedgerStats(data: IssuedThinkingReceipt[]) {
+  const serviceBreakdown = countLedgerValues(data.map((receipt) => receipt.aiService));
   const roleBreakdown = countLedgerValues(data.map((receipt) => receipt.aiRole));
   const feelingBreakdown = countLedgerValues(data.map((receipt) => receipt.feelingAfter));
   const balanceBreakdown = countLedgerValues(data.map((receipt) => receipt.thinkingBalance));
@@ -2608,6 +2714,7 @@ function buildLedgerStats(data: IssuedThinkingReceipt[]) {
     topRole,
     topFeeling,
     topBalance,
+    serviceBreakdown,
     roleBreakdown,
     feelingBreakdown,
     balanceBreakdown,
