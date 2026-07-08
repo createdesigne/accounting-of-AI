@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 
 type TabKey = "home" | "journal" | "receipts" | "analysis" | "tax";
+type SettlementView = "monthly" | "annual";
 
 type JournalUnit = {
   amount: number;
@@ -506,6 +507,7 @@ function App() {
   const [receiptFilter, setReceiptFilter] = useState<ReceiptFilter | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<TabKey | null>(null);
   const [analysisFocus, setAnalysisFocus] = useState<AnalysisFocus>(null);
+  const [settlementView, setSettlementView] = useState<SettlementView>("monthly");
   const [isSettlementOpen, setIsSettlementOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
@@ -681,6 +683,7 @@ function App() {
   function showAnalysis(focus: AnalysisFocus = null) {
     setIsSettlementOpen(false);
     setActiveTab("tax");
+    setSettlementView("monthly");
     setAnalysisFocus(focus);
     scrollScreenToTop("auto");
   }
@@ -709,6 +712,9 @@ function App() {
       setReceiptFilter(null);
       setFilterOrigin(null);
     }
+    if (tab === "tax") {
+      setSettlementView("monthly");
+    }
     setActiveTab(tab);
     setSaveMessage("");
     setAnalysisFocus(null);
@@ -718,6 +724,7 @@ function App() {
   function openSettlement() {
     setIsSettlementOpen(false);
     setActiveTab("tax");
+    setSettlementView("monthly");
     setSaveMessage("");
     setAnalysisFocus(null);
     scrollScreenToTop("auto");
@@ -838,6 +845,29 @@ function App() {
     );
   }
 
+  function issueDemoQrReceipt() {
+    try {
+      localStorage.setItem(RAW_CONVERSATION_KEY, JSON.stringify(demoConversation));
+    } catch {
+      // localStorage が使えない環境でも、QR付きレシートの発行体験は続けます。
+    }
+
+    const candidate = classifyConversation(demoConversation);
+    const receipt = createIssuedReceipt(candidate);
+
+    setConversationCandidate(candidate);
+    setConversationMessage("サンプル会話から、QR付き思考レシートを発行しました。");
+    setCandidateIssueMessage("QRコード付きの思考レシートを発行しました。");
+    setIssuedReceipt(receipt);
+    setLedgerMessage("");
+    setReceiptActionMessage("");
+    setReaderStep("closed");
+    setScannedReceipt(null);
+    setIsSettlementOpen(false);
+    setActiveTab("home");
+    scrollScreenToTop("auto");
+  }
+
   function saveIssuedReceiptToLedger() {
     if (!issuedReceipt) return;
 
@@ -922,17 +952,25 @@ function App() {
             </section>
           )}
           {!isSettlementOpen && activeTab === "tax" && (
-            <>
+            settlementView === "monthly" ? (
               <AnalysisScreen
                 ledgerReceipts={thinkingLedger}
                 onAddSamples={addSampleLedgerData}
+                onShowAnnual={() => {
+                  setSettlementView("annual");
+                  scrollScreenToTop("auto");
+                }}
               />
+            ) : (
               <ThoughtSettlementScreen
                 ledgerReceipts={thinkingLedger}
-                onBackHome={closeSettlement}
+                onBackMonthly={() => {
+                  setSettlementView("monthly");
+                  scrollScreenToTop("auto");
+                }}
                 onAddSamples={addSampleLedgerData}
               />
-            </>
+            )
           )}
           {!isSettlementOpen && activeTab === "journal" && (
             <JournalScreen receipts={receiptData} highlightedReceiptId={highlightedReceiptId} />
@@ -959,6 +997,7 @@ function App() {
           onClose={closeReader}
           onBackToScan={backToReaderScan}
           onLoadSample={loadSampleReceipt}
+          onIssueDemoQrReceipt={issueDemoQrReceipt}
           onSave={saveScannedReceipt}
         />
         <ReceiptDetailModal receipt={selectedReceipt} onClose={closeReceiptDetail} />
@@ -1000,10 +1039,11 @@ function ToastMessage({ message }: { message: string }) {
 
 function ThoughtSettlementScreen({
   ledgerReceipts,
+  onBackMonthly,
   onAddSamples,
 }: {
   ledgerReceipts: IssuedThinkingReceipt[];
-  onBackHome: () => void;
+  onBackMonthly: () => void;
   onAddSamples: () => void;
 }) {
   const ledgerStats = buildLedgerStats(ledgerReceipts);
@@ -1011,6 +1051,11 @@ function ThoughtSettlementScreen({
 
   return (
     <section className="stack settlement-screen">
+      <button className="back-link" type="button" onClick={onBackMonthly}>
+        <ArrowLeft size={16} />
+        月次決算に戻る
+      </button>
+
       <section className="settlement-hero">
         <div>
           <p className="eyebrow light">1年分のまとめ</p>
@@ -2064,9 +2109,11 @@ function JournalDetailRow({
 function AnalysisScreen({
   ledgerReceipts,
   onAddSamples,
+  onShowAnnual,
 }: {
   ledgerReceipts: IssuedThinkingReceipt[];
   onAddSamples: () => void;
+  onShowAnnual: () => void;
 }) {
   const monthlyStats = buildMonthlyLedgerStats(ledgerReceipts);
   const monthlyDecisions = monthlyStats.decisions.slice(0, 3);
@@ -2136,13 +2183,31 @@ function AnalysisScreen({
           </section>
         </>
       )}
+
+      <section className="monthly-report-card settlement-switch-card">
+        <SectionTitle icon={<BookOpenText size={18} />} title="年末の確定申告へ" />
+        <p className="monthly-insight">
+          月ごとの思考決算がたまると、年末に「2026年 私とAIの確定申告」としてまとめられます。
+        </p>
+        <button className="primary-action" type="button" onClick={onShowAnnual}>
+          <BookOpenText size={18} />
+          確定申告を確認する
+        </button>
+      </section>
     </section>
   );
 }
 
 function ReceiptsScreen({
+  receipts,
   thinkingLedger,
+  filter,
+  filterOrigin,
+  highlightedReceiptId,
   saveMessage,
+  onClearFilter,
+  onReturnFromFilter,
+  onOpenReceipt,
   onAddSamples,
 }: {
   receipts: ThoughtReceipt[];
@@ -2156,14 +2221,23 @@ function ReceiptsScreen({
   onOpenReceipt: (receipt: ThoughtReceipt) => void;
   onAddSamples: () => void;
 }) {
+  const filteredReceipts = filter ? applyReceiptFilter(receipts, filter) : receipts;
+
   return (
     <section className="stack">
       <div className="receipt-title">
         <div>
           <p className="eyebrow">思考帳簿</p>
-          <h2>保存した思考レシート</h2>
+          <h2>AIとの会話を、帳簿のように振り返る</h2>
         </div>
       </div>
+
+      {filter && (
+        <button className="back-link" type="button" onClick={onReturnFromFilter}>
+          <ArrowLeft size={16} />
+          {getFilterBackLabel(filterOrigin)}
+        </button>
+      )}
 
       {saveMessage && (
         <div className="save-message" role="status">
@@ -2172,7 +2246,53 @@ function ReceiptsScreen({
         </div>
       )}
 
-      <SavedLedgerList receipts={thinkingLedger} onAddSamples={onAddSamples} />
+      {filter && (
+        <div className="filter-card">
+          <div>
+            <p className="eyebrow">絞り込み中</p>
+            <strong>{getFilterTitle(filter)}</strong>
+            <em>
+              表示中 {filteredReceipts.length}件 / 全{receipts.length}件
+            </em>
+            <span>{getFilterDescription(filter)}</span>
+          </div>
+          <button type="button" onClick={onClearFilter}>
+            絞り込みを解除
+          </button>
+        </div>
+      )}
+
+      <div className="receipt-ledger">
+        {filteredReceipts.map((receipt) => (
+          <ReceiptRow
+            key={receipt.id}
+            receipt={receipt}
+            isHighlighted={receipt.id === highlightedReceiptId}
+            onClick={() => onOpenReceipt(receipt)}
+          />
+        ))}
+      </div>
+
+      {filter && filteredReceipts.length > 0 && (
+        <div className="bottom-return-card">
+          <button type="button" onClick={onReturnFromFilter}>
+            {getBottomReturnLabel(filterOrigin)}
+          </button>
+        </div>
+      )}
+
+      {filteredReceipts.length === 0 && (
+        <section className="card empty-state">
+          <SectionTitle icon={<ReceiptText size={18} />} title="該当するレシートはまだありません" />
+          <p>絞り込みを解除すると、すべての思考レシートを見られます。</p>
+        </section>
+      )}
+
+      {thinkingLedger.length > 0 && (
+        <section className="section-block">
+          <SavedLedgerList receipts={thinkingLedger} onAddSamples={onAddSamples} />
+        </section>
+      )}
     </section>
   );
 }
@@ -2183,6 +2303,7 @@ function ReceiptReaderModal({
   onClose,
   onBackToScan,
   onLoadSample,
+  onIssueDemoQrReceipt,
   onSave,
 }: {
   step: ReaderStep;
@@ -2190,6 +2311,7 @@ function ReceiptReaderModal({
   onClose: () => void;
   onBackToScan: () => void;
   onLoadSample: () => void;
+  onIssueDemoQrReceipt: () => void;
   onSave: () => void;
 }) {
   const modalRef = useRef<HTMLDivElement | null>(null);
@@ -2230,6 +2352,15 @@ function ReceiptReaderModal({
               <ScanLine size={18} />
               サンプルレシートを読み込む
             </button>
+            <div className="reader-option-card">
+              <div>
+                <strong>QR付きレシートを作成</strong>
+                <p>サンプル会話から、紙に印刷できる思考レシートを発行します。</p>
+              </div>
+              <button className="secondary-action" type="button" onClick={onIssueDemoQrReceipt}>
+                QRコードを作成する
+              </button>
+            </div>
             <button className="secondary-action" type="button" onClick={onClose}>
               閉じる
             </button>
@@ -3419,15 +3550,17 @@ function getFilterDescription(filter: ReceiptFilter) {
 }
 
 function getFilterBackLabel(origin: TabKey | null) {
-  if (origin === "analysis") return "分析に戻る";
-  if (origin === "home") return "ホームに戻る";
-  return "すべてのレシートに戻る";
+  if (origin === "tax" || origin === "analysis") return "決算に戻る";
+  if (origin === "journal") return "仕訳に戻る";
+  if (origin === "home") return "レシートに戻る";
+  return "すべての帳簿に戻る";
 }
 
 function getBottomReturnLabel(origin: TabKey | null) {
-  if (origin === "analysis") return "分析画面に戻る";
-  if (origin === "home") return "ホームに戻る";
-  return "すべてのレシートに戻る";
+  if (origin === "tax" || origin === "analysis") return "決算画面に戻る";
+  if (origin === "journal") return "仕訳に戻る";
+  if (origin === "home") return "レシートに戻る";
+  return "すべての帳簿に戻る";
 }
 
 function hasMoodChange(receipt: ThoughtReceipt) {

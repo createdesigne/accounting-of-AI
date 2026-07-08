@@ -2443,6 +2443,29 @@ button {
   line-height: 1.7;
 }
 
+.reader-option-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+}
+
+.reader-option-card strong {
+  display: block;
+  color: #1e293b;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.reader-option-card p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .scan-corner {
   position: absolute;
   width: 32px;
