@@ -956,6 +956,10 @@ function App() {
               <AnalysisScreen
                 ledgerReceipts={thinkingLedger}
                 onAddSamples={addSampleLedgerData}
+                onBackHome={() => {
+                  setActiveTab("home");
+                  scrollScreenToTop("auto");
+                }}
                 onShowAnnual={() => {
                   setSettlementView("annual");
                   scrollScreenToTop("auto");
@@ -2109,24 +2113,46 @@ function JournalDetailRow({
 function AnalysisScreen({
   ledgerReceipts,
   onAddSamples,
+  onBackHome,
   onShowAnnual,
 }: {
   ledgerReceipts: IssuedThinkingReceipt[];
   onAddSamples: () => void;
+  onBackHome: () => void;
   onShowAnnual: () => void;
 }) {
   const monthlyStats = buildMonthlyLedgerStats(ledgerReceipts);
   const monthlyDecisions = monthlyStats.decisions.slice(0, 3);
+  const hasMonthlyData = monthlyStats.count > 0;
 
   return (
-    <section className="stack">
-      <div className="analysis-header">
+    <section className="stack monthly-settlement-screen">
+      <button className="back-link" type="button" onClick={onBackHome}>
+        <ArrowLeft size={16} />
+        レシートに戻る
+      </button>
+
+      <div className="monthly-settlement-heading">
         <div>
-          <p className="eyebrow">月次決算</p>
-          <h2>今月のAIとの関係</h2>
+          <p className="eyebrow">決算</p>
+          <h2>6月の思考決算</h2>
           <p className="screen-purpose">今月の思考レシートから、AIとの関わり方を振り返ります。</p>
         </div>
       </div>
+
+      <section className="monthly-hero-card">
+        <p className="eyebrow light">2026年6月</p>
+        <h3>
+          {hasMonthlyData
+            ? `今月は、${monthlyStats.topTopic}の場面でAIを「${monthlyStats.topRole}」として使う記録が目立ちました。`
+            : "今月の思考レシートを保存すると、AIとの関わり方がここにまとまります。"}
+        </h3>
+        <p>
+          {hasMonthlyData
+            ? `思考残高は「${monthlyStats.topBalance}」の傾向です。AIの提案を受け取りながら、自分で決めたことも残せています。`
+            : "まずは1枚、思考レシートを帳簿に保存すると月次決算に反映されます。"}
+        </p>
+      </section>
 
       {ledgerReceipts.length === 0 ? (
         <LedgerEmptyState onAddSamples={onAddSamples} />
@@ -2139,7 +2165,7 @@ function AnalysisScreen({
         </section>
       ) : (
         <>
-          <div className="monthly-metric-grid">
+          <div className="monthly-metric-grid monthly-kpi-grid">
             <SettlementMetric label="今月のレシート数" value={`${monthlyStats.count}件`} />
             <SettlementMetric label="よく使ったAI" value={monthlyStats.topService} />
             <SettlementMetric label="よく使った役割" value={monthlyStats.topRole} />
@@ -2152,20 +2178,22 @@ function AnalysisScreen({
             <p className="reflection">{monthlyStats.summary}</p>
           </section>
 
-          <section className="monthly-report-card">
-            <SectionTitle icon={<Bot size={18} />} title="今月もっとも特徴的だったAIの使い方" />
-            <p className="monthly-insight">
-              {monthlyStats.featuredUse}
-            </p>
-          </section>
+          <div className="monthly-secondary-grid">
+            <section className="monthly-report-card compact-monthly-card">
+              <SectionTitle icon={<Bot size={18} />} title="特徴的だった使い方" />
+              <p className="monthly-insight">
+                {monthlyStats.featuredUse}
+              </p>
+            </section>
 
-          <section className="monthly-report-card">
-            <SectionTitle icon={<NotebookTabs size={18} />} title="代表的な相談テーマ" />
-            <p className="monthly-insight">{monthlyStats.representativeTopic}</p>
-          </section>
+            <section className="monthly-report-card compact-monthly-card">
+              <SectionTitle icon={<NotebookTabs size={18} />} title="代表的な相談テーマ" />
+              <p className="monthly-topic-highlight">{monthlyStats.representativeTopic}</p>
+            </section>
+          </div>
 
-          <section className="section-block">
-            <SectionTitle icon={<CheckCircle2 size={18} />} title="自分で決めたことの代表例" />
+          <section className="monthly-report-card monthly-decision-card">
+            <SectionTitle icon={<CheckCircle2 size={18} />} title="自分で決めたこと" />
             {monthlyDecisions.length === 0 ? (
               <p className="saved-ledger-empty">今月の自己決定はまだ記録されていません。</p>
             ) : (
@@ -2191,9 +2219,14 @@ function AnalysisScreen({
         </p>
         <button className="primary-action" type="button" onClick={onShowAnnual}>
           <BookOpenText size={18} />
-          確定申告を確認する
+          確定申告を見る
         </button>
       </section>
+
+      <button className="secondary-action monthly-bottom-back" type="button" onClick={onBackHome}>
+        <ArrowLeft size={16} />
+        レシートに戻る
+      </button>
     </section>
   );
 }
