@@ -3119,6 +3119,9 @@ button {
 }
 
 .annual-month {
+  border: 0;
+  cursor: pointer;
+  min-height: 64px;
   display: grid;
   gap: 6px;
   padding: 12px 4px;
@@ -3132,4 +3135,20 @@ button {
 .annual-month.recorded {
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.annual-month:hover {
+  box-shadow: inset 0 0 0 2px #93c5fd;
+}
+
+.annual-month:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.preview-notice {
+  margin: 6px 0 0;
+  color: #0369a1;
+  font-size: 11px;
+  font-weight: 700;
 }
