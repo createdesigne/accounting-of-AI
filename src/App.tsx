@@ -713,7 +713,7 @@ function App() {
       setFilterOrigin(null);
     }
     if (tab === "tax") {
-      setSettlementView("monthly");
+      setSettlementView("annual");
     }
     setActiveTab(tab);
     setSaveMessage("");
@@ -724,7 +724,7 @@ function App() {
   function openSettlement() {
     setIsSettlementOpen(false);
     setActiveTab("tax");
-    setSettlementView("monthly");
+    setSettlementView("annual");
     setSaveMessage("");
     setAnalysisFocus(null);
     scrollScreenToTop("auto");
@@ -1050,7 +1050,30 @@ function ThoughtSettlementScreen({
   onBackMonthly: () => void;
   onAddSamples: () => void;
 }) {
-  const ledgerStats = buildLedgerStats(ledgerReceipts);
+  const currentYear = new Date().getFullYear();
+  const years = Array.from(new Set([
+    currentYear,
+    ...ledgerReceipts.flatMap((receipt) => {
+      const monthKey = getLedgerReceiptMonthKey(receipt);
+      return monthKey ? [Number(monthKey.slice(0, 4))] : [];
+    }),
+  ])).sort((a, b) => b - a);
+  const [selectedYear, setSelectedYear] = useState(() => {
+    const recordedYears = ledgerReceipts.flatMap((receipt) => {
+      const monthKey = getLedgerReceiptMonthKey(receipt);
+      return monthKey ? [Number(monthKey.slice(0, 4))] : [];
+    });
+    return recordedYears.length > 0 ? Math.max(...recordedYears) : currentYear;
+  });
+  const annualReceipts = ledgerReceipts.filter(
+    (receipt) => getLedgerReceiptMonthKey(receipt)?.startsWith(`${selectedYear}-`),
+  );
+  const ledgerStats = buildLedgerStats(annualReceipts);
+  const months = Array.from({ length: 12 }, (_, index) => {
+    const monthKey = `${selectedYear}-${String(index + 1).padStart(2, "0")}`;
+    return annualReceipts.filter((receipt) => getLedgerReceiptMonthKey(receipt) === monthKey).length;
+  });
+  const undatedCount = ledgerReceipts.filter((receipt) => !getLedgerReceiptMonthKey(receipt)).length;
   const examples = ledgerStats.decisions.slice(0, 3);
 
   return (
@@ -1062,16 +1085,53 @@ function ThoughtSettlementScreen({
 
       <section className="settlement-hero">
         <div>
-          <p className="eyebrow light">1年分のまとめ</p>
+          <p className="eyebrow light">{selectedYear}年 · 1年分のまとめ</p>
           <h2>私とAIの確定申告</h2>
         </div>
         <p>蓄積した記録から、自分とAIの関係を見つめ直します。</p>
       </section>
 
+      <section className="annual-report-card">
+        <label className="annual-year-control">
+          <span>対象年</span>
+          <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+            {years.map((year) => <option key={year} value={year}>{year}年</option>)}
+          </select>
+        </label>
+        <p className="annual-scope-note">
+          {selectedYear}年1月〜12月に発行した、帳簿の保存済みレシートを集計しています。
+          発行日時を確認できない記録は会話日時を使います。
+        </p>
+        {undatedCount > 0 && (
+          <p className="annual-scope-note">日付を確認できない{undatedCount}件は、年間集計に含めていません。</p>
+        )}
+      </section>
+
       {ledgerReceipts.length === 0 ? (
         <LedgerEmptyState onAddSamples={onAddSamples} />
+      ) : annualReceipts.length === 0 ? (
+        <section className="annual-report-card" role="status">
+          <SectionTitle icon={<CalendarDays size={18} />} title={`${selectedYear}年の記録`} />
+          <p className="reflection">この年の思考レシートはまだありません。レシートを帳簿に保存すると、確定申告に反映されます。</p>
+        </section>
       ) : (
         <>
+          <div className="annual-report-grid">
+            <SettlementMetric label="年間のレシート数" value={`${ledgerStats.count}件`} />
+            <SettlementMetric label="記録のある月" value={`${months.filter((count) => count > 0).length}か月 / 12か月`} />
+            <SettlementMetric label="よく使ったAI" value={ledgerStats.topService} />
+            <SettlementMetric label="思考残高" value={ledgerStats.topBalance} />
+          </div>
+          <section className="annual-report-card">
+            <SectionTitle icon={<CalendarDays size={18} />} title="1年の記録" />
+            <div className="annual-month-grid">
+              {months.map((count, index) => (
+                <div className={count > 0 ? "annual-month recorded" : "annual-month"} key={index}>
+                  <span>{index + 1}月</span><strong>{count}件</strong>
+                </div>
+              ))}
+            </div>
+          </section>
           <section className="annual-report-card annual-report-card-primary">
             <SectionTitle icon={<BookOpenText size={18} />} title="AIとの関係コメント" />
             <p className="annual-report-comment">{ledgerStats.relationshipComment}</p>
@@ -1079,7 +1139,7 @@ function ThoughtSettlementScreen({
 
           <section className="annual-report-card">
             <SectionTitle icon={<BarChart3 size={18} />} title="全体の傾向" />
-            <p className="annual-scope-note">thinkingLedger 全体をもとに集計しています。</p>
+            <p className="annual-scope-note">{selectedYear}年の保存済みレシートをもとに集計しています。</p>
             <div className="annual-graph-stack">
               <AnnualTrendChart
                 title="AIに求めた役割の内訳"
@@ -3442,10 +3502,11 @@ function getLedgerReceiptMonthKey(receipt: IssuedThinkingReceipt) {
 }
 
 function getMonthKeyFromText(value: string) {
-  const match = value.match(/(\d{4})[/-年.](\d{1,2})/);
+  const match = value.match(/(\d{4})[/年.\-](\d{1,2})(?!\d)/);
   if (!match) return null;
 
   const [, year, month] = match;
+  if (Number(month) < 1 || Number(month) > 12) return null;
   return `${year}-${month.padStart(2, "0")}`;
 }
 

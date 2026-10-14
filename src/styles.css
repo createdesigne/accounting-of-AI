@@ -3087,3 +3087,49 @@ button {
     page-break-inside: avoid;
   }
 }
+
+.annual-year-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.annual-year-control select {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+}
+
+.annual-year-control select:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 3px;
+}
+
+.annual-month-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.annual-month {
+  display: grid;
+  gap: 6px;
+  padding: 12px 4px;
+  border-radius: 12px;
+  text-align: center;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.annual-month.recorded {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
