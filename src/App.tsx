@@ -95,9 +95,11 @@ type IssuedThinkingReceipt = ThoughtReceiptCandidate & {
 };
 
 // 応募用プロトタイプなので、外部DBではなく画面確認用のサンプルデータを置いています。
-const STORAGE_KEY = "watashi-to-ai-thought-receipts";
-const RAW_CONVERSATION_KEY = "aiConversationRaw";
-const THINKING_LEDGER_KEY = "thinkingLedger";
+const IS_PREVIEW = window.location.pathname.startsWith("/accounting-of-AI/preview/");
+const STORAGE_PREFIX = IS_PREVIEW ? "preview-month-ledger:" : "";
+const STORAGE_KEY = `${STORAGE_PREFIX}watashi-to-ai-thought-receipts`;
+const RAW_CONVERSATION_KEY = `${STORAGE_PREFIX}aiConversationRaw`;
+const THINKING_LEDGER_KEY = `${STORAGE_PREFIX}thinkingLedger`;
 const RECEIPT_HASH_KEY = "receipt";
 const DRAFT_QUERY_KEY = "draft";
 
@@ -499,15 +501,17 @@ function resetPageScroll(behavior: ScrollBehavior = "auto", extraElement?: HTMLE
 
 function App() {
   const screenRef = useRef<HTMLDivElement | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>("home");
+  const [activeTab, setActiveTab] = useState<TabKey>(IS_PREVIEW ? "tax" : "home");
   const [receiptData, setReceiptData] = useState<ThoughtReceipt[]>(loadReceipts);
   const [readerStep, setReaderStep] = useState<ReaderStep>("closed");
   const [scannedReceipt, setScannedReceipt] = useState<ThoughtReceipt | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
   const [receiptFilter, setReceiptFilter] = useState<ReceiptFilter | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<TabKey | null>(null);
+  const [ledgerMonth, setLedgerMonth] = useState<string | null>(null);
+  const [annualYear, setAnnualYear] = useState<number | null>(null);
   const [analysisFocus, setAnalysisFocus] = useState<AnalysisFocus>(null);
-  const [settlementView, setSettlementView] = useState<SettlementView>("monthly");
+  const [settlementView, setSettlementView] = useState<SettlementView>(IS_PREVIEW ? "annual" : "monthly");
   const [isSettlementOpen, setIsSettlementOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
@@ -672,11 +676,30 @@ function App() {
   }
 
   function showReceipts(filter: ReceiptFilter | null = null) {
+    setLedgerMonth(null);
     setIsSettlementOpen(false);
     setReceiptFilter(filter);
     setFilterOrigin(filter ? activeTab : null);
     setActiveTab("receipts");
     setSaveMessage("");
+    scrollScreenToTop("auto");
+  }
+
+  function showLedgerMonth(monthKey: string) {
+    setLedgerMonth(monthKey);
+    setAnnualYear(Number(monthKey.slice(0, 4)));
+    setReceiptFilter(null);
+    setFilterOrigin(null);
+    setIsSettlementOpen(false);
+    setActiveTab("receipts");
+    setSaveMessage("");
+    scrollScreenToTop("auto");
+  }
+
+  function returnToAnnualReport() {
+    setLedgerMonth(null);
+    setActiveTab("tax");
+    setSettlementView("annual");
     scrollScreenToTop("auto");
   }
 
@@ -709,6 +732,7 @@ function App() {
   function handleTabChange(tab: TabKey) {
     setIsSettlementOpen(false);
     if (tab === "receipts") {
+      setLedgerMonth(null);
       setReceiptFilter(null);
       setFilterOrigin(null);
     }
@@ -968,6 +992,9 @@ function App() {
             ) : (
               <ThoughtSettlementScreen
                 ledgerReceipts={thinkingLedger}
+                year={annualYear}
+                onYearChange={setAnnualYear}
+                onOpenMonth={showLedgerMonth}
                 onBackMonthly={() => {
                   setSettlementView("monthly");
                   scrollScreenToTop("auto");
@@ -983,6 +1010,12 @@ function App() {
             <ReceiptsScreen
               receipts={receiptData}
               thinkingLedger={thinkingLedger}
+              monthKey={ledgerMonth}
+              onBackAnnual={returnToAnnualReport}
+              onClearMonth={() => {
+                setLedgerMonth(null);
+                scrollScreenToTop("auto");
+              }}
               filter={receiptFilter}
               filterOrigin={filterOrigin}
               highlightedReceiptId={highlightedReceiptId}
@@ -1017,6 +1050,7 @@ function Header({ onOpenSettlement }: { onOpenSettlement: () => void }) {
       <div>
         <p className="eyebrow">思考帳簿アプリ</p>
         <h1>私とAIの確定申告</h1>
+        {IS_PREVIEW && <p className="preview-notice">確認用プレビュー · 本番の記録には影響しません</p>}
       </div>
       <button
         className="icon-button"
@@ -1043,10 +1077,16 @@ function ToastMessage({ message }: { message: string }) {
 
 function ThoughtSettlementScreen({
   ledgerReceipts,
+  year,
+  onYearChange,
+  onOpenMonth,
   onBackMonthly,
   onAddSamples,
 }: {
   ledgerReceipts: IssuedThinkingReceipt[];
+  year: number | null;
+  onYearChange: (year: number) => void;
+  onOpenMonth: (monthKey: string) => void;
   onBackMonthly: () => void;
   onAddSamples: () => void;
 }) {
@@ -1058,13 +1098,10 @@ function ThoughtSettlementScreen({
       return monthKey ? [Number(monthKey.slice(0, 4))] : [];
     }),
   ])).sort((a, b) => b - a);
-  const [selectedYear, setSelectedYear] = useState(() => {
-    const recordedYears = ledgerReceipts.flatMap((receipt) => {
-      const monthKey = getLedgerReceiptMonthKey(receipt);
-      return monthKey ? [Number(monthKey.slice(0, 4))] : [];
-    });
-    return recordedYears.length > 0 ? Math.max(...recordedYears) : currentYear;
-  });
+  const recordedYears = years.filter((candidate) => ledgerReceipts.some(
+    (receipt) => getLedgerReceiptMonthKey(receipt)?.startsWith(`${candidate}-`),
+  ));
+  const selectedYear = year ?? recordedYears[0] ?? currentYear;
   const annualReceipts = ledgerReceipts.filter(
     (receipt) => getLedgerReceiptMonthKey(receipt)?.startsWith(`${selectedYear}-`),
   );
@@ -1094,7 +1131,7 @@ function ThoughtSettlementScreen({
       <section className="annual-report-card">
         <label className="annual-year-control">
           <span>対象年</span>
-          <select value={selectedYear} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+          <select value={selectedYear} onChange={(event) => onYearChange(Number(event.target.value))}>
             {years.map((year) => <option key={year} value={year}>{year}年</option>)}
           </select>
         </label>
@@ -1126,9 +1163,15 @@ function ThoughtSettlementScreen({
             <SectionTitle icon={<CalendarDays size={18} />} title="1年の記録" />
             <div className="annual-month-grid">
               {months.map((count, index) => (
-                <div className={count > 0 ? "annual-month recorded" : "annual-month"} key={index}>
+                <button
+                  className={count > 0 ? "annual-month recorded" : "annual-month"}
+                  key={index}
+                  type="button"
+                  aria-label={`${selectedYear}年${index + 1}月の帳簿を見る（${count}件）`}
+                  onClick={() => onOpenMonth(`${selectedYear}-${String(index + 1).padStart(2, "0")}`)}
+                >
                   <span>{index + 1}月</span><strong>{count}件</strong>
-                </div>
+                </button>
               ))}
             </div>
           </section>
@@ -2294,6 +2337,9 @@ function AnalysisScreen({
 function ReceiptsScreen({
   receipts,
   thinkingLedger,
+  monthKey,
+  onBackAnnual,
+  onClearMonth,
   filter,
   filterOrigin,
   highlightedReceiptId,
@@ -2305,6 +2351,9 @@ function ReceiptsScreen({
 }: {
   receipts: ThoughtReceipt[];
   thinkingLedger: IssuedThinkingReceipt[];
+  monthKey: string | null;
+  onBackAnnual: () => void;
+  onClearMonth: () => void;
   filter: ReceiptFilter | null;
   filterOrigin: TabKey | null;
   highlightedReceiptId: string | null;
@@ -2315,6 +2364,42 @@ function ReceiptsScreen({
   onAddSamples: () => void;
 }) {
   const filteredReceipts = filter ? applyReceiptFilter(receipts, filter) : receipts;
+
+  if (monthKey) {
+    const monthlyLedger = thinkingLedger.filter(
+      (receipt) => getLedgerReceiptMonthKey(receipt) === monthKey,
+    );
+    const [year, month] = monthKey.split("-");
+    const monthLabel = `${year}年${Number(month)}月`;
+
+    return (
+      <section className="stack">
+        <button className="back-link" type="button" onClick={onBackAnnual}>
+          <ArrowLeft size={16} />確定申告に戻る
+        </button>
+        <div className="receipt-title">
+          <div><p className="eyebrow">思考帳簿</p><h2>{monthLabel}の帳簿記録</h2></div>
+        </div>
+        <div className="filter-card">
+          <div>
+            <p className="eyebrow">絞り込み中</p>
+            <strong>{monthLabel}</strong>
+            <em>表示中 {monthlyLedger.length}件 / 全{thinkingLedger.length}件</em>
+            <span>確定申告と同じ発行年月で絞り込んでいます。発行日時を確認できない記録は会話日時を使います。</span>
+          </div>
+          <button type="button" onClick={onClearMonth}>絞り込みを解除</button>
+        </div>
+        {monthlyLedger.length > 0 ? (
+          <SavedLedgerList receipts={monthlyLedger} onAddSamples={onAddSamples} />
+        ) : (
+          <section className="card empty-state" role="status">
+            <SectionTitle icon={<ReceiptText size={18} />} title="この月の帳簿記録はまだありません" />
+            <p>{monthLabel}の保存済みレシートはありません。絞り込みを解除すると、すべての帳簿記録を確認できます。</p>
+          </section>
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="stack">
@@ -3286,7 +3371,7 @@ function decodeReceiptPayload(payload: string) {
 function loadThinkingLedger() {
   try {
     const stored = localStorage.getItem(THINKING_LEDGER_KEY);
-    if (!stored) return [];
+    if (!stored) return IS_PREVIEW ? sampleThinkingLedgerReceipts : [];
     const parsed = JSON.parse(stored) as IssuedThinkingReceipt[];
     if (!Array.isArray(parsed)) return [];
     return parsed
