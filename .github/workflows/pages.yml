@@ -18,6 +18,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      production_html_sha: ${{ steps.production.outputs.html_sha }}
+      preview_html_sha: ${{ steps.preview.outputs.html_sha }}
+      preview_commit: ${{ steps.preview.outputs.commit }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -37,7 +41,32 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build
-        run: pnpm build
+        id: production
+        run: |
+          pnpm build
+          echo "html_sha=$(sha256sum dist/index.html | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout preview
+        uses: actions/checkout@v4
+        with:
+          ref: preview/month-ledger
+          path: .preview-source
+
+      - name: Build isolated preview
+        id: preview
+        working-directory: .preview-source
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm exec tsc
+          pnpm exec vite build --base /accounting-of-AI/preview/month-ledger/
+          git rev-parse HEAD > dist/revision.txt
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "html_sha=$(sha256sum dist/index.html | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+
+      - name: Add preview beside production
+        run: |
+          mkdir -p dist/preview/month-ledger
+          cp -R .preview-source/dist/. dist/preview/month-ledger/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -54,3 +83,27 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      - name: Verify published pages
+        env:
+          PAGE_URL: ${{ steps.deployment.outputs.page_url }}
+          PRODUCTION_HTML_SHA: ${{ needs.build.outputs.production_html_sha }}
+          PREVIEW_HTML_SHA: ${{ needs.build.outputs.preview_html_sha }}
+          PREVIEW_COMMIT: ${{ needs.build.outputs.preview_commit }}
+        run: |
+          set -euo pipefail
+          page_url="${PAGE_URL%/}"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "$page_url/?revision=$PREVIEW_COMMIT" -o /tmp/live-production.html &&
+               curl --fail --silent --show-error "$page_url/preview/month-ledger/?revision=$PREVIEW_COMMIT" -o /tmp/live-preview.html &&
+               curl --fail --silent --show-error "$page_url/preview/month-ledger/revision.txt?revision=$PREVIEW_COMMIT" -o /tmp/live-revision.txt &&
+               test "$(sha256sum /tmp/live-production.html | cut -d ' ' -f 1)" = "$PRODUCTION_HTML_SHA" &&
+               test "$(sha256sum /tmp/live-preview.html | cut -d ' ' -f 1)" = "$PREVIEW_HTML_SHA" &&
+               test "$(cat /tmp/live-revision.txt)" = "$PREVIEW_COMMIT"; then
+              echo "Production and preview are accessible and match the built artifacts."
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "Published pages did not match the expected artifacts."
+          exit 1
