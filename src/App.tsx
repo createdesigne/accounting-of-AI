@@ -3,6 +3,7 @@ import QRCode from "qrcode";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import {
   ArrowLeft,
+  ArrowRight,
   BarChart3,
   BookOpenText,
   Bot,
@@ -999,7 +1000,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <main className="phone-frame">
+      <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
         <Header onOpenSettlement={openSettlement} />
         <div className="screen" ref={screenRef}>
           {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
@@ -1169,7 +1170,8 @@ function SettlementPeriodNavigation({
 
 function LedgerLoadState({ status, onRetry }: { status: "loading" | "error"; onRetry: () => void }) {
   return (
-    <section className="card" role={status === "error" ? "alert" : "status"}>
+    <section className="card report-load-state" role={status === "error" ? "alert" : "status"}>
+      <span className="report-state-icon" aria-hidden="true"><NotebookTabs size={24} /></span>
       <h2>{status === "error" ? "帳簿を取得できませんでした" : "帳簿を読み込み中です"}</h2>
       <p>{status === "error" ? "保存先へのアクセスやデータ形式を確認してください。集計値は表示していません。保存済みデータは変更していません。" : "保存済みの記録を確認しています。"}</p>
       {status === "error" && <button className="secondary-action" type="button" onClick={onRetry}>再読み込み</button>}
@@ -1182,19 +1184,78 @@ function ReportPeriodControls({ anchor, kind, onChange }: { anchor: Date; kind: 
   const currentLabel = kind === "weekly" ? "今週" : kind === "monthly" ? "今月" : "今年";
   return (
     <section className="report-period-controls" aria-label="対象期間の操作">
-      <p className="report-period-label" aria-live="polite">{formatPeriod(anchor, kind)}</p>
-      <div className="report-period-actions">
-        <button type="button" disabled={anchor.getFullYear() <= 1} onClick={() => onChange(shiftPeriod(anchor, kind, -1))}>前の{unit}</button>
-        <button type="button" onClick={() => onChange(new Date())}>{currentLabel}に戻る</button>
-        <button type="button" disabled={anchor.getFullYear() >= 9999} onClick={() => onChange(shiftPeriod(anchor, kind, 1))}>次の{unit}</button>
+      <div className="report-period-topline">
+        <p className="report-period-label" aria-live="polite"><ReportDateText value={formatPeriod(anchor, kind)} /></p>
+        <button className="report-period-current" type="button" onClick={() => onChange(new Date())}>{currentLabel}に戻る</button>
       </div>
-      <label className="report-anchor-control">基準日
-        <input type="date" min="0001-01-01" max="9999-12-31" value={dateKey(anchor)} onChange={(event) => {
-          const date = parseLedgerDate(event.target.value);
-          if (date) onChange(date);
-        }} />
-      </label>
-      <p className="report-scope-note">基準日を含む期間を表示します。週間は月曜〜日曜です。期間を切り替えても基準日は維持されます。</p>
+      <div className="report-period-toolbar">
+        <button className="report-period-step" type="button" aria-label={`前の${unit}`} disabled={anchor.getFullYear() <= 1} onClick={() => onChange(shiftPeriod(anchor, kind, -1))}><ArrowLeft size={16} aria-hidden="true" /><span>前の{unit}</span></button>
+        <label className="report-anchor-control"><span>基準日</span>
+          <input type="date" min="0001-01-01" max="9999-12-31" value={dateKey(anchor)} onChange={(event) => {
+            const date = parseLedgerDate(event.target.value);
+            if (date) onChange(date);
+          }} />
+        </label>
+        <button className="report-period-step" type="button" aria-label={`次の${unit}`} disabled={anchor.getFullYear() >= 9999} onClick={() => onChange(shiftPeriod(anchor, kind, 1))}><ArrowRight size={16} aria-hidden="true" /><span>次の{unit}</span></button>
+      </div>
+    </section>
+  );
+}
+
+function ReportDateText({ value }: { value: string }) {
+  return <>{value.split("〜").map((part, index) => (
+    <span key={index}>{index > 0 && <>〜<wbr /></>}<span className="report-date-part">{part}</span></span>
+  ))}</>;
+}
+
+function ReportSummary({ title, period, countLabel, count, children }: {
+  title: string;
+  period: string;
+  countLabel: string;
+  count: number;
+  children?: ReactNode;
+}) {
+  return (
+    <section className="report-summary" aria-label={`${title}のサマリー`}>
+      <div className="report-summary-heading">
+        <div><p className="report-summary-period"><ReportDateText value={period} /></p><h2>{title}</h2></div>
+        <span className="report-summary-icon" aria-hidden="true"><ReceiptText size={22} /></span>
+      </div>
+      <div className="report-summary-total">
+        <span className="report-summary-label">{countLabel}</span>
+        <p className="report-summary-count"><strong>{count}</strong><span>件</span></p>
+      </div>
+      {children && <div className="report-summary-footer">{children}</div>}
+    </section>
+  );
+}
+
+function ReportInsights({ stats }: { stats: ReturnType<typeof buildLedgerStats> }) {
+  return (
+    <div className="report-insights">
+      <article className="report-insight-card">
+        <span className="report-insight-label"><span className="report-insight-icon"><Bot size={18} aria-hidden="true" /></span>よく使ったAI</span>
+        <strong>{stats.topService}</strong>
+      </article>
+      <article className="report-insight-card">
+        <span className="report-insight-label"><span className="report-insight-icon"><Sparkles size={18} aria-hidden="true" /></span>よく使った役割</span>
+        <strong>{stats.topRole}</strong>
+      </article>
+      <article className="report-insight-card report-insight-balance">
+        <span className="report-insight-icon"><Coins size={22} aria-hidden="true" /></span>
+        <div><span className="report-insight-label">思考残高</span><strong>{stats.topBalance}</strong></div>
+      </article>
+    </div>
+  );
+}
+
+function ReportNotes({ children }: { children?: ReactNode }) {
+  return (
+    <section className="report-notes" aria-label="集計について">
+      <SectionTitle icon={<BookOpenText size={16} />} title="集計について" />
+      <p>基準日を含む期間を表示します。週間は月曜〜日曜です。期間を切り替えても基準日は維持されます。</p>
+      <p>発行日を優先し、判定できない場合は会話日を使います。「よく使った」と思考残高は最多の記録分類です。同数の場合は項目名の日本語順で表示します。</p>
+      {children}
     </section>
   );
 }
@@ -1207,7 +1268,10 @@ function ReportRecordList({ receipts, title, onOpenLedger }: {
   const [visibleCount, setVisibleCount] = useState(20);
   return (
     <section className="monthly-report-card report-records">
-      <SectionTitle icon={<NotebookTabs size={18} />} title={title} />
+      <div className="report-records-heading">
+        <SectionTitle icon={<NotebookTabs size={18} />} title={title} />
+        <p>各記録を押すと、帳簿の詳細を確認できます。</p>
+      </div>
       {receipts.length === 0 ? <p className="monthly-insight">この期間の帳簿記録はありません。対象期間を変更するか、帳簿を確認してください。</p> : (
         <div className="report-record-list">
           {receipts.slice(0, visibleCount).map((receipt) => (
@@ -1236,18 +1300,14 @@ function PeriodLedgerScreen({ kind, anchor, ledgerReceipts, onOpenLedger }: {
   const scope = weekly ? "今週" : "対象月";
   const undated = ledgerReceipts.filter((receipt) => !ledgerDate(receipt)).length;
   return (
-    <section className="stack report-screen" aria-labelledby="period-report-title">
-      <div className="report-heading">
-        <p className="eyebrow">決算 · {records.length}件の保存済みレシート</p>
-        <h2 id="period-report-title">{weekly ? "週間申告" : `${anchor.getMonth() + 1}月の思考決算`}</h2>
-      </div>
-      <div className="monthly-metric-grid monthly-kpi-grid report-metric-grid">
-        <SettlementMetric label={weekly ? "今週のレシート数" : "今月のレシート数"} value={`${stats.count}件`} />
-        <SettlementMetric label="よく使ったAI" value={stats.topService} />
-        <SettlementMetric label="よく使った役割" value={stats.topRole} />
-        <SettlementMetric label="思考残高" value={stats.topBalance} />
-      </div>
-      <p className="report-scope-note">発行日を優先し、判定できない場合は会話日を使います。「よく使った」と思考残高は最多の記録分類です。同数の場合は項目名の日本語順で表示します。</p>
+    <section className="stack report-screen" aria-label={weekly ? "週間申告" : "月次決算"}>
+      <ReportSummary
+        title={weekly ? "週間申告" : `${anchor.getMonth() + 1}月の思考決算`}
+        period={formatPeriod(anchor, kind)}
+        countLabel={weekly ? "今週のレシート数" : "今月のレシート数"}
+        count={stats.count}
+      />
+      <ReportInsights stats={stats} />
       {undated > 0 && <p className="report-date-warning" role="status">日付を確認できない{undated}件は集計に含めていません。帳簿の詳細から日付を確認してください。</p>}
       <ReportRecordList receipts={records} title={`${weekly ? "今週" : "対象月"}の記録`} onOpenLedger={onOpenLedger} />
       {records.length > 0 && <>
@@ -1265,6 +1325,7 @@ function PeriodLedgerScreen({ kind, anchor, ledgerReceipts, onOpenLedger }: {
           <div className="ledger-detail-list">{stats.decisions.length ? stats.decisions.slice(0, 3).map((decision) => <p key={decision}>{decision}</p>) : <p>まだ明確な判断は記録されていません</p>}</div>
         </section>
       </>}
+      <ReportNotes />
     </section>
   );
 }
@@ -1310,51 +1371,17 @@ function ThoughtSettlementScreen({
 
   return (
     <section className="stack settlement-screen">
-      <button className="back-link" type="button" onClick={onBackMonthly}>
-        <ArrowLeft size={16} />
-        月次決算に戻る
-      </button>
-
-      <section className="settlement-hero report-annual-hero">
-        <div>
-          <p className="eyebrow light">{selectedYear}年 · 1年分のまとめ</p>
-          <h2>私とAIの確定申告</h2>
-        </div>
-        <p>蓄積した記録から、自分とAIの関係を見つめ直します。</p>
-      </section>
-
-      <section className="annual-report-card">
-        <label className="annual-year-control">
-          <span>対象年</span>
+      <ReportSummary title="私とAIの確定申告" period={`${selectedYear}年1月〜12月`} countLabel="年間のレシート数" count={ledgerStats.count}>
+        <span className="report-recorded-months"><CalendarDays size={16} aria-hidden="true" /><span>記録のある月<strong>{months.filter((count) => count > 0).length}か月 / 12か月</strong></span></span>
+        <label className="annual-year-control report-summary-year"><span>対象年</span>
           <select value={selectedYear} onChange={(event) => onYearChange(Number(event.target.value))}>
             {years.map((year) => <option key={year} value={year}>{year}年</option>)}
           </select>
         </label>
-        <p className="annual-scope-note">
-          {selectedYear}年1月〜12月に発行した、帳簿の保存済みレシートを集計しています。
-          発行日時を確認できない記録は会話日時を使います。
-        </p>
-        {undatedCount > 0 && (
-          <p className="annual-scope-note">日付を確認できない{undatedCount}件は、年間集計に含めていません。</p>
-        )}
-      </section>
-
-      <div className="annual-report-grid">
-        <SettlementMetric label="年間のレシート数" value={`${ledgerStats.count}件`} />
-        <SettlementMetric label="記録のある月" value={`${months.filter((count) => count > 0).length}か月 / 12か月`} />
-        <SettlementMetric label="よく使ったAI" value={ledgerStats.topService} />
-        <SettlementMetric label="思考残高" value={ledgerStats.topBalance} />
-      </div>
-
-      {ledgerReceipts.length === 0 ? (
-        <LedgerEmptyState onAddSamples={onAddSamples} />
-      ) : annualReceipts.length === 0 ? (
-        <section className="annual-report-card" role="status">
-          <SectionTitle icon={<CalendarDays size={18} />} title={`${selectedYear}年の記録`} />
-          <p className="reflection">この年の思考レシートはまだありません。レシートを帳簿に保存すると、確定申告に反映されます。</p>
-        </section>
-      ) : (
-        <>
+      </ReportSummary>
+      <ReportInsights stats={ledgerStats} />
+      {undatedCount > 0 && <p className="report-date-warning" role="status">日付を確認できない{undatedCount}件は、年間集計に含めていません。</p>}
+      {annualReceipts.length > 0 && (
           <section className="annual-report-card">
             <SectionTitle icon={<CalendarDays size={18} />} title="1年の記録" />
             <div className="annual-month-grid">
@@ -1371,6 +1398,17 @@ function ThoughtSettlementScreen({
               ))}
             </div>
           </section>
+      )}
+      <ReportRecordList receipts={annualReceipts} title="年間の帳簿記録" onOpenLedger={onOpenLedger} />
+      {ledgerReceipts.length === 0 ? (
+        <LedgerEmptyState onAddSamples={onAddSamples} />
+      ) : annualReceipts.length === 0 ? (
+        <section className="annual-report-card" role="status">
+          <SectionTitle icon={<CalendarDays size={18} />} title={`${selectedYear}年の記録`} />
+          <p className="reflection">この年の思考レシートはまだありません。レシートを帳簿に保存すると、確定申告に反映されます。</p>
+        </section>
+      ) : (
+        <>
           <section className="annual-report-card annual-report-card-primary">
             <SectionTitle icon={<BookOpenText size={18} />} title="AIとの関係コメント" />
             <p className="annual-report-comment">{ledgerStats.relationshipComment}</p>
@@ -1436,7 +1474,12 @@ function ThoughtSettlementScreen({
           </section>
         </>
       )}
-      <ReportRecordList receipts={annualReceipts} title="年間の帳簿記録" onOpenLedger={onOpenLedger} />
+      <button className="back-link" type="button" onClick={onBackMonthly}>
+        <ArrowLeft size={16} />月次決算に戻る
+      </button>
+      <ReportNotes>
+        <p>{selectedYear}年1月〜12月に発行した、帳簿の保存済みレシートを集計しています。発行日時を確認できない記録は会話日時を使います。</p>
+      </ReportNotes>
     </section>
   );
 }
