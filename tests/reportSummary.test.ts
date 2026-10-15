@@ -17,6 +17,7 @@ test('empty and single records avoid invented trends in all periods', () => {
 test('only a strict majority of all records is described as frequent', () => {
   assert.match(buildReportSummary([record('先生'), record('先生'), record('編集者')], 'weekly'), /「先生」.*多め/);
   for (const records of [
+    [record('先生'), record('先生')],
     [record('先生'), record('編集者')],
     [record('先生'), record('先生'), record('編集者'), record('相談')],
     [record('先生'), record('先生'), record(), record()],
@@ -49,7 +50,7 @@ test('output is stable without mutation and follows additions, edits and deletio
   const mixed = buildReportSummary(records, 'weekly');
   assert.equal(buildReportSummary([...records].reverse(), 'weekly'), mixed);
   assert.match(buildReportSummary([...records, record('先生')], 'weekly'), /先生.*多め/);
-  assert.match(buildReportSummary([records[0], record('先生')], 'weekly'), /先生.*多め/);
+  assert.match(buildReportSummary([records[0], record('先生')], 'weekly'), /先生.*記録があります/);
   assert.match(buildReportSummary(records.slice(1), 'weekly'), /編集者.*記録があります/);
   assert.equal(JSON.stringify(records), snapshot);
 });

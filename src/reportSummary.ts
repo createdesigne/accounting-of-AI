@@ -12,8 +12,8 @@ export function buildReportSummary(records: readonly SummaryRecord[], kind: Summ
     const services = countLabels(records.map(record => record.aiService));
     const role = roles[0];
     if (role && shortLabel(role.label)) {
-      if (records.length === 1) return `${period}は、AIを「${role.label}」として使った記録があります。`;
-      if (role.count >= 2 && role.count > records.length / 2) {
+      if (records.length <= 2 && role.count === records.length) return `${period}は、AIを「${role.label}」として使った記録があります。`;
+      if (records.length >= 3 && role.count > records.length / 2) {
         return `${period}は、AIを「${role.label}」として使う記録が多めです。`;
       }
     }
@@ -26,8 +26,8 @@ export function buildReportSummary(records: readonly SummaryRecord[], kind: Summ
     }
     const service = services[0];
     if (service && shortLabel(service.label)) {
-      if (records.length === 1) return `${period}は、${service.label}を使った記録があります。`;
-      if (service.count >= 2 && service.count > records.length / 2) {
+      if (records.length <= 2 && service.count === records.length) return `${period}は、${service.label}を使った記録があります。`;
+      if (records.length >= 3 && service.count > records.length / 2) {
         return `${period}は、${service.label}を使った記録が多めです。`;
       }
     }
