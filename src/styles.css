@@ -3152,3 +3152,614 @@ button {
   font-size: 11px;
   font-weight: 700;
 }
+
+.settlement-period-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  border-radius: 16px;
+  background: #eff6ff;
+}
+
+.settlement-period-nav button {
+  min-height: 44px;
+  padding: 10px 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #1d4ed8;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.settlement-period-nav button[aria-pressed="true"] {
+  background: #2563eb;
+  color: #fff;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.18);
+}
+
+.settlement-period-nav button:hover {
+  box-shadow: inset 0 0 0 2px #93c5fd;
+}
+
+.settlement-period-nav button:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.report-period-controls {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.report-period-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.report-period-label {
+  min-width: 0;
+  margin: 0;
+  color: #1e3a8a;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.65;
+}
+
+.report-date-part {
+  white-space: nowrap;
+}
+
+.report-period-current {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.report-period-toolbar {
+  display: grid;
+  grid-template-columns: minmax(54px, 0.5fr) minmax(0, 1.2fr) minmax(54px, 0.5fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.report-period-step {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 2px;
+  min-height: 48px;
+  padding: 4px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.report-period-step:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.report-anchor-control {
+  display: grid;
+  position: relative;
+  min-width: 0;
+  color: #475569;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.report-anchor-control > span {
+  position: absolute;
+  top: 4px;
+  left: 9px;
+  pointer-events: none;
+}
+
+.report-anchor-control input {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 18px 7px 3px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #1e293b;
+  font: inherit;
+  font-size: 14px;
+}
+
+.report-detail-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.report-summary-group {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.report-summary {
+  min-width: 0;
+  min-height: 0;
+  align-content: start;
+}
+
+.report-summary::after {
+  display: none;
+}
+
+.report-summary p.report-summary-period {
+  margin: 0;
+  justify-self: start;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: rgba(15, 23, 42, 0.16);
+  font-size: 13px;
+  color: #fff;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.report-summary h2.report-summary-message {
+  margin: 0;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.report-summary-metadata {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.report-summary-total {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #475569;
+  flex-wrap: wrap;
+}
+
+.report-summary-total > svg {
+  flex-shrink: 0;
+  color: #2563eb;
+}
+
+.report-summary-label {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.report-summary-count {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  min-width: 0;
+  margin: 0;
+  line-height: 1.6;
+}
+
+.report-summary-count strong {
+  min-width: 0;
+  color: #1e293b;
+  font-size: 16px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.report-summary-count > span {
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.report-summary-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #cfe5fc;
+}
+
+.report-recorded-months {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #475569;
+  font-size: 12px;
+}
+
+.report-recorded-months > span {
+  display: grid;
+  gap: 4px;
+}
+
+.report-recorded-months strong {
+  color: #1e293b;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.report-summary-year {
+  gap: 5px;
+  padding-left: 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #164e63;
+  font-size: 12px;
+}
+
+.report-summary-year select {
+  min-height: 44px;
+  padding: 6px 8px;
+  border: 0;
+  font-size: 14px;
+}
+
+.report-insights {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.report-insight-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+}
+
+.report-insight-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.report-insight-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: #e0f2fe;
+  color: #2563eb;
+}
+
+.report-insight-card strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 20px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.report-insight-balance {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #eff8ff;
+  border-color: #cfe8fc;
+}
+
+.report-insight-balance > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.report-insight-balance > .report-insight-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
+.report-insight-balance strong {
+  font-size: 21px;
+}
+
+.report-records-heading {
+  display: grid;
+  gap: 7px;
+}
+
+.report-records-heading p {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.report-notes {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  background: #f1f7fd;
+}
+
+.report-notes p {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.report-load-state {
+  display: grid;
+  gap: 12px;
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.report-load-state h2 {
+  margin: 0;
+  color: #1e3a8a;
+  font-size: 19px;
+  line-height: 1.6;
+}
+
+.report-load-state p {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.report-state-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: #e0f2fe;
+  color: #2563eb;
+}
+
+.report-period-current:focus-visible,
+.report-period-step:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.report-scope-note {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.report-heading h2 {
+  margin: 4px 0 0;
+  font-size: 22px;
+}
+
+.report-metric-grid .settlement-metric strong {
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.report-metric-grid .settlement-metric span {
+  color: #475569;
+  font-size: 13px;
+}
+
+.report-screen .monthly-insight {
+  font-size: 14px;
+}
+
+.report-record-list {
+  display: grid;
+  gap: 8px;
+}
+
+.report-record {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+  text-align: left;
+  color: #1e293b;
+  cursor: pointer;
+}
+
+.report-record span {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.report-record small {
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.report-record strong {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.report-record svg {
+  flex-shrink: 0;
+  color: #2563eb;
+}
+
+.report-record:hover {
+  background: #eff6ff;
+  border-color: #60a5fa;
+}
+
+.report-record:focus-visible,
+.report-period-actions button:focus-visible,
+.report-anchor-control input:focus-visible,
+.ledger-edit-form textarea:focus-visible,
+.ledger-detail-card:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.report-annual-hero {
+  min-height: 0;
+  padding: 18px;
+  gap: 10px;
+}
+
+.report-annual-hero h2 {
+  font-size: 23px;
+}
+
+.report-date-warning {
+  margin: 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff7ed;
+  color: #7c2d12;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.ledger-edit-form,
+.ledger-edit-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.ledger-edit-form {
+  gap: 14px;
+}
+
+.ledger-edit-form textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  font: inherit;
+  color: #1e293b;
+  background: #fff;
+  resize: vertical;
+}
+
+.report-detail-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-delete-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  color: #991b1b;
+  background: #fff7f7;
+}
+
+/* Reserve the existing bottom navigation within report screens only. */
+.report-frame {
+  height: 100dvh;
+  min-height: 0;
+  background: linear-gradient(180deg, #edf5ff 0%, #f4faff 55%, #f8fafc 100%);
+}
+
+.report-frame .screen {
+  min-height: 0;
+  margin-bottom: 82px;
+  padding-bottom: 24px;
+  scroll-padding-block: 12px;
+}
+
+@media (min-width: 720px) {
+  .report-frame {
+    height: min(920px, calc(100dvh - 56px));
+    min-height: 0;
+  }
+}
+
+@media (max-width: 360px) {
+  .report-insight-card:not(.report-insight-balance) .report-insight-label {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+/* Soft transitions echo the existing home and journal screens. */
+.report-frame .settlement-period-nav {
+  border-color: rgba(191, 219, 254, 0.75);
+  background: rgba(239, 246, 255, 0.8);
+}
+
+.report-frame .settlement-period-nav button[aria-pressed="true"] {
+  background: linear-gradient(120deg, #2563eb, #0877c4);
+}
+
+.report-frame .report-period-controls {
+  border-color: rgba(219, 234, 254, 0.8);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 6px 18px rgba(37, 99, 235, 0.025);
+}
+
+.report-insight-card {
+  background: linear-gradient(145deg, #fff, #f6fbff);
+}
+
+.report-insight-balance {
+  background: linear-gradient(115deg, #eff6ff, #e1f5fe);
+}
+
+.report-frame .report-records {
+  border-color: rgba(219, 234, 254, 0.85);
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.035);
+}

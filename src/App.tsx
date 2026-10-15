@@ -1,7 +1,10 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
+import { buildReportSummary } from "./reportSummary";
 import {
   ArrowLeft,
+  ArrowRight,
   BarChart3,
   BookOpenText,
   Bot,
@@ -22,7 +25,7 @@ import {
 } from "lucide-react";
 
 type TabKey = "home" | "journal" | "receipts" | "analysis" | "tax";
-type SettlementView = "monthly" | "annual";
+type SettlementView = LedgerPeriod;
 
 type JournalUnit = {
   amount: number;
@@ -509,9 +512,13 @@ function App() {
   const [receiptFilter, setReceiptFilter] = useState<ReceiptFilter | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<TabKey | null>(null);
   const [ledgerMonth, setLedgerMonth] = useState<string | null>(null);
-  const [annualYear, setAnnualYear] = useState<number | null>(null);
+  const [reportDate, setReportDate] = useState(() => new Date());
+  const [ledgerRange, setLedgerRange] = useState<{ anchor: Date; kind: SettlementView; receiptNo?: string } | null>(null);
+  const [ledgerReturnView, setLedgerReturnView] = useState<SettlementView>("annual");
+  const annualYear = reportDate.getFullYear();
+  const setAnnualYear = (year: number) => setReportDate(calendarDate(year, reportDate.getMonth(), 1));
   const [analysisFocus, setAnalysisFocus] = useState<AnalysisFocus>(null);
-  const [settlementView, setSettlementView] = useState<SettlementView>(IS_PREVIEW ? "annual" : "monthly");
+  const [settlementView, setSettlementView] = useState<SettlementView>("annual");
   const [isSettlementOpen, setIsSettlementOpen] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");
   const [toastMessage, setToastMessage] = useState("");
@@ -526,8 +533,50 @@ function App() {
   const [qrMessage, setQrMessage] = useState("");
   const [ledgerMessage, setLedgerMessage] = useState("");
   const [receiptActionMessage, setReceiptActionMessage] = useState("");
-  const [thinkingLedger, setThinkingLedger] =
-    useState<IssuedThinkingReceipt[]>(loadThinkingLedger);
+  const [thinkingLedger, setThinkingLedger] = useState<IssuedThinkingReceipt[]>([]);
+  const [ledgerStatus, setLedgerStatus] = useState<"loading" | "ready" | "error">("loading");
+  const refreshLedger = useCallback(() => {
+    try {
+      setThinkingLedger(loadThinkingLedger());
+      setLedgerStatus("ready");
+    } catch {
+      setLedgerStatus("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshLedger();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === THINKING_LEDGER_KEY || event.key === null) refreshLedger();
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") refreshLedger(); };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", refreshLedger);
+    window.addEventListener("thinking-ledger-changed", refreshLedger);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", refreshLedger);
+      window.removeEventListener("thinking-ledger-changed", refreshLedger);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshLedger]);
+
+  function persistLedger(records: IssuedThinkingReceipt[]) {
+    localStorage.setItem(THINKING_LEDGER_KEY, JSON.stringify(records));
+    setThinkingLedger(records);
+    setLedgerStatus("ready");
+  }
+
+  function updateLedgerReceipt(receipt: IssuedThinkingReceipt) {
+    const current = loadThinkingLedger();
+    if (!current.some((item) => item.receiptNo === receipt.receiptNo)) throw new Error("記録が見つかりません。再読み込みしてください。");
+    persistLedger(current.map((item) => item.receiptNo === receipt.receiptNo ? receipt : item));
+  }
+
+  function deleteLedgerReceipt(receiptNo: string) {
+    persistLedger(loadThinkingLedger().filter((item) => item.receiptNo !== receiptNo));
+  }
   const stats = useMemo(() => buildStats(receiptData), [receiptData]);
 
   useEffect(() => {
@@ -677,6 +726,7 @@ function App() {
 
   function showReceipts(filter: ReceiptFilter | null = null) {
     setLedgerMonth(null);
+    setLedgerRange(null);
     setIsSettlementOpen(false);
     setReceiptFilter(filter);
     setFilterOrigin(filter ? activeTab : null);
@@ -687,7 +737,8 @@ function App() {
 
   function showLedgerMonth(monthKey: string) {
     setLedgerMonth(monthKey);
-    setAnnualYear(Number(monthKey.slice(0, 4)));
+    setLedgerRange(null);
+    setLedgerReturnView("annual");
     setReceiptFilter(null);
     setFilterOrigin(null);
     setIsSettlementOpen(false);
@@ -696,10 +747,21 @@ function App() {
     scrollScreenToTop("auto");
   }
 
+  function openReportLedger(receiptNo?: string) {
+    setLedgerMonth(null);
+    setLedgerRange({ anchor: new Date(reportDate), kind: settlementView, receiptNo });
+    setLedgerReturnView(settlementView);
+    setReceiptFilter(null);
+    setFilterOrigin(null);
+    setActiveTab("receipts");
+    scrollScreenToTop("auto");
+  }
+
   function returnToAnnualReport() {
     setLedgerMonth(null);
+    setLedgerRange(null);
     setActiveTab("tax");
-    setSettlementView("annual");
+    setSettlementView(ledgerReturnView);
     scrollScreenToTop("auto");
   }
 
@@ -733,11 +795,9 @@ function App() {
     setIsSettlementOpen(false);
     if (tab === "receipts") {
       setLedgerMonth(null);
+      setLedgerRange(null);
       setReceiptFilter(null);
       setFilterOrigin(null);
-    }
-    if (tab === "tax") {
-      setSettlementView("annual");
     }
     setActiveTab(tab);
     setSaveMessage("");
@@ -748,7 +808,6 @@ function App() {
   function openSettlement() {
     setIsSettlementOpen(false);
     setActiveTab("tax");
-    setSettlementView("annual");
     setSaveMessage("");
     setAnalysisFocus(null);
     scrollScreenToTop("auto");
@@ -829,9 +888,11 @@ function App() {
       localStorage.removeItem(RAW_CONVERSATION_KEY);
       localStorage.removeItem(THINKING_LEDGER_KEY);
     } catch {
-      // localStorage が使えない環境でも、画面上の状態はリセットします。
+      showToast("保存先にアクセスできないため、リセットできませんでした。");
+      return;
     }
 
+    setLedgerStatus("ready");
     setConversationCandidate(null);
     setConversationMessage("");
     setCandidateIssueMessage("");
@@ -900,13 +961,7 @@ function App() {
       const current = loadThinkingLedger();
       const exists = current.some((receipt) => receipt.receiptNo === receiptData.receiptNo);
       const updatedLedger = exists ? current : [receiptData, ...current];
-      localStorage.setItem(
-        THINKING_LEDGER_KEY,
-        JSON.stringify(updatedLedger),
-      );
-      console.log("saved receipt", receiptData);
-      console.log("thinkingLedger", updatedLedger);
-      setThinkingLedger(updatedLedger);
+      persistLedger(updatedLedger);
       setLedgerMessage("思考帳簿に保存しました");
       setLedgerMessage("帳簿に保存しました。");
     } catch {
@@ -922,8 +977,7 @@ function App() {
         (receipt) => !receiptNos.has(receipt.receiptNo),
       );
       const updatedLedger = [...samplesToAdd, ...current];
-      localStorage.setItem(THINKING_LEDGER_KEY, JSON.stringify(updatedLedger));
-      setThinkingLedger(updatedLedger);
+      persistLedger(updatedLedger);
       showToast("開発確認用のサンプル帳簿データを追加しました。");
     } catch {
       showToast("サンプル帳簿データを追加できませんでした。");
@@ -947,7 +1001,7 @@ function App() {
 
   return (
     <div className="app-shell">
-      <main className="phone-frame">
+      <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
         <Header onOpenSettlement={openSettlement} />
         <div className="screen" ref={screenRef}>
           {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
@@ -976,44 +1030,55 @@ function App() {
             </section>
           )}
           {!isSettlementOpen && activeTab === "tax" && (
-            settlementView === "monthly" ? (
-              <AnalysisScreen
-                ledgerReceipts={thinkingLedger}
-                onAddSamples={addSampleLedgerData}
-                onBackHome={() => {
-                  setActiveTab("home");
-                  scrollScreenToTop("auto");
-                }}
-                onShowAnnual={() => {
-                  setSettlementView("annual");
+            <div className="stack">
+              <SettlementPeriodNavigation
+                value={settlementView}
+                onChange={(view) => {
+                  setSettlementView(view);
+                  setAnalysisFocus(null);
                   scrollScreenToTop("auto");
                 }}
               />
-            ) : (
-              <ThoughtSettlementScreen
-                ledgerReceipts={thinkingLedger}
-                year={annualYear}
-                onYearChange={setAnnualYear}
-                onOpenMonth={showLedgerMonth}
-                onBackMonthly={() => {
-                  setSettlementView("monthly");
-                  scrollScreenToTop("auto");
-                }}
-                onAddSamples={addSampleLedgerData}
-              />
-            )
+              <ReportPeriodControls anchor={reportDate} kind={settlementView} onChange={setReportDate} />
+              {ledgerStatus !== "ready" ? (
+                <LedgerLoadState status={ledgerStatus} onRetry={refreshLedger} />
+              ) : settlementView === "annual" ? (
+                <ThoughtSettlementScreen
+                  ledgerReceipts={thinkingLedger}
+                  year={annualYear}
+                  onYearChange={setAnnualYear}
+                  onOpenMonth={showLedgerMonth}
+                  onOpenLedger={openReportLedger}
+                  onBackMonthly={() => { setSettlementView("monthly"); scrollScreenToTop("auto"); }}
+                  onAddSamples={addSampleLedgerData}
+                />
+              ) : (
+                <PeriodLedgerScreen
+                  key={`${settlementView}-${dateKey(reportDate)}`}
+                  kind={settlementView}
+                  anchor={reportDate}
+                  ledgerReceipts={thinkingLedger}
+                  onOpenLedger={openReportLedger}
+                />
+              )}
+            </div>
           )}
           {!isSettlementOpen && activeTab === "journal" && (
             <JournalScreen receipts={receiptData} highlightedReceiptId={highlightedReceiptId} />
           )}
           {!isSettlementOpen && activeTab === "receipts" && (
-            <ReceiptsScreen
+            ledgerStatus !== "ready" ? <LedgerLoadState status={ledgerStatus} onRetry={refreshLedger} /> : <ReceiptsScreen
               receipts={receiptData}
               thinkingLedger={thinkingLedger}
               monthKey={ledgerMonth}
+              range={ledgerRange}
+              returnView={ledgerReturnView}
+              onUpdate={updateLedgerReceipt}
+              onDelete={deleteLedgerReceipt}
               onBackAnnual={returnToAnnualReport}
               onClearMonth={() => {
                 setLedgerMonth(null);
+                setLedgerRange(null);
                 scrollScreenToTop("auto");
               }}
               filter={receiptFilter}
@@ -1075,8 +1140,209 @@ function ToastMessage({ message }: { message: string }) {
   );
 }
 
+function SettlementPeriodNavigation({
+  value,
+  onChange,
+}: {
+  value: SettlementView;
+  onChange: (view: SettlementView) => void;
+}) {
+  const periods: Array<{ value: SettlementView; label: string }> = [
+    { value: "weekly", label: "週間" },
+    { value: "monthly", label: "月間" },
+    { value: "annual", label: "年間" },
+  ];
+
+  return (
+    <nav className="settlement-period-nav" aria-label="決算の期間">
+      {periods.map((period) => (
+        <button
+          key={period.value}
+          type="button"
+          aria-pressed={value === period.value}
+          onClick={() => onChange(period.value)}
+        >
+          {period.label}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+function LedgerLoadState({ status, onRetry }: { status: "loading" | "error"; onRetry: () => void }) {
+  return (
+    <section className="card report-load-state" role={status === "error" ? "alert" : "status"}>
+      <span className="report-state-icon" aria-hidden="true"><NotebookTabs size={24} /></span>
+      <h2>{status === "error" ? "帳簿を取得できませんでした" : "帳簿を読み込み中です"}</h2>
+      <p>{status === "error" ? "保存先へのアクセスやデータ形式を確認してください。集計値は表示していません。保存済みデータは変更していません。" : "保存済みの記録を確認しています。"}</p>
+      {status === "error" && <button className="secondary-action" type="button" onClick={onRetry}>再読み込み</button>}
+    </section>
+  );
+}
+
+function ReportPeriodControls({ anchor, kind, onChange }: { anchor: Date; kind: SettlementView; onChange: (date: Date) => void }) {
+  const unit = kind === "weekly" ? "週" : kind === "monthly" ? "月" : "年";
+  const currentLabel = kind === "weekly" ? "今週" : kind === "monthly" ? "今月" : "今年";
+  return (
+    <section className="report-period-controls" aria-label="対象期間の操作">
+      <div className="report-period-topline">
+        <p className="report-period-label" aria-live="polite"><ReportDateText value={formatPeriod(anchor, kind)} /></p>
+        <button className="report-period-current" type="button" onClick={() => onChange(new Date())}>{currentLabel}に戻る</button>
+      </div>
+      <div className="report-period-toolbar">
+        <button className="report-period-step" type="button" aria-label={`前の${unit}`} disabled={anchor.getFullYear() <= 1} onClick={() => onChange(shiftPeriod(anchor, kind, -1))}><ArrowLeft size={16} aria-hidden="true" /><span>前の{unit}</span></button>
+        <label className="report-anchor-control"><span>基準日</span>
+          <input type="date" min="0001-01-01" max="9999-12-31" value={dateKey(anchor)} onChange={(event) => {
+            const date = parseLedgerDate(event.target.value);
+            if (date) onChange(date);
+          }} />
+        </label>
+        <button className="report-period-step" type="button" aria-label={`次の${unit}`} disabled={anchor.getFullYear() >= 9999} onClick={() => onChange(shiftPeriod(anchor, kind, 1))}><ArrowRight size={16} aria-hidden="true" /><span>次の{unit}</span></button>
+      </div>
+    </section>
+  );
+}
+
+function ReportDateText({ value }: { value: string }) {
+  return <>{value.split("〜").map((part, index) => (
+    <span key={index}>{index > 0 && <>〜<wbr /></>}<span className="report-date-part">{part}</span></span>
+  ))}</>;
+}
+
+function ReportSummary({ title, period, records, kind, anchor, children }: {
+  title: string;
+  period: string;
+  records: IssuedThinkingReceipt[];
+  kind: SettlementView;
+  anchor: Date;
+  children?: ReactNode;
+}) {
+  const { start, end } = periodBounds(anchor, kind);
+  const now = new Date();
+  const isCurrent = now >= start && now < end;
+  const summary = useMemo(() => buildReportSummary(records, kind, isCurrent), [records, kind, isCurrent]);
+  return (
+    <div className="report-summary-group">
+      <section className="monthly-hero-card report-summary" aria-label={`${title}のサマリー`}>
+        <p className="report-summary-period"><ReportDateText value={period} /></p>
+        <h2 className="report-summary-message">{summary}</h2>
+      </section>
+      <div className="report-summary-metadata">
+        <div className="report-summary-total">
+          <ReceiptText size={16} aria-hidden="true" />
+          <span className="report-summary-label">思考レシート</span>
+          <p className="report-summary-count"><strong>{records.length}</strong><span>件</span></p>
+        </div>
+        {children && <div className="report-summary-footer">{children}</div>}
+      </div>
+    </div>
+  );
+}
+
+function ReportInsights({ stats }: { stats: ReturnType<typeof buildLedgerStats> }) {
+  return (
+    <div className="report-insights">
+      <article className="report-insight-card">
+        <span className="report-insight-label"><span className="report-insight-icon"><Bot size={18} aria-hidden="true" /></span>よく使ったAI</span>
+        <strong>{stats.topService}</strong>
+      </article>
+      <article className="report-insight-card">
+        <span className="report-insight-label"><span className="report-insight-icon"><Sparkles size={18} aria-hidden="true" /></span>よく使った役割</span>
+        <strong>{stats.topRole}</strong>
+      </article>
+      <article className="report-insight-card report-insight-balance">
+        <span className="report-insight-icon"><Coins size={22} aria-hidden="true" /></span>
+        <div><span className="report-insight-label">思考残高</span><strong>{stats.topBalance}</strong></div>
+      </article>
+    </div>
+  );
+}
+
+function ReportNotes({ children }: { children?: ReactNode }) {
+  return (
+    <section className="report-notes" aria-label="集計について">
+      <SectionTitle icon={<BookOpenText size={16} />} title="集計について" />
+      <p>基準日を含む期間を表示します。週間は月曜〜日曜です。期間を切り替えても基準日は維持されます。</p>
+      <p>発行日を優先し、判定できない場合は会話日を使います。「よく使った」と思考残高は最多の記録分類です。同数の場合は項目名の日本語順で表示します。</p>
+      {children}
+    </section>
+  );
+}
+
+function ReportRecordList({ receipts, title, onOpenLedger }: {
+  receipts: IssuedThinkingReceipt[];
+  title: string;
+  onOpenLedger: (receiptNo?: string) => void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(20);
+  return (
+    <section className="monthly-report-card report-records">
+      <div className="report-records-heading">
+        <SectionTitle icon={<NotebookTabs size={18} />} title={title} />
+        <p>各記録を押すと、帳簿の詳細を確認できます。</p>
+      </div>
+      {receipts.length === 0 ? <p className="monthly-insight">この期間の帳簿記録はありません。対象期間を変更するか、帳簿を確認してください。</p> : (
+        <div className="report-record-list">
+          {receipts.slice(0, visibleCount).map((receipt) => (
+            <button className="report-record" type="button" key={receipt.receiptNo} onClick={() => onOpenLedger(receipt.receiptNo)}>
+              <span><small>{dateKey(ledgerDate(receipt)!).replace(/-/g, "/")} · {receipt.aiService || "未記録"}</small><strong>{receipt.topic || "相談テーマ未記録"}</strong><small>{receipt.aiRole || "役割未記録"} · {receipt.thinkingBalance || "思考残高未記録"}</small></span>
+              <ChevronRight size={18} aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      )}
+      {receipts.length > visibleCount && <button className="secondary-action" type="button" onClick={() => setVisibleCount((count) => count + 20)}>さらに20件表示</button>}
+      <button className="secondary-action" type="button" onClick={() => onOpenLedger()}>この期間の帳簿を開く（{receipts.length}件）</button>
+    </section>
+  );
+}
+
+function PeriodLedgerScreen({ kind, anchor, ledgerReceipts, onOpenLedger }: {
+  kind: "weekly" | "monthly";
+  anchor: Date;
+  ledgerReceipts: IssuedThinkingReceipt[];
+  onOpenLedger: (receiptNo?: string) => void;
+}) {
+  const records = useMemo(() => selectPeriod(ledgerReceipts, anchor, kind), [ledgerReceipts, anchor, kind]);
+  const stats = buildLedgerStats(records);
+  const weekly = kind === "weekly";
+  const scope = weekly ? "今週" : "対象月";
+  const undated = ledgerReceipts.filter((receipt) => !ledgerDate(receipt)).length;
+  return (
+    <section className="stack report-screen" aria-label={weekly ? "週間申告" : "月次決算"}>
+      <ReportSummary
+        title={weekly ? "週間申告" : `${anchor.getMonth() + 1}月の思考決算`}
+        period={formatPeriod(anchor, kind)}
+        records={records}
+        kind={kind}
+        anchor={anchor}
+      />
+      <ReportInsights stats={stats} />
+      {undated > 0 && <p className="report-date-warning" role="status">日付を確認できない{undated}件は集計に含めていません。帳簿の詳細から日付を確認してください。</p>}
+      <ReportRecordList receipts={records} title={`${weekly ? "今週" : "対象月"}の記録`} onOpenLedger={onOpenLedger} />
+      {records.length > 0 && <>
+        <section className="monthly-report-card">
+          <SectionTitle icon={<Sparkles size={18} />} title={`${scope}のまとめ`} />
+          <p className="monthly-insight">{stats.relationshipComment}</p>
+        </section>
+        <section className="monthly-report-card">
+          <SectionTitle icon={<BarChart3 size={18} />} title="全体の傾向" />
+          <AnnualTrendChart title="AIに求めた役割の内訳" description="同じ対象期間の記録を集計しています。" items={stats.roleBreakdown} />
+          <AnnualTrendChart title="思考残高の傾向" description="帳簿に残した思考残高の分類です。" items={stats.balanceBreakdown} />
+        </section>
+        <section className="monthly-report-card">
+          <SectionTitle icon={<CheckCircle2 size={18} />} title="自分で決めたこと" />
+          <div className="ledger-detail-list">{stats.decisions.length ? stats.decisions.slice(0, 3).map((decision) => <p key={decision}>{decision}</p>) : <p>まだ明確な判断は記録されていません</p>}</div>
+        </section>
+      </>}
+      <ReportNotes />
+    </section>
+  );
+}
+
 function ThoughtSettlementScreen({
   ledgerReceipts,
+  onOpenLedger,
   year,
   onYearChange,
   onOpenMonth,
@@ -1084,6 +1350,7 @@ function ThoughtSettlementScreen({
   onAddSamples,
 }: {
   ledgerReceipts: IssuedThinkingReceipt[];
+  onOpenLedger: (receiptNo?: string) => void;
   year: number | null;
   onYearChange: (year: number) => void;
   onOpenMonth: (monthKey: string) => void;
@@ -1093,6 +1360,7 @@ function ThoughtSettlementScreen({
   const currentYear = new Date().getFullYear();
   const years = Array.from(new Set([
     currentYear,
+    year ?? currentYear,
     ...ledgerReceipts.flatMap((receipt) => {
       const monthKey = getLedgerReceiptMonthKey(receipt);
       return monthKey ? [Number(monthKey.slice(0, 4))] : [];
@@ -1102,9 +1370,7 @@ function ThoughtSettlementScreen({
     (receipt) => getLedgerReceiptMonthKey(receipt)?.startsWith(`${candidate}-`),
   ));
   const selectedYear = year ?? recordedYears[0] ?? currentYear;
-  const annualReceipts = ledgerReceipts.filter(
-    (receipt) => getLedgerReceiptMonthKey(receipt)?.startsWith(`${selectedYear}-`),
-  );
+  const annualReceipts = useMemo(() => selectPeriod(ledgerReceipts, calendarDate(selectedYear, 0, 1), "annual"), [ledgerReceipts, selectedYear]);
   const ledgerStats = buildLedgerStats(annualReceipts);
   const months = Array.from({ length: 12 }, (_, index) => {
     const monthKey = `${selectedYear}-${String(index + 1).padStart(2, "0")}`;
@@ -1115,50 +1381,17 @@ function ThoughtSettlementScreen({
 
   return (
     <section className="stack settlement-screen">
-      <button className="back-link" type="button" onClick={onBackMonthly}>
-        <ArrowLeft size={16} />
-        月次決算に戻る
-      </button>
-
-      <section className="settlement-hero">
-        <div>
-          <p className="eyebrow light">{selectedYear}年 · 1年分のまとめ</p>
-          <h2>私とAIの確定申告</h2>
-        </div>
-        <p>蓄積した記録から、自分とAIの関係を見つめ直します。</p>
-      </section>
-
-      <section className="annual-report-card">
-        <label className="annual-year-control">
-          <span>対象年</span>
+      <ReportSummary title="私とAIの確定申告" period={`${selectedYear}年1月〜12月`} records={annualReceipts} kind="annual" anchor={calendarDate(selectedYear, 0, 1)}>
+        <span className="report-recorded-months"><CalendarDays size={16} aria-hidden="true" /><span>記録のある月<strong>{months.filter((count) => count > 0).length}か月 / 12か月</strong></span></span>
+        <label className="annual-year-control report-summary-year"><span>対象年</span>
           <select value={selectedYear} onChange={(event) => onYearChange(Number(event.target.value))}>
             {years.map((year) => <option key={year} value={year}>{year}年</option>)}
           </select>
         </label>
-        <p className="annual-scope-note">
-          {selectedYear}年1月〜12月に発行した、帳簿の保存済みレシートを集計しています。
-          発行日時を確認できない記録は会話日時を使います。
-        </p>
-        {undatedCount > 0 && (
-          <p className="annual-scope-note">日付を確認できない{undatedCount}件は、年間集計に含めていません。</p>
-        )}
-      </section>
-
-      {ledgerReceipts.length === 0 ? (
-        <LedgerEmptyState onAddSamples={onAddSamples} />
-      ) : annualReceipts.length === 0 ? (
-        <section className="annual-report-card" role="status">
-          <SectionTitle icon={<CalendarDays size={18} />} title={`${selectedYear}年の記録`} />
-          <p className="reflection">この年の思考レシートはまだありません。レシートを帳簿に保存すると、確定申告に反映されます。</p>
-        </section>
-      ) : (
-        <>
-          <div className="annual-report-grid">
-            <SettlementMetric label="年間のレシート数" value={`${ledgerStats.count}件`} />
-            <SettlementMetric label="記録のある月" value={`${months.filter((count) => count > 0).length}か月 / 12か月`} />
-            <SettlementMetric label="よく使ったAI" value={ledgerStats.topService} />
-            <SettlementMetric label="思考残高" value={ledgerStats.topBalance} />
-          </div>
+      </ReportSummary>
+      <ReportInsights stats={ledgerStats} />
+      {undatedCount > 0 && <p className="report-date-warning" role="status">日付を確認できない{undatedCount}件は、年間集計に含めていません。</p>}
+      {annualReceipts.length > 0 && (
           <section className="annual-report-card">
             <SectionTitle icon={<CalendarDays size={18} />} title="1年の記録" />
             <div className="annual-month-grid">
@@ -1175,6 +1408,17 @@ function ThoughtSettlementScreen({
               ))}
             </div>
           </section>
+      )}
+      <ReportRecordList receipts={annualReceipts} title="年間の帳簿記録" onOpenLedger={onOpenLedger} />
+      {ledgerReceipts.length === 0 ? (
+        <LedgerEmptyState onAddSamples={onAddSamples} />
+      ) : annualReceipts.length === 0 ? (
+        <section className="annual-report-card" role="status">
+          <SectionTitle icon={<CalendarDays size={18} />} title={`${selectedYear}年の記録`} />
+          <p className="reflection">この年の思考レシートはまだありません。レシートを帳簿に保存すると、確定申告に反映されます。</p>
+        </section>
+      ) : (
+        <>
           <section className="annual-report-card annual-report-card-primary">
             <SectionTitle icon={<BookOpenText size={18} />} title="AIとの関係コメント" />
             <p className="annual-report-comment">{ledgerStats.relationshipComment}</p>
@@ -1240,6 +1484,12 @@ function ThoughtSettlementScreen({
           </section>
         </>
       )}
+      <button className="back-link" type="button" onClick={onBackMonthly}>
+        <ArrowLeft size={16} />月次決算に戻る
+      </button>
+      <ReportNotes>
+        <p>{selectedYear}年1月〜12月に発行した、帳簿の保存済みレシートを集計しています。発行日時を確認できない記録は会話日時を使います。</p>
+      </ReportNotes>
     </section>
   );
 }
@@ -1787,31 +2037,57 @@ function LedgerBreakdown({
   );
 }
 
-function LedgerReceiptDetail({
-  receipt,
-  onClose,
-}: {
+function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
   receipt: IssuedThinkingReceipt;
   onClose: () => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => void;
+  onDelete: (receiptNo: string) => void;
 }) {
+  const [draft, setDraft] = useState(receipt);
+  const [editing, setEditing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState("");
+  const detailRef = useRef<HTMLElement | null>(null);
+  useEffect(() => { detailRef.current?.focus(); detailRef.current?.scrollIntoView({ block: "start" }); }, [receipt.receiptNo]);
+  const fields: Array<{ key: keyof ThoughtReceiptCandidate | "issuedAt"; label: string }> = [
+    { key: "issuedAt", label: "発行日時" }, { key: "conversationDate", label: "会話日時" },
+    { key: "aiService", label: "使用AI" }, { key: "topic", label: "相談テーマ" },
+    { key: "aiRole", label: "AIに求めた役割" }, { key: "aiAdded", label: "AIが足したこと" },
+    { key: "selfDecision", label: "自分で決めたこと" }, { key: "feelingAfter", label: "会話後の気持ち" },
+    { key: "thinkingBalance", label: "思考残高" },
+  ];
   return (
-    <section className="ledger-detail-card">
+    <section className="ledger-detail-card" ref={detailRef} tabIndex={-1} aria-label="レシート詳細">
       <SectionTitle icon={<ReceiptText size={18} />} title="レシート詳細" />
-      <div className="ledger-detail-list">
-        <ConfirmRow label="receiptNo" value={receipt.receiptNo} />
-        <ConfirmRow label="issuedAt" value={receipt.issuedAt} />
-        <ConfirmRow label="使用AI" value={receipt.aiService} />
-        <ConfirmRow label="会話日時" value={receipt.conversationDate} />
-        <ConfirmRow label="相談テーマ" value={receipt.topic} />
-        <ConfirmRow label="AIに求めた役割" value={receipt.aiRole} />
-        <ConfirmRow label="AIが足したこと" value={receipt.aiAdded} />
-        <ConfirmRow label="自分で決めたこと" value={receipt.selfDecision} />
-        <ConfirmRow label="会話後の気持ち" value={receipt.feelingAfter} />
-        <ConfirmRow label="思考残高" value={receipt.thinkingBalance} />
-      </div>
-      <button className="secondary-action compact-action" type="button" onClick={onClose}>
-        詳細を閉じる
-      </button>
+      {editing ? <form className="ledger-edit-form" onSubmit={(event) => {
+        event.preventDefault();
+        if (!ledgerDate(draft)) { setError("発行日時または会話日時を、年月日まで入力してください。"); return; }
+        try { onUpdate(draft); setEditing(false); setError(""); } catch { setError("保存できませんでした。保存先を確認し、再読み込みしてからお試しください。"); }
+      }}>
+        <p>レシート番号：{receipt.receiptNo}</p>
+        {fields.map(({ key, label }) => <label key={key}>{label}<textarea aria-label={label} rows={key === "selfDecision" || key === "aiAdded" ? 3 : 1} value={draft[key]} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
+        <p className="report-scope-note">発行日時は「2026/07/04 10:10」など、元の保存形式で入力できます。編集はこのレシートだけに反映されます。</p>
+        <button className="primary-action" type="submit">変更を保存</button>
+        <button className="secondary-action" type="button" onClick={() => { setEditing(false); setError(""); }}>編集をキャンセル</button>
+      </form> : <>
+        <div className="ledger-detail-list">
+          <ConfirmRow label="receiptNo" value={receipt.receiptNo} />
+          {fields.map(({ key, label }) => <ConfirmRow key={key} label={label} value={receipt[key]} />)}
+        </div>
+        <div className="report-detail-actions">
+          <button className="secondary-action" type="button" onClick={() => { setDraft(receipt); setEditing(true); setConfirmDelete(false); setError(""); }}>編集する</button>
+          <button className="secondary-action" type="button" onClick={() => setConfirmDelete(true)}>削除する</button>
+        </div>
+      </>}
+      {confirmDelete && <div className="report-delete-confirm" role="alert">
+        <p>「{receipt.topic}」を帳簿から削除します。週間・月間・年間の集計からも除かれます。</p>
+        <button className="secondary-action" type="button" onClick={() => {
+          try { onDelete(receipt.receiptNo); onClose(); } catch { setError("削除できませんでした。保存先を確認してください。"); }
+        }}>削除を確定</button>
+        <button className="secondary-action" type="button" onClick={() => setConfirmDelete(false)}>削除をキャンセル</button>
+      </div>}
+      {error && <p role="alert">{error}</p>}
+      <button className="secondary-action compact-action" type="button" onClick={onClose}>詳細を閉じる</button>
     </section>
   );
 }
@@ -1819,11 +2095,17 @@ function LedgerReceiptDetail({
 function SavedLedgerList({
   receipts,
   onAddSamples,
+  initialReceiptNo,
+  onUpdate,
+  onDelete,
 }: {
   receipts: IssuedThinkingReceipt[];
   onAddSamples: () => void;
+  initialReceiptNo?: string;
+  onUpdate: (receipt: IssuedThinkingReceipt) => void;
+  onDelete: (receiptNo: string) => void;
 }) {
-  const [selectedReceiptNo, setSelectedReceiptNo] = useState<string | null>(null);
+  const [selectedReceiptNo, setSelectedReceiptNo] = useState<string | null>(initialReceiptNo ?? null);
   const selectedReceipt =
     receipts.find((receipt) => receipt.receiptNo === selectedReceiptNo) ?? null;
 
@@ -1880,6 +2162,8 @@ function SavedLedgerList({
           {selectedReceipt && (
             <LedgerReceiptDetail
               receipt={selectedReceipt}
+              onUpdate={onUpdate}
+              onDelete={onDelete}
               onClose={() => setSelectedReceiptNo(null)}
             />
           )}
@@ -2213,131 +2497,14 @@ function JournalDetailRow({
   );
 }
 
-function AnalysisScreen({
-  ledgerReceipts,
-  onAddSamples,
-  onBackHome,
-  onShowAnnual,
-}: {
-  ledgerReceipts: IssuedThinkingReceipt[];
-  onAddSamples: () => void;
-  onBackHome: () => void;
-  onShowAnnual: () => void;
-}) {
-  const monthlyStats = buildMonthlyLedgerStats(ledgerReceipts);
-  const monthlyDecisions = monthlyStats.decisions.slice(0, 3);
-  const hasMonthlyData = monthlyStats.count > 0;
-
-  return (
-    <section className="stack monthly-settlement-screen">
-      <button className="back-link" type="button" onClick={onBackHome}>
-        <ArrowLeft size={16} />
-        レシートに戻る
-      </button>
-
-      <div className="monthly-settlement-heading">
-        <div>
-          <p className="eyebrow">決算</p>
-          <h2>6月の思考決算</h2>
-          <p className="screen-purpose">今月の思考レシートから、AIとの関わり方を振り返ります。</p>
-        </div>
-      </div>
-
-      <section className="monthly-hero-card">
-        <p className="eyebrow light">2026年6月</p>
-        <h3>
-          {hasMonthlyData
-            ? `今月は、${monthlyStats.topTopic}の場面でAIを「${monthlyStats.topRole}」として使う記録が目立ちました。`
-            : "今月の思考レシートを保存すると、AIとの関わり方がここにまとまります。"}
-        </h3>
-        <p>
-          {hasMonthlyData
-            ? `思考残高は「${monthlyStats.topBalance}」の傾向です。AIの提案を受け取りながら、自分で決めたことも残せています。`
-            : "まずは1枚、思考レシートを帳簿に保存すると月次決算に反映されます。"}
-        </p>
-      </section>
-
-      {ledgerReceipts.length === 0 ? (
-        <LedgerEmptyState onAddSamples={onAddSamples} />
-      ) : monthlyStats.count === 0 ? (
-        <section className="monthly-report-card">
-          <SectionTitle icon={<CalendarDays size={18} />} title="今月の記録" />
-          <p className="monthly-insight">
-            今月の思考レシートはまだありません。レシートを発行して帳簿に保存すると、月次決算に反映されます。
-          </p>
-        </section>
-      ) : (
-        <>
-          <div className="monthly-metric-grid monthly-kpi-grid">
-            <SettlementMetric label="今月のレシート数" value={`${monthlyStats.count}件`} />
-            <SettlementMetric label="よく使ったAI" value={monthlyStats.topService} />
-            <SettlementMetric label="よく使った役割" value={monthlyStats.topRole} />
-            <SettlementMetric label="多かった相談テーマ" value={monthlyStats.topTopic} />
-            <SettlementMetric label="思考残高" value={monthlyStats.topBalance} />
-          </div>
-
-          <section className="monthly-report-card">
-            <SectionTitle icon={<Sparkles size={18} />} title="今月のまとめ" />
-            <p className="reflection">{monthlyStats.summary}</p>
-          </section>
-
-          <div className="monthly-secondary-grid">
-            <section className="monthly-report-card compact-monthly-card">
-              <SectionTitle icon={<Bot size={18} />} title="特徴的だった使い方" />
-              <p className="monthly-insight">
-                {monthlyStats.featuredUse}
-              </p>
-            </section>
-
-            <section className="monthly-report-card compact-monthly-card">
-              <SectionTitle icon={<NotebookTabs size={18} />} title="代表的な相談テーマ" />
-              <p className="monthly-topic-highlight">{monthlyStats.representativeTopic}</p>
-            </section>
-          </div>
-
-          <section className="monthly-report-card monthly-decision-card">
-            <SectionTitle icon={<CheckCircle2 size={18} />} title="自分で決めたこと" />
-            {monthlyDecisions.length === 0 ? (
-              <p className="saved-ledger-empty">今月の自己決定はまだ記録されていません。</p>
-            ) : (
-              <div className="ledger-detail-list">
-                {monthlyDecisions.map((decision) => (
-                  <p key={decision}>{decision}</p>
-                ))}
-              </div>
-            )}
-          </section>
-
-          <section className="monthly-next-card">
-            <SectionTitle icon={<ChevronRight size={18} />} title="次月に向けた一言" />
-            <p>{monthlyStats.nextMonthNote}</p>
-          </section>
-        </>
-      )}
-
-      <section className="monthly-report-card settlement-switch-card">
-        <SectionTitle icon={<BookOpenText size={18} />} title="年末の確定申告へ" />
-        <p className="monthly-insight">
-          月ごとの思考決算がたまると、年末に「2026年 私とAIの確定申告」としてまとめられます。
-        </p>
-        <button className="primary-action" type="button" onClick={onShowAnnual}>
-          <BookOpenText size={18} />
-          確定申告を見る
-        </button>
-      </section>
-
-      <button className="secondary-action monthly-bottom-back" type="button" onClick={onBackHome}>
-        <ArrowLeft size={16} />
-        レシートに戻る
-      </button>
-    </section>
-  );
-}
-
 function ReceiptsScreen({
   receipts,
   thinkingLedger,
   monthKey,
+  range,
+  returnView,
+  onUpdate,
+  onDelete,
   onBackAnnual,
   onClearMonth,
   filter,
@@ -2352,6 +2519,10 @@ function ReceiptsScreen({
   receipts: ThoughtReceipt[];
   thinkingLedger: IssuedThinkingReceipt[];
   monthKey: string | null;
+  range: { anchor: Date; kind: SettlementView; receiptNo?: string } | null;
+  returnView: SettlementView;
+  onUpdate: (receipt: IssuedThinkingReceipt) => void;
+  onDelete: (receiptNo: string) => void;
   onBackAnnual: () => void;
   onClearMonth: () => void;
   filter: ReceiptFilter | null;
@@ -2365,17 +2536,16 @@ function ReceiptsScreen({
 }) {
   const filteredReceipts = filter ? applyReceiptFilter(receipts, filter) : receipts;
 
-  if (monthKey) {
-    const monthlyLedger = thinkingLedger.filter(
-      (receipt) => getLedgerReceiptMonthKey(receipt) === monthKey,
-    );
-    const [year, month] = monthKey.split("-");
-    const monthLabel = `${year}年${Number(month)}月`;
+  if (monthKey || range) {
+    const anchor = range?.anchor ?? parseLedgerDate(`${monthKey}-01`)!;
+    const monthlyLedger = selectPeriod(thinkingLedger, anchor, range?.kind ?? "monthly");
+    const monthLabel = formatPeriod(anchor, range?.kind ?? "monthly");
+    const backLabel = returnView === "annual" ? "確定申告に戻る" : returnView === "weekly" ? "週間申告に戻る" : "月次決算に戻る";
 
     return (
       <section className="stack">
         <button className="back-link" type="button" onClick={onBackAnnual}>
-          <ArrowLeft size={16} />確定申告に戻る
+          <ArrowLeft size={16} />{backLabel}
         </button>
         <div className="receipt-title">
           <div><p className="eyebrow">思考帳簿</p><h2>{monthLabel}の帳簿記録</h2></div>
@@ -2385,15 +2555,15 @@ function ReceiptsScreen({
             <p className="eyebrow">絞り込み中</p>
             <strong>{monthLabel}</strong>
             <em>表示中 {monthlyLedger.length}件 / 全{thinkingLedger.length}件</em>
-            <span>確定申告と同じ発行年月で絞り込んでいます。発行日時を確認できない記録は会話日時を使います。</span>
+            <span>申告画面と同じ発行日・対象期間で絞り込んでいます。発行日時を確認できない記録は会話日時を使います。</span>
           </div>
           <button type="button" onClick={onClearMonth}>絞り込みを解除</button>
         </div>
         {monthlyLedger.length > 0 ? (
-          <SavedLedgerList receipts={monthlyLedger} onAddSamples={onAddSamples} />
+          <SavedLedgerList key={range?.receiptNo ?? monthLabel} receipts={monthlyLedger} initialReceiptNo={range?.receiptNo} onAddSamples={onAddSamples} onUpdate={onUpdate} onDelete={onDelete} />
         ) : (
           <section className="card empty-state" role="status">
-            <SectionTitle icon={<ReceiptText size={18} />} title="この月の帳簿記録はまだありません" />
+            <SectionTitle icon={<ReceiptText size={18} />} title="この期間の帳簿記録はまだありません" />
             <p>{monthLabel}の保存済みレシートはありません。絞り込みを解除すると、すべての帳簿記録を確認できます。</p>
           </section>
         )}
@@ -2468,7 +2638,7 @@ function ReceiptsScreen({
 
       {thinkingLedger.length > 0 && (
         <section className="section-block">
-          <SavedLedgerList receipts={thinkingLedger} onAddSamples={onAddSamples} />
+          <SavedLedgerList receipts={thinkingLedger} onAddSamples={onAddSamples} onUpdate={onUpdate} onDelete={onDelete} />
         </section>
       )}
     </section>
@@ -3369,17 +3539,15 @@ function decodeReceiptPayload(payload: string) {
 }
 
 function loadThinkingLedger() {
-  try {
-    const stored = localStorage.getItem(THINKING_LEDGER_KEY);
-    if (!stored) return IS_PREVIEW ? sampleThinkingLedgerReceipts : [];
-    const parsed = JSON.parse(stored) as IssuedThinkingReceipt[];
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map(normalizeIssuedReceipt)
-      .filter((receipt): receipt is IssuedThinkingReceipt => Boolean(receipt));
-  } catch {
-    return [];
+  const stored = localStorage.getItem(THINKING_LEDGER_KEY);
+  if (stored === null) return [];
+  const parsed: unknown = JSON.parse(stored);
+  if (!Array.isArray(parsed)) throw new Error("帳簿データの形式が正しくありません。");
+  const normalized = parsed.map(normalizeIssuedReceipt);
+  if (normalized.some((receipt) => !receipt) || new Set(normalized.map((receipt) => receipt?.receiptNo)).size !== normalized.length) {
+    throw new Error("帳簿の記録を読み込めませんでした。");
   }
+  return normalized as IssuedThinkingReceipt[];
 }
 
 function isIssuedReceipt(receipt: unknown): receipt is IssuedThinkingReceipt {
@@ -3402,7 +3570,7 @@ function normalizeIssuedReceipt(receipt: unknown): IssuedThinkingReceipt | null 
     "thinkingBalance",
   ];
   const isValid =
-    typeof receiptNo === "string" &&
+    typeof receiptNo === "string" && receiptNo.trim().length > 0 &&
     requiredFields.every((key) => typeof target[key] === "string");
 
   if (!isValid) return null;
@@ -3583,16 +3751,8 @@ function getCurrentMonthKey() {
 }
 
 function getLedgerReceiptMonthKey(receipt: IssuedThinkingReceipt) {
-  return getMonthKeyFromText(receipt.issuedAt) ?? getMonthKeyFromText(receipt.conversationDate);
-}
-
-function getMonthKeyFromText(value: string) {
-  const match = value.match(/(\d{4})[/年.\-](\d{1,2})(?!\d)/);
-  if (!match) return null;
-
-  const [, year, month] = match;
-  if (Number(month) < 1 || Number(month) > 12) return null;
-  return `${year}-${month.padStart(2, "0")}`;
+  const date = ledgerDate(receipt);
+  return date ? dateKey(date).slice(0, 7) : null;
 }
 
 function buildSettlementStats(data: ThoughtReceipt[]) {

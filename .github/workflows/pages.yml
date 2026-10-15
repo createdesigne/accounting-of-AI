@@ -40,6 +40,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test report periods and summaries
+        run: |
+          TZ=Asia/Tokyo node --experimental-strip-types --test tests/*.test.ts
+          TZ=America/Los_Angeles node --experimental-strip-types --test tests/*.test.ts
+
       - name: Build
         id: production
         run: |
@@ -58,8 +63,8 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           pnpm exec tsc
-          TZ=Asia/Tokyo node --experimental-strip-types --test tests/ledgerPeriods.test.ts
-          TZ=America/Los_Angeles node --experimental-strip-types --test tests/ledgerPeriods.test.ts
+          TZ=Asia/Tokyo node --experimental-strip-types --test tests/*.test.ts
+          TZ=America/Los_Angeles node --experimental-strip-types --test tests/*.test.ts
           pnpm exec vite build --base /accounting-of-AI/preview/month-ledger/
           git rev-parse HEAD > dist/revision.txt
           echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
