@@ -14,6 +14,13 @@ test('empty and single records avoid invented trends in all periods', () => {
   }
 });
 
+test('only the displayed current period uses this week, month or year', () => {
+  for (const [kind, prefix] of [['weekly', '今週は'], ['monthly', '今月は'], ['annual', '今年は']] as const) {
+    assert.ok(buildReportSummary([record('先生')], kind, true).startsWith(prefix));
+    assert.doesNotMatch(buildReportSummary([record('先生')], kind, false), /今週|今月|今年/);
+  }
+});
+
 test('only a strict majority of all records is described as frequent', () => {
   assert.match(buildReportSummary([record('先生'), record('先生'), record('編集者')], 'weekly'), /「先生」.*多め/);
   for (const records of [

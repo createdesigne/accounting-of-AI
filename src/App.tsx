@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, selectPeriod, shiftPeriod } from "./ledgerPeriods";
+import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import { buildReportSummary } from "./reportSummary";
 import {
   ArrowLeft,
@@ -1209,28 +1209,33 @@ function ReportDateText({ value }: { value: string }) {
   ))}</>;
 }
 
-function ReportSummary({ title, period, records, kind, children }: {
+function ReportSummary({ title, period, records, kind, anchor, children }: {
   title: string;
   period: string;
   records: IssuedThinkingReceipt[];
   kind: SettlementView;
+  anchor: Date;
   children?: ReactNode;
 }) {
-  const summary = useMemo(() => buildReportSummary(records, kind), [records, kind]);
+  const { start, end } = periodBounds(anchor, kind);
+  const now = new Date();
+  const isCurrent = now >= start && now < end;
+  const summary = useMemo(() => buildReportSummary(records, kind, isCurrent), [records, kind, isCurrent]);
   return (
-    <section className="report-summary" aria-label={`${title}のサマリー`}>
-      <div className="report-summary-heading">
-        <div><p className="report-summary-period"><ReportDateText value={period} /></p><h2>{title}</h2></div>
-        <span className="report-summary-icon" aria-hidden="true"><BookOpenText size={18} /></span>
+    <div className="report-summary-group">
+      <section className="monthly-hero-card report-summary" aria-label={`${title}のサマリー`}>
+        <p className="report-summary-period"><ReportDateText value={period} /></p>
+        <h2 className="report-summary-message">{summary}</h2>
+      </section>
+      <div className="report-summary-metadata">
+        <div className="report-summary-total">
+          <ReceiptText size={16} aria-hidden="true" />
+          <span className="report-summary-label">思考レシート</span>
+          <p className="report-summary-count"><strong>{records.length}</strong><span>件</span></p>
+        </div>
+        {children && <div className="report-summary-footer">{children}</div>}
       </div>
-      <p className="report-summary-message">{summary}</p>
-      <div className="report-summary-total">
-        <ReceiptText size={16} aria-hidden="true" />
-        <span className="report-summary-label">思考レシート</span>
-        <p className="report-summary-count"><strong>{records.length}</strong><span>件</span></p>
-      </div>
-      {children && <div className="report-summary-footer">{children}</div>}
-    </section>
+    </div>
   );
 }
 
@@ -1310,6 +1315,7 @@ function PeriodLedgerScreen({ kind, anchor, ledgerReceipts, onOpenLedger }: {
         period={formatPeriod(anchor, kind)}
         records={records}
         kind={kind}
+        anchor={anchor}
       />
       <ReportInsights stats={stats} />
       {undated > 0 && <p className="report-date-warning" role="status">日付を確認できない{undated}件は集計に含めていません。帳簿の詳細から日付を確認してください。</p>}
@@ -1375,7 +1381,7 @@ function ThoughtSettlementScreen({
 
   return (
     <section className="stack settlement-screen">
-      <ReportSummary title="私とAIの確定申告" period={`${selectedYear}年1月〜12月`} records={annualReceipts} kind="annual">
+      <ReportSummary title="私とAIの確定申告" period={`${selectedYear}年1月〜12月`} records={annualReceipts} kind="annual" anchor={calendarDate(selectedYear, 0, 1)}>
         <span className="report-recorded-months"><CalendarDays size={16} aria-hidden="true" /><span>記録のある月<strong>{months.filter((count) => count > 0).length}か月 / 12か月</strong></span></span>
         <label className="annual-year-control report-summary-year"><span>対象年</span>
           <select value={selectedYear} onChange={(event) => onYearChange(Number(event.target.value))}>

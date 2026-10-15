@@ -3,9 +3,11 @@ type SummaryPeriod = "weekly" | "monthly" | "annual";
 
 // Presentation only: use one recorded field at a time, never infer a relationship
 // between independently counted AI names, roles, topics or thinking balances.
-export function buildReportSummary(records: readonly SummaryRecord[], kind: SummaryPeriod): string {
+export function buildReportSummary(records: readonly SummaryRecord[], kind: SummaryPeriod, isCurrent = false): string {
   if (records.length === 0) return "この期間の記録はまだありません。";
-  const period = kind === "weekly" ? "この週" : kind === "monthly" ? "この月" : "この年";
+  const period = isCurrent
+    ? kind === "weekly" ? "今週" : kind === "monthly" ? "今月" : "今年"
+    : kind === "weekly" ? "この週" : kind === "monthly" ? "この月" : "この年";
   const fallback = `${period}は、思考レシートが${records.length}件残っています。`;
   try {
     const roles = countLabels(records.map(record => record.aiRole));
