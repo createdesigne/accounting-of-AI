@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, selectPeriod, shiftPeriod } from "./ledgerPeriods";
+import { buildReportSummary } from "./reportSummary";
 import {
   ArrowLeft,
   ArrowRight,
@@ -1208,22 +1209,25 @@ function ReportDateText({ value }: { value: string }) {
   ))}</>;
 }
 
-function ReportSummary({ title, period, countLabel, count, children }: {
+function ReportSummary({ title, period, records, kind, children }: {
   title: string;
   period: string;
-  countLabel: string;
-  count: number;
+  records: IssuedThinkingReceipt[];
+  kind: SettlementView;
   children?: ReactNode;
 }) {
+  const summary = useMemo(() => buildReportSummary(records, kind), [records, kind]);
   return (
     <section className="report-summary" aria-label={`${title}のサマリー`}>
       <div className="report-summary-heading">
         <div><p className="report-summary-period"><ReportDateText value={period} /></p><h2>{title}</h2></div>
-        <span className="report-summary-icon" aria-hidden="true"><ReceiptText size={22} /></span>
+        <span className="report-summary-icon" aria-hidden="true"><BookOpenText size={18} /></span>
       </div>
+      <p className="report-summary-message">{summary}</p>
       <div className="report-summary-total">
-        <span className="report-summary-label">{countLabel}</span>
-        <p className="report-summary-count"><strong>{count}</strong><span>件</span></p>
+        <ReceiptText size={16} aria-hidden="true" />
+        <span className="report-summary-label">思考レシート</span>
+        <p className="report-summary-count"><strong>{records.length}</strong><span>件</span></p>
       </div>
       {children && <div className="report-summary-footer">{children}</div>}
     </section>
@@ -1294,7 +1298,7 @@ function PeriodLedgerScreen({ kind, anchor, ledgerReceipts, onOpenLedger }: {
   ledgerReceipts: IssuedThinkingReceipt[];
   onOpenLedger: (receiptNo?: string) => void;
 }) {
-  const records = selectPeriod(ledgerReceipts, anchor, kind);
+  const records = useMemo(() => selectPeriod(ledgerReceipts, anchor, kind), [ledgerReceipts, anchor, kind]);
   const stats = buildLedgerStats(records);
   const weekly = kind === "weekly";
   const scope = weekly ? "今週" : "対象月";
@@ -1304,8 +1308,8 @@ function PeriodLedgerScreen({ kind, anchor, ledgerReceipts, onOpenLedger }: {
       <ReportSummary
         title={weekly ? "週間申告" : `${anchor.getMonth() + 1}月の思考決算`}
         period={formatPeriod(anchor, kind)}
-        countLabel={weekly ? "今週のレシート数" : "今月のレシート数"}
-        count={stats.count}
+        records={records}
+        kind={kind}
       />
       <ReportInsights stats={stats} />
       {undated > 0 && <p className="report-date-warning" role="status">日付を確認できない{undated}件は集計に含めていません。帳簿の詳細から日付を確認してください。</p>}
@@ -1360,7 +1364,7 @@ function ThoughtSettlementScreen({
     (receipt) => getLedgerReceiptMonthKey(receipt)?.startsWith(`${candidate}-`),
   ));
   const selectedYear = year ?? recordedYears[0] ?? currentYear;
-  const annualReceipts = selectPeriod(ledgerReceipts, calendarDate(selectedYear, 0, 1), "annual");
+  const annualReceipts = useMemo(() => selectPeriod(ledgerReceipts, calendarDate(selectedYear, 0, 1), "annual"), [ledgerReceipts, selectedYear]);
   const ledgerStats = buildLedgerStats(annualReceipts);
   const months = Array.from({ length: 12 }, (_, index) => {
     const monthKey = `${selectedYear}-${String(index + 1).padStart(2, "0")}`;
@@ -1371,7 +1375,7 @@ function ThoughtSettlementScreen({
 
   return (
     <section className="stack settlement-screen">
-      <ReportSummary title="私とAIの確定申告" period={`${selectedYear}年1月〜12月`} countLabel="年間のレシート数" count={ledgerStats.count}>
+      <ReportSummary title="私とAIの確定申告" period={`${selectedYear}年1月〜12月`} records={annualReceipts} kind="annual">
         <span className="report-recorded-months"><CalendarDays size={16} aria-hidden="true" /><span>記録のある月<strong>{months.filter((count) => count > 0).length}か月 / 12か月</strong></span></span>
         <label className="annual-year-control report-summary-year"><span>対象年</span>
           <select value={selectedYear} onChange={(event) => onYearChange(Number(event.target.value))}>
