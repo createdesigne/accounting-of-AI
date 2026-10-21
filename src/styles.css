@@ -2914,7 +2914,7 @@ button {
 }
 
 @page {
-  size: 80mm auto;
+  /* Width and content height are set together by prepareReceiptPage. */
   margin: 0;
 }
 
@@ -2951,6 +2951,7 @@ button {
   .bottom-nav,
   .receipt-url-field,
   .receipt-share-fallback,
+  .receipt-home-back,
   .receipt-save-hint,
   .issued-receipt-panel > .primary-action,
   .issued-receipt-actions,

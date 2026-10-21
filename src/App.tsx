@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import QRCode from "qrcode";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import { buildReportSummary } from "./reportSummary";
+import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
 import { type RawConversation, parseDraftConversation } from "./conversationDraft";
 import {
   ArrowLeft,
@@ -673,6 +674,24 @@ function App() {
     };
   }, [issuedReceipt]);
 
+  useEffect(() => {
+    if (!issuedReceipt || activeTab !== "home") return;
+    const prepare = () => {
+      try {
+        const host = document.querySelector<HTMLElement>(".print-receipt-host");
+        if (host) prepareReceiptPage(host);
+      } catch {
+        setReceiptActionMessage("印刷サイズを設定できませんでした。もう一度お試しください。");
+      }
+    };
+    prepare();
+    window.addEventListener("beforeprint", prepare);
+    return () => {
+      window.removeEventListener("beforeprint", prepare);
+      clearReceiptPage();
+    };
+  }, [issuedReceipt, qrCodeUrl, activeTab]);
+
   function openReader() {
     setIsSettlementOpen(false);
     setActiveTab("home");
@@ -815,6 +834,7 @@ function App() {
   }
 
   function handleTabChange(tab: TabKey) {
+    if (tab === "home") returnToReceiptHome();
     setIsSettlementOpen(false);
     if (tab === "receipts") {
       setLedgerMonth(null);
@@ -1009,7 +1029,30 @@ function App() {
   }
 
   function printIssuedReceipt() {
-    window.print();
+    try {
+      const host = document.querySelector<HTMLElement>(".print-receipt-host");
+      if (!host) return;
+      prepareReceiptPage(host);
+      window.print();
+    } catch {
+      setReceiptActionMessage("印刷サイズを設定できませんでした。もう一度お試しください。");
+    }
+  }
+
+  function returnToReceiptHome() {
+    setIssuedReceipt(null);
+    setConversationCandidate(null);
+    setConversationMessage("");
+    setCandidateIssueMessage("");
+    setLedgerMessage("");
+    setReceiptActionMessage("");
+    const url = new URL(window.location.href);
+    if (url.hash.startsWith("#receipt=")) {
+      url.hash = "";
+      window.history.replaceState(null, "", url);
+    }
+    setActiveTab("home");
+    scrollScreenToTop("auto");
   }
 
   async function copyReceiptUrl() {
@@ -1069,6 +1112,7 @@ function App() {
                   onSave={saveIssuedReceiptToLedger}
                   onPrint={printIssuedReceipt}
                   onCopyUrl={copyReceiptUrl}
+                  onBack={returnToReceiptHome}
                 />
             </section>
           )}
@@ -1955,6 +1999,7 @@ function IssuedReceiptPanel({
   onSave,
   onPrint,
   onCopyUrl,
+  onBack,
 }: {
   receipt: IssuedThinkingReceipt;
   receiptUrl: string;
@@ -1965,9 +2010,13 @@ function IssuedReceiptPanel({
   onSave: () => void;
   onPrint: () => void;
   onCopyUrl: () => void;
+  onBack: () => void;
 }) {
   return (
     <section className="issued-receipt-panel">
+      <button className="secondary-action receipt-home-back" type="button" onClick={onBack}>
+        <ArrowLeft size={18} />レシート画面に戻る
+      </button>
       <h2 className="receipt-print-title">思考レシート</h2>
       <div className="issued-receipt-header">
         <span className="receipt-status-label">発行済み思考レシート</span>
