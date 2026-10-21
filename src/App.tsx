@@ -501,6 +501,7 @@ function App() {
   const [receiptData, setReceiptData] = useState<ThoughtReceipt[]>(loadReceipts);
   const [readerStep, setReaderStep] = useState<ReaderStep>("closed");
   const [scannedReceipt, setScannedReceipt] = useState<ThoughtReceipt | null>(null);
+  const [readerError, setReaderError] = useState("");
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
   const [receiptFilter, setReceiptFilter] = useState<ReceiptFilter | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<TabKey | null>(null);
@@ -677,6 +678,7 @@ function App() {
     setActiveTab("home");
     setReaderStep("scan");
     setScannedReceipt(null);
+    setReaderError("");
     setSaveMessage("");
     scrollScreenToTop("auto");
   }
@@ -684,29 +686,41 @@ function App() {
   function closeReader() {
     setReaderStep("closed");
     setScannedReceipt(null);
+    setReaderError("");
     setActiveTab("home");
     scrollScreenToTop("auto");
   }
 
   function loadSampleReceipt() {
-    setScannedReceipt(normalizeReceipt(sampleScannedReceipt));
+    const savedReceipt = receiptData.find(receipt => receipt.id === sampleScannedReceipt.id);
+    setScannedReceipt(normalizeReceipt(savedReceipt ?? sampleScannedReceipt));
+    setReaderError("");
     setReaderStep("confirm");
     scrollScreenToTop("auto");
   }
 
   function backToReaderScan() {
+    setReaderError("");
     setReaderStep("scan");
     scrollScreenToTop("auto");
   }
 
   function saveScannedReceipt() {
     if (!scannedReceipt) return;
-    const receiptToSave = normalizeReceipt(scannedReceipt);
+    const receiptToSave = { ...normalizeReceipt(scannedReceipt), journal: getReceiptJournal(scannedReceipt) };
 
-    setReceiptData((current) => {
-      const exists = current.some((receipt) => receipt.id === receiptToSave.id);
-      return exists ? current : [receiptToSave, ...current];
-    });
+    const exists = receiptData.some(receipt => receipt.id === receiptToSave.id);
+    const updated = exists
+      ? receiptData.map(receipt => receipt.id === receiptToSave.id ? { ...receipt, journal: receiptToSave.journal } : receipt)
+      : [receiptToSave, ...receiptData];
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      setReaderError("保存できませんでした。ブラウザの保存設定を確認して、もう一度お試しください。調整した数値はこの画面に残っています。");
+      return;
+    }
+    setReceiptData(updated);
+    setReaderError("");
     setReaderStep("closed");
     setScannedReceipt(null);
     setReceiptFilter(null);
@@ -723,6 +737,15 @@ function App() {
       setSaveMessage("");
       setHighlightedReceiptId(null);
     }, 5000);
+  }
+
+  function updateScannedJournalAmount(key: JournalCategoryKey, value: number) {
+    setScannedReceipt(current => {
+      if (!current) return current;
+      const journal = getReceiptJournal(current);
+      return { ...current, journal: { ...journal, [key]: { ...journal[key], amount: normalizeAmount(value, journal[key].amount) } } };
+    });
+    setReaderError("");
   }
 
   function showReceipts(filter: ReceiptFilter | null = null) {
@@ -768,8 +791,7 @@ function App() {
 
   function showAnalysis(focus: AnalysisFocus = null) {
     setIsSettlementOpen(false);
-    setActiveTab("tax");
-    setSettlementView("monthly");
+    setActiveTab("home");
     setAnalysisFocus(focus);
     scrollScreenToTop("auto");
   }
@@ -1028,6 +1050,7 @@ function App() {
                 <button className="secondary-action" type="button" onClick={() => { setConversationCandidate(null); setConversationMessage(""); }}>レシート画面に戻る</button>
               </> : <>
                 <button className="extension-import-button" type="button" onClick={loadExtensionConversation}><ScanLine size={18} />拡張機能データを読み込む</button>
+                <button className="secondary-action" type="button" onClick={loadDemoConversation}>サンプル会話を読み込む</button>
                 <a className="secondary-action" href="./ai-thought-receipt-bridge.zip" download>Chrome拡張機能をダウンロード</a>
                 <p className="extension-setup-hint">ZIPを展開し、Chromeの拡張機能管理画面で「デベロッパーモード」→「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。導入済みの場合は更新版のフォルダーに入れ替えて、拡張機能を再読み込みしてください。</p>
                 {conversationMessage && <button className="secondary-action" type="button" onClick={() => setConversationMessage("")}>レシート画面に戻る</button>}
@@ -1121,7 +1144,10 @@ function App() {
           onLoadSample={loadSampleReceipt}
           onIssueDemoQrReceipt={issueDemoQrReceipt}
           onSave={saveScannedReceipt}
+          onJournalChange={updateScannedJournalAmount}
+          error={readerError}
         />
+        {analysisFocus === "analysis-screen-time" && <ScreenTimeModal stats={stats} onClose={() => setAnalysisFocus(null)} />}
         <ReceiptDetailModal receipt={selectedReceipt} onClose={closeReceiptDetail} />
         <BottomNav activeTab={activeTab} onChange={handleTabChange} />
       </main>
@@ -1571,6 +1597,27 @@ function AnnualTrendChart({
   );
 }
 
+function ScreenTimeModal({ stats, onClose }: { stats: ReturnType<typeof buildStats>; onClose: () => void }) {
+  return (
+    <div className="reader-backdrop" role="dialog" aria-modal="true" aria-labelledby="screen-time-title" onKeyDown={event => { if (event.key === "Escape") onClose(); }}>
+      <div className="reader-modal">
+        <button className="reader-close" type="button" aria-label="閉じる" onClick={onClose} autoFocus><X size={18} /></button>
+        <div className="reader-panel" id="analysis-screen-time">
+          <h2 id="screen-time-title">AIスクリーンタイム</h2>
+          <p className="reader-description">保存済みの思考レシートに記録された合計時間です。</p>
+          <strong className="screen-time-total">{formatHours(stats.totalMinutes)}</strong>
+          <section className="card screen-time-chart">
+            <SectionTitle icon={<Clock3 size={18} />} title="月別AIスクリーンタイム" />
+            <MonthlyBars data={stats.monthlyScreenTime} />
+            <p className="reader-description">2〜5月は既存の見本データです。</p>
+          </section>
+          <button className="secondary-action" type="button" onClick={onClose}>レシートに戻る</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PreviousSettlementModal({ onClose }: { onClose: () => void }) {
   const modalRef = useRef<HTMLDivElement | null>(null);
 
@@ -1979,6 +2026,10 @@ function IssuedReceiptPanel({
           共有URLをコピーする
         </button>
       </div>
+      {actionMessage.includes("復元URL欄") && <label className="candidate-field receipt-share-fallback">
+        <span>復元URL</span>
+        <input type="text" readOnly value={receiptUrl} aria-label="復元URL" onFocus={event => event.currentTarget.select()} />
+      </label>}
       {ledgerMessage && (
         <div className="candidate-message issued" role="status">
           <CheckCircle2 size={18} />
@@ -2676,6 +2727,8 @@ function ReceiptReaderModal({
   onLoadSample,
   onIssueDemoQrReceipt,
   onSave,
+  onJournalChange,
+  error,
 }: {
   step: ReaderStep;
   receipt: ThoughtReceipt | null;
@@ -2684,6 +2737,8 @@ function ReceiptReaderModal({
   onLoadSample: () => void;
   onIssueDemoQrReceipt: () => void;
   onSave: () => void;
+  onJournalChange: (key: JournalCategoryKey, value: number) => void;
+  error: string;
 }) {
   const modalRef = useRef<HTMLDivElement | null>(null);
 
@@ -2763,7 +2818,8 @@ function ReceiptReaderModal({
               <ConfirmRow label="自分で決めたこと" value={receipt.selfDecision} />
               <ConfirmRow label="思考残高" value={receipt.thoughtBalance} />
             </div>
-            <ConfirmJournalBlock receipt={receipt} />
+            <ConfirmJournalBlock receipt={receipt} onChange={onJournalChange} />
+            {error && <p className="qr-error" role="alert">{error}</p>}
             <button className="primary-action" type="button" onClick={onSave}>
               <CheckCircle2 size={18} />
               思考帳簿に保存
@@ -2778,55 +2834,37 @@ function ReceiptReaderModal({
   );
 }
 
-function ConfirmJournalBlock({ receipt }: { receipt: ThoughtReceipt }) {
+function ConfirmJournalBlock({ receipt, onChange }: { receipt: ThoughtReceipt; onChange: (key: JournalCategoryKey, value: number) => void }) {
   const journal = getReceiptJournal(receipt);
-
   return (
     <div className="confirm-journal">
       <SectionTitle icon={<BookOpenText size={18} />} title="思考仕訳" />
-      <JournalConfirmLine
-        label="AI借入"
-        amount={journal.aiBorrowing.amount}
-        text={journal.aiBorrowing.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="自己出資"
-        amount={journal.selfCapital.amount}
-        text={journal.selfCapital.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="思考資産"
-        amount={journal.thoughtAsset.amount}
-        text={journal.thoughtAsset.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="思考支出"
-        amount={journal.thoughtExpense.amount}
-        text={journal.thoughtExpense.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="自己判断残高"
-        amount={journal.selfDecisionBalance.amount}
-        text={journal.selfDecisionBalance.text}
-      />
+      <p className="journal-slider-help">保存する前に、各項目を1〜5のバーで調整できます。</p>
+      {journalCategories.map(category => <JournalConfirmLine
+        key={category.key}
+        id={`preview-journal-${category.key}`}
+        label={category.label}
+        amount={getJournalAmount(journal, category.key)}
+        text={category.key === "selfDecisionBalance" ? journal.selfDecisionBalance.text : journal[category.key].tags.join(" / ")}
+        onChange={value => onChange(category.key, value)}
+      />)}
     </div>
   );
 }
 
-function JournalConfirmLine({
-  label,
-  amount,
-  text,
-}: {
+function JournalConfirmLine({ id, label, amount, text, onChange }: {
+  id: string;
   label: string;
   amount: number;
   text: string;
+  onChange: (value: number) => void;
 }) {
   return (
-    <div className="journal-confirm-line">
-      <strong>{label}：{amount}</strong>
-      <span>{text}</span>
-    </div>
+    <label className="journal-confirm-line" htmlFor={id}>
+      <strong>{label}：<output htmlFor={id}>{amount}</output></strong>
+      <input id={id} type="range" min="1" max="5" step="1" value={amount} aria-label={label} aria-describedby={`${id}-hint`} onChange={event => onChange(Number(event.target.value))} />
+      <span id={`${id}-hint`}>{text}</span>
+    </label>
   );
 }
 
