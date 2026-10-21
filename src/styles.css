@@ -641,6 +641,18 @@ button {
   margin-bottom: 14px;
 }
 
+.extension-setup-hint {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.extension-import-card a.secondary-action {
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
 .import-card-heading,
 .candidate-form-heading {
   display: grid;

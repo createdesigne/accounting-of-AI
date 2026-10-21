@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import QRCode from "qrcode";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import { buildReportSummary } from "./reportSummary";
+import { type RawConversation, parseDraftConversation } from "./conversationDraft";
 import {
   ArrowLeft,
   ArrowRight,
@@ -69,14 +70,6 @@ type ReceiptFilter =
 type ConversationMessage = {
   role?: string;
   text?: string;
-};
-
-type RawConversation = {
-  aiService?: string;
-  url?: string;
-  capturedAt?: string;
-  conversationTitle?: string;
-  messages?: ConversationMessage[];
 };
 
 type ThoughtReceiptCandidate = {
@@ -617,7 +610,15 @@ function App() {
     if (restoreReceiptFromUrl()) return;
 
     const draftConversation = restoreDraftConversationFromUrl();
-    if (!draftConversation) return;
+    if (!draftConversation) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has(DRAFT_QUERY_KEY) || new URLSearchParams(url.hash.slice(1)).has(DRAFT_QUERY_KEY)) {
+        setConversationMessage("会話データを読み込めませんでした。Chrome拡張機能からもう一度送ってください。");
+        setActiveTab("home");
+        clearDraftQueryParam();
+      }
+      return;
+    }
 
     try {
       localStorage.setItem(RAW_CONVERSATION_KEY, JSON.stringify(draftConversation));
@@ -843,7 +844,8 @@ function App() {
         return;
       }
 
-      const parsed = JSON.parse(stored) as RawConversation;
+      const parsed = parseDraftConversation(stored);
+      if (!parsed) throw new Error("Invalid conversation");
       const candidate = classifyConversation(parsed);
       setConversationCandidate(candidate);
       setCandidateIssueMessage("");
@@ -1004,7 +1006,7 @@ function App() {
       <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
         <Header onOpenSettlement={openSettlement} />
         <div className="screen" ref={screenRef}>
-          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
+          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
             <HomeScreen
               stats={stats}
               receipts={receiptData}
@@ -1013,6 +1015,24 @@ function App() {
               onStartReader={openReader}
               onOpenReceipt={setSelectedReceipt}
             />
+          )}
+          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
+            <section className="extension-import-card extension-import-card-top" aria-label="Chrome拡張機能との連携">
+              <div className="import-card-heading">
+                <strong>{conversationCandidate ? "取り込んだ会話を確認" : "Chrome拡張機能から取り込む"}</strong>
+                <p>AIの会話ページで拡張機能の「思考レシート化する」を押すと、ここで内容を確認できます。保存は確認・発行したあとに行います。</p>
+              </div>
+              {conversationMessage && <p className="candidate-message" role="status">{conversationMessage}</p>}
+              {conversationCandidate ? <>
+                <ConversationCandidateForm candidate={conversationCandidate} issueMessage={candidateIssueMessage} onChange={updateConversationCandidate} onIssue={issueConversationCandidate} />
+                <button className="secondary-action" type="button" onClick={() => { setConversationCandidate(null); setConversationMessage(""); }}>レシート画面に戻る</button>
+              </> : <>
+                <button className="extension-import-button" type="button" onClick={loadExtensionConversation}><ScanLine size={18} />拡張機能データを読み込む</button>
+                <a className="secondary-action" href="./ai-thought-receipt-bridge.zip" download>Chrome拡張機能をダウンロード</a>
+                <p className="extension-setup-hint">ZIPを展開し、Chromeの拡張機能管理画面で「デベロッパーモード」→「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。導入済みの場合は更新版のフォルダーに入れ替えて、拡張機能を再読み込みしてください。</p>
+                {conversationMessage && <button className="secondary-action" type="button" onClick={() => setConversationMessage("")}>レシート画面に戻る</button>}
+              </>}
+            </section>
           )}
           {!isSettlementOpen && activeTab === "home" && issuedReceipt && (
             <section className="extension-import-card extension-import-card-top print-receipt-host">
@@ -1835,6 +1855,7 @@ function CandidateFieldControl({
         <span>{label}</span>
         <select
           id={id}
+          aria-label={label}
           value={value}
           onChange={(event) => onChange(field, event.target.value)}
         >
@@ -1854,6 +1875,7 @@ function CandidateFieldControl({
         <span>{label}</span>
         <textarea
           id={id}
+          aria-label={label}
           value={value}
           rows={3}
           onChange={(event) => onChange(field, event.target.value)}
@@ -1867,6 +1889,7 @@ function CandidateFieldControl({
       <span>{label}</span>
       <input
         id={id}
+        aria-label={label}
         type="text"
         value={value}
         onChange={(event) => onChange(field, event.target.value)}
@@ -3432,8 +3455,13 @@ function createReceiptUrl(receipt: IssuedThinkingReceipt) {
 function clearDraftQueryParam() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  if (!url.searchParams.has(DRAFT_QUERY_KEY)) return;
+  const hash = new URLSearchParams(url.hash.slice(1));
+  if (!url.searchParams.has(DRAFT_QUERY_KEY) && !hash.has(DRAFT_QUERY_KEY)) return;
   url.searchParams.delete(DRAFT_QUERY_KEY);
+  if (hash.has(DRAFT_QUERY_KEY)) {
+    hash.delete(DRAFT_QUERY_KEY);
+    url.hash = hash.toString();
+  }
   const nextUrl = `${url.pathname}${url.search}${url.hash}`;
   window.history.replaceState({}, "", nextUrl);
 }
@@ -3442,64 +3470,11 @@ function restoreDraftConversationFromUrl() {
   if (typeof window === "undefined") return null;
 
   const params = new URLSearchParams(window.location.search);
-  const draft = params.get(DRAFT_QUERY_KEY);
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const draft = hash.has(DRAFT_QUERY_KEY) ? hash.get(DRAFT_QUERY_KEY) : params.get(DRAFT_QUERY_KEY);
   if (!draft) return null;
 
   return parseDraftConversation(draft);
-}
-
-function parseDraftConversation(draft: string) {
-  const candidates = Array.from(
-    new Set([
-      draft,
-      safeDecodeURIComponent(draft),
-      decodeBase64UrlUtf8(draft),
-    ].filter((value): value is string => Boolean(value))),
-  );
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate) as RawConversation;
-      if (isRawConversation(parsed)) return parsed;
-    } catch {
-      // 次のデコード候補を試します。
-    }
-  }
-
-  return null;
-}
-
-function safeDecodeURIComponent(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
-}
-
-function decodeBase64UrlUtf8(value: string) {
-  try {
-    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-    const binary = window.atob(padded);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return null;
-  }
-}
-
-function isRawConversation(value: unknown): value is RawConversation {
-  if (!value || typeof value !== "object") return false;
-  const conversation = value as RawConversation;
-  return (
-    (conversation.messages === undefined || Array.isArray(conversation.messages)) &&
-    (conversation.aiService === undefined || typeof conversation.aiService === "string") &&
-    (conversation.url === undefined || typeof conversation.url === "string") &&
-    (conversation.capturedAt === undefined || typeof conversation.capturedAt === "string") &&
-    (conversation.conversationTitle === undefined ||
-      typeof conversation.conversationTitle === "string")
-  );
 }
 
 function restoreReceiptFromUrl() {

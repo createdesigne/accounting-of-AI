@@ -1,7 +1,12 @@
-const WEB_APP_URL = "http://localhost:5173/";
+const WEB_APP_URLS = {
+  production: "https://createdesigne.github.io/accounting-of-AI/",
+  preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
+  local: "http://localhost:5173/accounting-of-AI/",
+};
 
 const button = document.getElementById("createReceipt");
 const statusText = document.getElementById("status");
+const destination = document.getElementById("destination");
 
 button.addEventListener("click", async () => {
   setStatus("会話を読み取っています...", true);
@@ -12,16 +17,21 @@ button.addEventListener("click", async () => {
       throw new Error("現在のタブを取得できませんでした。");
     }
 
-    const [{ result }] = await chrome.scripting.executeScript({
+    if (inferAiService(tab.url) === "その他") {
+      throw new Error("ChatGPT・Claude・Geminiなど、対応するAIの会話ページで実行してください。");
+    }
+    const [extracted] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractConversationFromPage,
     });
 
-    const rawConversation = normalizeConversation(result, tab);
-    const draft = encodeURIComponent(JSON.stringify(rawConversation));
-    const url = `${WEB_APP_URL}?draft=${draft}`;
+    const rawConversation = normalizeConversation(extracted?.result, tab);
+    const url = new URL(WEB_APP_URLS[destination.value] || WEB_APP_URLS.production);
+    // A fragment is read by the app; conversation text is not sent to Pages in the HTTP URL.
+    url.hash = new URLSearchParams({ draft: JSON.stringify(rawConversation) }).toString();
+    if (url.href.length > 1500000) throw new Error("会話が長すぎるため送れません。短い会話でお試しください。");
 
-    await chrome.tabs.create({ url });
+    await chrome.tabs.create({ url: url.href });
     setStatus("Webアプリを開きました。", false);
   } catch (error) {
     console.error(error);
@@ -32,30 +42,23 @@ button.addEventListener("click", async () => {
 function setStatus(message, busy) {
   statusText.textContent = message;
   button.disabled = busy;
+  destination.disabled = busy;
 }
 
 function normalizeConversation(extracted, tab) {
   const capturedAt = formatCapturedAt(new Date());
   const url = extracted?.url || tab.url || "";
   const title = extracted?.conversationTitle || tab.title || "無題の会話";
-  const messages = Array.isArray(extracted?.messages) ? extracted.messages : [];
+  const messages = Array.isArray(extracted?.messages) ? extracted.messages.filter(message => typeof message?.text === "string" && message.text.trim()) : [];
+  if (!messages.length) throw new Error("会話本文が見つかりません。会話を表示し直して、もう一度お試しください。");
 
   return {
     aiService: extracted?.aiService || inferAiService(url),
     url,
     capturedAt,
     conversationTitle: cleanupTitle(title),
-    messages: messages.length > 0 ? messages : fallbackMessages(title),
+    messages,
   };
-}
-
-function fallbackMessages(title) {
-  return [
-    {
-      role: "user",
-      text: cleanupText(title || "現在のAI会話"),
-    },
-  ];
 }
 
 function formatCapturedAt(date) {
@@ -76,14 +79,11 @@ function cleanupText(text) {
 }
 
 function inferAiService(url) {
-  const value = String(url || "").toLowerCase();
-  if (value.includes("chatgpt.com")) return "ChatGPT";
-  if (value.includes("gemini.google.com")) return "Gemini";
-  if (value.includes("claude.ai")) return "Claude";
-  if (value.includes("perplexity.ai")) return "Perplexity";
-  if (value.includes("notebooklm.google.com")) return "NotebookLM";
-  if (value.includes("copilot.microsoft.com")) return "Copilot";
-  return "その他";
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") return "その他";
+    return ({ "chatgpt.com": "ChatGPT", "chat.openai.com": "ChatGPT", "gemini.google.com": "Gemini", "claude.ai": "Claude", "www.perplexity.ai": "Perplexity", "perplexity.ai": "Perplexity", "notebooklm.google.com": "NotebookLM", "copilot.microsoft.com": "Copilot" })[parsed.hostname] || "その他";
+  } catch { return "その他"; }
 }
 
 function extractConversationFromPage() {
@@ -101,7 +101,7 @@ function extractConversationFromPage() {
 
   function inferServiceFromLocation(currentUrl) {
     const value = String(currentUrl || "").toLowerCase();
-    if (value.includes("chatgpt.com")) return "ChatGPT";
+    if (value.includes("chatgpt.com") || value.includes("chat.openai.com")) return "ChatGPT";
     if (value.includes("gemini.google.com")) return "Gemini";
     if (value.includes("claude.ai")) return "Claude";
     if (value.includes("perplexity.ai")) return "Perplexity";

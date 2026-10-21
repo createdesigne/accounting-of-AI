@@ -1,20 +1,27 @@
-# AI Thought Receipt Bridge
+# AI Thought Receipt Bridge（Chrome拡張機能）
 
-Chrome extension prototype for sending the current AI conversation page to the local web app.
+表示中のAI会話を「私とAIの確定申告」へ渡し、確認・修正してから思考レシートとして保存できます。
 
-## Load in Chrome
+## インストール・更新
 
-1. Open `chrome://extensions/`.
-2. Enable Developer mode.
-3. Click "Load unpacked".
-4. Select this `chrome-extension` folder.
+1. サイトの「レシート」画面下部から「Chrome拡張機能をダウンロード」を押します。
+2. ZIPを展開します（Windowsは右クリック→「すべて展開」）。
+3. Chromeで `chrome://extensions/` を開き、「デベロッパーモード」を有効にします。
+4. 「パッケージ化されていない拡張機能を読み込む」から、展開した `ai-thought-receipt-bridge` フォルダーを選択します。
+5. 導入済みの場合は、元のフォルダーのファイルを更新版で置き換え、Chromeの拡張機能管理画面で再読み込みします。別フォルダーへ入れる場合は古い拡張機能を削除し、重複させないでください。ブラウザーに保存した帳簿データには影響しません。
 
-## Flow
+## 使い方
 
-1. Open an AI conversation page.
-2. Click the extension icon.
-3. Click `思考レシート化する`.
-4. The extension opens `http://localhost:5173/?draft=...`.
-5. The web app reads the `draft` parameter and shows a thought receipt candidate.
+1. ChatGPT・Claude・Geminiなどの会話ページで、本文を表示します。
+2. 拡張機能を開き、送信先を確認して「思考レシート化する」を押します。既定は本番サイトです。
+3. Webアプリで候補の内容を確認・修正し、「レシートを発行する」→「帳簿に保存する」を押します。取り込みだけでは帳簿に保存しません。
 
-The web app URL is currently fixed to `http://localhost:5173/` in `popup.js`.
+送信先は本番、確認用プレビュー、ローカル開発用（`http://localhost:5173/accounting-of-AI/`）から選べます。プレビューの帳簿は本番と別です。
+
+会話の取得はボタンを押したときだけ行います。画面に読み込まれた直近20メッセージを対象とし、サイト側の表示変更・未読み込み・ログイン状態によっては取得できません。空の会話をサンプルデータで補うことはしません。
+
+新しい送信形式は `#draft=...` です。会話本文をHTTPリクエストのURLに含めず、Webアプリが候補を作ったあと、アドレスバーからも取り除きます。既存の `?draft=...` 形式も引き続き読み込めます。
+
+## 開発時
+
+`chrome-extension` のファイルを変更したら、リポジトリ直下で `python3 scripts/package-extension.py` を実行して配布ZIPを更新してください。`python3 scripts/package-extension.py --check` で一致を確認できます。依存ライブラリの追加は不要です。
