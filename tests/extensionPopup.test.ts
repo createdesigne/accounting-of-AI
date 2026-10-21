@@ -23,6 +23,7 @@ test('extension defaults to production and sends actual text in a fragment, not 
   assert.equal(url.origin + url.pathname, 'https://createdesigne.github.io/accounting-of-AI/');
   assert.equal(url.search, '');
   const raw = JSON.parse(new URLSearchParams(url.hash.slice(1)).get('draft')!);
+  assert.deepEqual(Object.keys(raw).sort(), ['aiService', 'capturedAt', 'conversationTitle', 'messages', 'url']);
   assert.deepEqual(raw.messages, conversation.messages);
   assert.equal(raw.conversationTitle, conversation.conversationTitle);
   assert.equal(page.elements.createReceipt.disabled, false);
@@ -38,8 +39,7 @@ test('AI names come from the actual tab host for ChatGPT, Claude and Gemini', as
     const page = popup({ source }); await page.run();
     const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
     assert.equal(raw.aiService, service);
-    assert.match(page.elements.status.textContent, /あなた1件・AI0件/);
-    assert.match(page.elements.status.textContent, /片方の話者のみ/);
+    assert.equal(page.elements.status.textContent, 'Webアプリを開きました。');
   }
 });
 test('unknown speaker roles are never guessed as user or assistant', async () => {

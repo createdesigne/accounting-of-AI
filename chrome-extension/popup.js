@@ -32,10 +32,7 @@ button.addEventListener("click", async () => {
     if (url.href.length > 1500000) throw new Error("会話が長すぎるため送れません。短い会話でお試しください。");
 
     await chrome.tabs.create({ url: url.href });
-    const userCount = rawConversation.messages.filter(message => message.role === "user").length;
-    const assistantCount = rawConversation.messages.length - userCount;
-    const note = userCount && assistantCount ? "" : "片方の話者のみ取得できました。候補の内容を確認してください。";
-    setStatus(`Webアプリを開きました。${rawConversation.aiService}：あなた${userCount}件・AI${assistantCount}件。${note}`, false);
+    setStatus("Webアプリを開きました。", false);
   } catch (error) {
     console.error(error);
     setStatus(error instanceof Error ? error.message : "会話データを送れませんでした。", false);
@@ -53,7 +50,7 @@ function normalizeConversation(extracted, tab) {
   const url = extracted?.url || tab.url || "";
   const title = extracted?.conversationTitle || tab.title || "無題の会話";
   const messages = Array.isArray(extracted?.messages) ? extracted.messages.filter(message => (message?.role === "user" || message?.role === "assistant") && typeof message.text === "string" && message.text.trim()) : [];
-  if (!messages.length) throw new Error(`${inferAiService(tab.url)}の会話本文が見つかりません。会話と回答を表示し、生成完了後にもう一度お試しください。画面の形式によっては未対応の場合があります。`);
+  if (!messages.length) throw new Error("会話本文が見つかりません。会話を表示し直して、もう一度お試しください。");
 
   return {
     aiService: inferAiService(tab.url),
