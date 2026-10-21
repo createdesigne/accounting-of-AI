@@ -51,6 +51,7 @@
   </head>
   <body>
     <h1>AI会話を思考レシートへ</h1>
+    <p>ChatGPT・Claude・Geminiの会話に対応。会話と回答を表示し、生成が終わってから実行してください。読み込まれた本文の直近20メッセージを取り込みます。</p>
     <label>送信先<select id="destination"><option value="production">本番サイト</option><option value="preview">確認用プレビュー</option><option value="local">ローカル開発用</option></select></label>
     <button id="createReceipt" type="button">思考レシート化する</button>
     <p id="status" role="status" aria-live="polite">ボタンを押すと、現在のAI会話を選択したWebアプリへ渡します。内容を確認してから帳簿に保存できます。</p>

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Thought Receipt Bridge",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "AI conversation pages can be sent to the thought receipt web app.",
   "permissions": ["activeTab", "scripting", "tabs"],
   "action": {

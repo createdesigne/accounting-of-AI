@@ -6,6 +6,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const ts = require('typescript');
+const { providers, conversationMarkup } = require('./aiConversationFixtures.cjs');
 const root = path.resolve(__dirname, '../..');
 const base = process.env.APP_URL || 'http://127.0.0.1:4173/accounting-of-AI/';
 const artifacts = process.env.ARTIFACT_DIR || '/tmp/accounting-extension-proof';
@@ -19,9 +20,9 @@ function existingFixture(name) {
   }
   visit(source); return JSON.parse(JSON.stringify(result));
 }
-const demo = existingFixture('demoConversation');
+const provider = process.env.AI_PROVIDER || 'ChatGPT';
+const demo = { ...existingFixture('demoConversation'), aiService: provider };
 const samples = existingFixture('sampleThinkingLedgerReceipts');
-const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 (async () => {
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
   try {
@@ -29,8 +30,8 @@ const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').rep
     const errors = []; context.on('page', p => p.on('pageerror', e => errors.push(e.message)));
     await context.addInitScript(samples => { if (location.hostname === '127.0.0.1' && localStorage.getItem('thinkingLedger') === null) localStorage.setItem('thinkingLedger', JSON.stringify(samples)); }, samples);
     const ai = await context.newPage();
-    await ai.route('https://chatgpt.com/c/bridge-check', route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: `<h1>${escape(demo.conversationTitle)}</h1><main>${demo.messages.map(m => `<div data-message-author-role="${m.role}">${escape(m.text)}</div>`).join('')}</main>` }));
-    await ai.goto('https://chatgpt.com/c/bridge-check');
+    await ai.route(providers[provider].url, route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: conversationMarkup(provider, demo.messages, demo.conversationTitle) }));
+    await ai.goto(providers[provider].url);
     const popup = await context.newPage(); let sentUrl;
     await popup.exposeFunction('testQuery', () => [{ id: 1, url: ai.url(), title: demo.conversationTitle }]);
     await popup.exposeFunction('testExecute', async fn => [{ result: await ai.evaluate(`(${fn})()`) }]);
@@ -49,10 +50,12 @@ const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').rep
     const url = new URL(sentUrl); assert.equal(url.search, '');
     const raw = JSON.parse(new URLSearchParams(url.hash.slice(1)).get('draft'));
     assert.deepEqual(raw.messages, demo.messages);
+    assert.equal(raw.aiService, provider);
     const app = await context.newPage(); await app.clock.setFixedTime(new Date('2026-10-21T03:00:00Z'));
     await app.goto(base + url.hash);
     await app.getByLabel('相談テーマ', { exact: true }).waitFor();
     assert.equal(await app.getByLabel('相談テーマ', { exact: true }).inputValue(), demo.conversationTitle);
+    assert.equal(await app.getByLabel('使用AI', { exact: true }).inputValue(), provider);
     assert.equal(new URL(app.url()).hash, '');
     assert.deepEqual(await app.evaluate(() => JSON.parse(localStorage.getItem('thinkingLedger'))), samples);
     for (const width of [320, 390, 768]) {
@@ -60,7 +63,7 @@ const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').rep
       assert.ok(await app.locator('.screen').evaluate(e => e.scrollWidth <= e.clientWidth));
     }
     await app.setViewportSize({ width: 390, height: 844 });
-    await app.screenshot({ path: path.join(artifacts, 'extension-candidate.png') });
+    await app.screenshot({ path: path.join(artifacts, 'extension-candidate-' + provider.toLowerCase() + '.png') });
     await app.getByLabel('AIに求めた役割', { exact: true }).selectOption('先生');
     await app.getByRole('button', { name: 'レシートを発行する', exact: true }).click();
     await app.getByRole('button', { name: '帳簿に保存する', exact: true }).click();
@@ -69,6 +72,7 @@ const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').rep
     assert.equal(saved.length, samples.length + 1);
     for (const sample of samples) assert.deepEqual(saved.find(r => r.receiptNo === sample.receiptNo), sample);
     assert.equal(saved.find(r => !samples.some(s => s.receiptNo === r.receiptNo)).aiRole, '先生');
+    assert.equal(saved.find(r => !samples.some(s => s.receiptNo === r.receiptNo)).aiService, provider);
     await app.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '決算', exact: true }).click();
     for (const [label, expected] of [['週間', '1件'], ['月間', '1件'], ['年間', '6件']]) {
       await app.getByRole('navigation', { name: '決算の期間' }).getByRole('button', { name: label, exact: true }).click();
@@ -98,7 +102,7 @@ const escape = text => text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').rep
     const download = await downloadPromise; assert.equal(await download.failure(), null);
     assert.deepEqual(fs.readFileSync(await download.path()), fs.readFileSync(path.join(root, 'public/ai-thought-receipt-bridge.zip')));
     assert.deepEqual(errors, []);
-    console.log('PASS: shipped popup + real DOM extraction + receiver/edit/issue/save; original samples unchanged; duplicate save prevented; weekly/monthly/annual reflect import; legacy URLs; malformed/empty data; 320–768px; actual ZIP download; no page errors. Chrome API boundary simulated.');
+    console.log(`PASS (${provider} representative markup): shipped popup + real DOM extraction + receiver/edit/issue/save; original samples unchanged; duplicate save prevented; weekly/monthly/annual reflect import; legacy URLs; malformed/empty data; 320–768px; actual ZIP download; no page errors. Chrome API boundary simulated.`);
     await context.close();
   } finally { await browser.close(); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

@@ -33,6 +33,20 @@ test('preview/local destinations preserve the application base path', async () =
     assert.ok(page.created[0].startsWith(expected + '#draft='));
   }
 });
+test('AI names come from the actual tab host for ChatGPT, Claude and Gemini', async () => {
+  for (const [source, service] of [['https://chat.openai.com/c/example', 'ChatGPT'], ['https://claude.ai/chat/example', 'Claude'], ['https://gemini.google.com/app/example', 'Gemini']]) {
+    const page = popup({ source }); await page.run();
+    const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
+    assert.equal(raw.aiService, service);
+    assert.match(page.elements.status.textContent, /あなた1件・AI0件/);
+    assert.match(page.elements.status.textContent, /片方の話者のみ/);
+  }
+});
+test('unknown speaker roles are never guessed as user or assistant', async () => {
+  const page = popup({ result: { ...conversation, messages: [{ role: 'system', text: 'Not a conversation turn' }] } }); await page.run();
+  assert.equal(page.created.length, 0);
+  assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
+});
 test('empty extraction never substitutes title or demo conversation', async () => {
   const page = popup({ result: { ...conversation, messages: [] } }); await page.run();
   assert.equal(page.created.length, 0);
@@ -40,7 +54,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.elements.createReceipt.disabled, false);
 });
 test('unsupported or lookalike domains are not read', async () => {
-  for (const source of ['chrome://extensions/', 'https://example.com/', 'https://chatgpt.com.example.com/', 'https://example.com/?chatgpt.com']) {
+  for (const source of ['chrome://extensions/', 'https://example.com/', 'https://chatgpt.com.example.com/', 'https://example.com/?chatgpt.com', 'https://constructor/', 'https://__proto__/']) {
     const page = popup({ source }); await page.run();
     assert.equal(page.injections(), 0); assert.equal(page.created.length, 0);
   }
