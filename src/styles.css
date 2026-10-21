@@ -641,6 +641,18 @@ button {
   margin-bottom: 14px;
 }
 
+.extension-setup-hint {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.extension-import-card a.secondary-action {
+  box-sizing: border-box;
+  text-decoration: none;
+}
+
 .import-card-heading,
 .candidate-form-heading {
   display: grid;
@@ -2420,8 +2432,10 @@ button {
 }
 
 .reader-backdrop {
-  position: absolute;
+  position: fixed;
   inset: 0;
+  width: min(100vw, 430px);
+  margin-inline: auto;
   z-index: 20;
   display: grid;
   place-items: center;
@@ -2677,6 +2691,42 @@ button {
   font-size: 13px;
 }
 
+.journal-slider-help {
+  margin: 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.journal-confirm-line input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.journal-confirm-line input[type="range"]:focus-visible {
+  outline: 3px solid #2563eb;
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+.screen-time-total {
+  color: #1e40af;
+  font-size: 28px;
+}
+
+.screen-time-chart .monthly-bars {
+  height: auto;
+  row-gap: 16px;
+}
+
+.screen-time-chart .month-col {
+  height: 172px;
+}
+
 .journal-confirm-line span {
   color: #64748b;
   font-size: 12px;
@@ -2864,7 +2914,7 @@ button {
 }
 
 @page {
-  size: 80mm auto;
+  /* Width and content height are set together by prepareReceiptPage. */
   margin: 0;
 }
 
@@ -2900,6 +2950,8 @@ button {
   .screen > :not(.print-receipt-host),
   .bottom-nav,
   .receipt-url-field,
+  .receipt-share-fallback,
+  .receipt-home-back,
   .receipt-save-hint,
   .issued-receipt-panel > .primary-action,
   .issued-receipt-actions,

@@ -2,6 +2,8 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import QRCode from "qrcode";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import { buildReportSummary } from "./reportSummary";
+import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
+import { type RawConversation, parseDraftConversation } from "./conversationDraft";
 import {
   ArrowLeft,
   ArrowRight,
@@ -69,14 +71,6 @@ type ReceiptFilter =
 type ConversationMessage = {
   role?: string;
   text?: string;
-};
-
-type RawConversation = {
-  aiService?: string;
-  url?: string;
-  capturedAt?: string;
-  conversationTitle?: string;
-  messages?: ConversationMessage[];
 };
 
 type ThoughtReceiptCandidate = {
@@ -508,6 +502,7 @@ function App() {
   const [receiptData, setReceiptData] = useState<ThoughtReceipt[]>(loadReceipts);
   const [readerStep, setReaderStep] = useState<ReaderStep>("closed");
   const [scannedReceipt, setScannedReceipt] = useState<ThoughtReceipt | null>(null);
+  const [readerError, setReaderError] = useState("");
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
   const [receiptFilter, setReceiptFilter] = useState<ReceiptFilter | null>(null);
   const [filterOrigin, setFilterOrigin] = useState<TabKey | null>(null);
@@ -617,7 +612,15 @@ function App() {
     if (restoreReceiptFromUrl()) return;
 
     const draftConversation = restoreDraftConversationFromUrl();
-    if (!draftConversation) return;
+    if (!draftConversation) {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has(DRAFT_QUERY_KEY) || new URLSearchParams(url.hash.slice(1)).has(DRAFT_QUERY_KEY)) {
+        setConversationMessage("会話データを読み込めませんでした。Chrome拡張機能からもう一度送ってください。");
+        setActiveTab("home");
+        clearDraftQueryParam();
+      }
+      return;
+    }
 
     try {
       localStorage.setItem(RAW_CONVERSATION_KEY, JSON.stringify(draftConversation));
@@ -671,11 +674,30 @@ function App() {
     };
   }, [issuedReceipt]);
 
+  useEffect(() => {
+    if (!issuedReceipt || activeTab !== "home") return;
+    const prepare = () => {
+      try {
+        const host = document.querySelector<HTMLElement>(".print-receipt-host");
+        if (host) prepareReceiptPage(host);
+      } catch {
+        setReceiptActionMessage("印刷サイズを設定できませんでした。もう一度お試しください。");
+      }
+    };
+    prepare();
+    window.addEventListener("beforeprint", prepare);
+    return () => {
+      window.removeEventListener("beforeprint", prepare);
+      clearReceiptPage();
+    };
+  }, [issuedReceipt, qrCodeUrl, activeTab]);
+
   function openReader() {
     setIsSettlementOpen(false);
     setActiveTab("home");
     setReaderStep("scan");
     setScannedReceipt(null);
+    setReaderError("");
     setSaveMessage("");
     scrollScreenToTop("auto");
   }
@@ -683,29 +705,41 @@ function App() {
   function closeReader() {
     setReaderStep("closed");
     setScannedReceipt(null);
+    setReaderError("");
     setActiveTab("home");
     scrollScreenToTop("auto");
   }
 
   function loadSampleReceipt() {
-    setScannedReceipt(normalizeReceipt(sampleScannedReceipt));
+    const savedReceipt = receiptData.find(receipt => receipt.id === sampleScannedReceipt.id);
+    setScannedReceipt(normalizeReceipt(savedReceipt ?? sampleScannedReceipt));
+    setReaderError("");
     setReaderStep("confirm");
     scrollScreenToTop("auto");
   }
 
   function backToReaderScan() {
+    setReaderError("");
     setReaderStep("scan");
     scrollScreenToTop("auto");
   }
 
   function saveScannedReceipt() {
     if (!scannedReceipt) return;
-    const receiptToSave = normalizeReceipt(scannedReceipt);
+    const receiptToSave = { ...normalizeReceipt(scannedReceipt), journal: getReceiptJournal(scannedReceipt) };
 
-    setReceiptData((current) => {
-      const exists = current.some((receipt) => receipt.id === receiptToSave.id);
-      return exists ? current : [receiptToSave, ...current];
-    });
+    const exists = receiptData.some(receipt => receipt.id === receiptToSave.id);
+    const updated = exists
+      ? receiptData.map(receipt => receipt.id === receiptToSave.id ? { ...receipt, journal: receiptToSave.journal } : receipt)
+      : [receiptToSave, ...receiptData];
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {
+      setReaderError("保存できませんでした。ブラウザの保存設定を確認して、もう一度お試しください。調整した数値はこの画面に残っています。");
+      return;
+    }
+    setReceiptData(updated);
+    setReaderError("");
     setReaderStep("closed");
     setScannedReceipt(null);
     setReceiptFilter(null);
@@ -722,6 +756,15 @@ function App() {
       setSaveMessage("");
       setHighlightedReceiptId(null);
     }, 5000);
+  }
+
+  function updateScannedJournalAmount(key: JournalCategoryKey, value: number) {
+    setScannedReceipt(current => {
+      if (!current) return current;
+      const journal = getReceiptJournal(current);
+      return { ...current, journal: { ...journal, [key]: { ...journal[key], amount: normalizeAmount(value, journal[key].amount) } } };
+    });
+    setReaderError("");
   }
 
   function showReceipts(filter: ReceiptFilter | null = null) {
@@ -767,8 +810,7 @@ function App() {
 
   function showAnalysis(focus: AnalysisFocus = null) {
     setIsSettlementOpen(false);
-    setActiveTab("tax");
-    setSettlementView("monthly");
+    setActiveTab("home");
     setAnalysisFocus(focus);
     scrollScreenToTop("auto");
   }
@@ -792,6 +834,7 @@ function App() {
   }
 
   function handleTabChange(tab: TabKey) {
+    if (tab === "home") returnToReceiptHome();
     setIsSettlementOpen(false);
     if (tab === "receipts") {
       setLedgerMonth(null);
@@ -843,7 +886,8 @@ function App() {
         return;
       }
 
-      const parsed = JSON.parse(stored) as RawConversation;
+      const parsed = parseDraftConversation(stored);
+      if (!parsed) throw new Error("Invalid conversation");
       const candidate = classifyConversation(parsed);
       setConversationCandidate(candidate);
       setCandidateIssueMessage("");
@@ -985,7 +1029,30 @@ function App() {
   }
 
   function printIssuedReceipt() {
-    window.print();
+    try {
+      const host = document.querySelector<HTMLElement>(".print-receipt-host");
+      if (!host) return;
+      prepareReceiptPage(host);
+      window.print();
+    } catch {
+      setReceiptActionMessage("印刷サイズを設定できませんでした。もう一度お試しください。");
+    }
+  }
+
+  function returnToReceiptHome() {
+    setIssuedReceipt(null);
+    setConversationCandidate(null);
+    setConversationMessage("");
+    setCandidateIssueMessage("");
+    setLedgerMessage("");
+    setReceiptActionMessage("");
+    const url = new URL(window.location.href);
+    if (url.hash.startsWith("#receipt=")) {
+      url.hash = "";
+      window.history.replaceState(null, "", url);
+    }
+    setActiveTab("home");
+    scrollScreenToTop("auto");
   }
 
   async function copyReceiptUrl() {
@@ -1004,7 +1071,7 @@ function App() {
       <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
         <Header onOpenSettlement={openSettlement} />
         <div className="screen" ref={screenRef}>
-          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
+          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
             <HomeScreen
               stats={stats}
               receipts={receiptData}
@@ -1013,6 +1080,25 @@ function App() {
               onStartReader={openReader}
               onOpenReceipt={setSelectedReceipt}
             />
+          )}
+          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
+            <section className="extension-import-card extension-import-card-top" aria-label="Chrome拡張機能との連携">
+              <div className="import-card-heading">
+                <strong>{conversationCandidate ? "取り込んだ会話を確認" : "Chrome拡張機能から取り込む"}</strong>
+                <p>AIの会話ページで拡張機能の「思考レシート化する」を押すと、ここで内容を確認できます。保存は確認・発行したあとに行います。</p>
+              </div>
+              {conversationMessage && <p className="candidate-message" role="status">{conversationMessage}</p>}
+              {conversationCandidate ? <>
+                <ConversationCandidateForm candidate={conversationCandidate} issueMessage={candidateIssueMessage} onChange={updateConversationCandidate} onIssue={issueConversationCandidate} />
+                <button className="secondary-action" type="button" onClick={() => { setConversationCandidate(null); setConversationMessage(""); }}>レシート画面に戻る</button>
+              </> : <>
+                <button className="extension-import-button" type="button" onClick={loadExtensionConversation}><ScanLine size={18} />拡張機能データを読み込む</button>
+                <button className="secondary-action" type="button" onClick={loadDemoConversation}>サンプル会話を読み込む</button>
+                <a className="secondary-action" href="./ai-thought-receipt-bridge.zip" download>Chrome拡張機能をダウンロード</a>
+                <p className="extension-setup-hint">ZIPを展開し、Chromeの拡張機能管理画面で「デベロッパーモード」→「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。導入済みの場合は更新版のフォルダーに入れ替えて、拡張機能を再読み込みしてください。</p>
+                {conversationMessage && <button className="secondary-action" type="button" onClick={() => setConversationMessage("")}>レシート画面に戻る</button>}
+              </>}
+            </section>
           )}
           {!isSettlementOpen && activeTab === "home" && issuedReceipt && (
             <section className="extension-import-card extension-import-card-top print-receipt-host">
@@ -1026,6 +1112,7 @@ function App() {
                   onSave={saveIssuedReceiptToLedger}
                   onPrint={printIssuedReceipt}
                   onCopyUrl={copyReceiptUrl}
+                  onBack={returnToReceiptHome}
                 />
             </section>
           )}
@@ -1101,7 +1188,10 @@ function App() {
           onLoadSample={loadSampleReceipt}
           onIssueDemoQrReceipt={issueDemoQrReceipt}
           onSave={saveScannedReceipt}
+          onJournalChange={updateScannedJournalAmount}
+          error={readerError}
         />
+        {analysisFocus === "analysis-screen-time" && <ScreenTimeModal stats={stats} onClose={() => setAnalysisFocus(null)} />}
         <ReceiptDetailModal receipt={selectedReceipt} onClose={closeReceiptDetail} />
         <BottomNav activeTab={activeTab} onChange={handleTabChange} />
       </main>
@@ -1551,6 +1641,27 @@ function AnnualTrendChart({
   );
 }
 
+function ScreenTimeModal({ stats, onClose }: { stats: ReturnType<typeof buildStats>; onClose: () => void }) {
+  return (
+    <div className="reader-backdrop" role="dialog" aria-modal="true" aria-labelledby="screen-time-title" onKeyDown={event => { if (event.key === "Escape") onClose(); }}>
+      <div className="reader-modal">
+        <button className="reader-close" type="button" aria-label="閉じる" onClick={onClose} autoFocus><X size={18} /></button>
+        <div className="reader-panel" id="analysis-screen-time">
+          <h2 id="screen-time-title">AIスクリーンタイム</h2>
+          <p className="reader-description">保存済みの思考レシートに記録された合計時間です。</p>
+          <strong className="screen-time-total">{formatHours(stats.totalMinutes)}</strong>
+          <section className="card screen-time-chart">
+            <SectionTitle icon={<Clock3 size={18} />} title="月別AIスクリーンタイム" />
+            <MonthlyBars data={stats.monthlyScreenTime} />
+            <p className="reader-description">2〜5月は既存の見本データです。</p>
+          </section>
+          <button className="secondary-action" type="button" onClick={onClose}>レシートに戻る</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PreviousSettlementModal({ onClose }: { onClose: () => void }) {
   const modalRef = useRef<HTMLDivElement | null>(null);
 
@@ -1835,6 +1946,7 @@ function CandidateFieldControl({
         <span>{label}</span>
         <select
           id={id}
+          aria-label={label}
           value={value}
           onChange={(event) => onChange(field, event.target.value)}
         >
@@ -1854,6 +1966,7 @@ function CandidateFieldControl({
         <span>{label}</span>
         <textarea
           id={id}
+          aria-label={label}
           value={value}
           rows={3}
           onChange={(event) => onChange(field, event.target.value)}
@@ -1867,6 +1980,7 @@ function CandidateFieldControl({
       <span>{label}</span>
       <input
         id={id}
+        aria-label={label}
         type="text"
         value={value}
         onChange={(event) => onChange(field, event.target.value)}
@@ -1885,6 +1999,7 @@ function IssuedReceiptPanel({
   onSave,
   onPrint,
   onCopyUrl,
+  onBack,
 }: {
   receipt: IssuedThinkingReceipt;
   receiptUrl: string;
@@ -1895,9 +2010,13 @@ function IssuedReceiptPanel({
   onSave: () => void;
   onPrint: () => void;
   onCopyUrl: () => void;
+  onBack: () => void;
 }) {
   return (
     <section className="issued-receipt-panel">
+      <button className="secondary-action receipt-home-back" type="button" onClick={onBack}>
+        <ArrowLeft size={18} />レシート画面に戻る
+      </button>
       <h2 className="receipt-print-title">思考レシート</h2>
       <div className="issued-receipt-header">
         <span className="receipt-status-label">発行済み思考レシート</span>
@@ -1956,6 +2075,10 @@ function IssuedReceiptPanel({
           共有URLをコピーする
         </button>
       </div>
+      {actionMessage.includes("復元URL欄") && <label className="candidate-field receipt-share-fallback">
+        <span>復元URL</span>
+        <input type="text" readOnly value={receiptUrl} aria-label="復元URL" onFocus={event => event.currentTarget.select()} />
+      </label>}
       {ledgerMessage && (
         <div className="candidate-message issued" role="status">
           <CheckCircle2 size={18} />
@@ -2653,6 +2776,8 @@ function ReceiptReaderModal({
   onLoadSample,
   onIssueDemoQrReceipt,
   onSave,
+  onJournalChange,
+  error,
 }: {
   step: ReaderStep;
   receipt: ThoughtReceipt | null;
@@ -2661,6 +2786,8 @@ function ReceiptReaderModal({
   onLoadSample: () => void;
   onIssueDemoQrReceipt: () => void;
   onSave: () => void;
+  onJournalChange: (key: JournalCategoryKey, value: number) => void;
+  error: string;
 }) {
   const modalRef = useRef<HTMLDivElement | null>(null);
 
@@ -2740,7 +2867,8 @@ function ReceiptReaderModal({
               <ConfirmRow label="自分で決めたこと" value={receipt.selfDecision} />
               <ConfirmRow label="思考残高" value={receipt.thoughtBalance} />
             </div>
-            <ConfirmJournalBlock receipt={receipt} />
+            <ConfirmJournalBlock receipt={receipt} onChange={onJournalChange} />
+            {error && <p className="qr-error" role="alert">{error}</p>}
             <button className="primary-action" type="button" onClick={onSave}>
               <CheckCircle2 size={18} />
               思考帳簿に保存
@@ -2755,55 +2883,37 @@ function ReceiptReaderModal({
   );
 }
 
-function ConfirmJournalBlock({ receipt }: { receipt: ThoughtReceipt }) {
+function ConfirmJournalBlock({ receipt, onChange }: { receipt: ThoughtReceipt; onChange: (key: JournalCategoryKey, value: number) => void }) {
   const journal = getReceiptJournal(receipt);
-
   return (
     <div className="confirm-journal">
       <SectionTitle icon={<BookOpenText size={18} />} title="思考仕訳" />
-      <JournalConfirmLine
-        label="AI借入"
-        amount={journal.aiBorrowing.amount}
-        text={journal.aiBorrowing.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="自己出資"
-        amount={journal.selfCapital.amount}
-        text={journal.selfCapital.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="思考資産"
-        amount={journal.thoughtAsset.amount}
-        text={journal.thoughtAsset.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="思考支出"
-        amount={journal.thoughtExpense.amount}
-        text={journal.thoughtExpense.tags.join(" / ")}
-      />
-      <JournalConfirmLine
-        label="自己判断残高"
-        amount={journal.selfDecisionBalance.amount}
-        text={journal.selfDecisionBalance.text}
-      />
+      <p className="journal-slider-help">保存する前に、各項目を1〜5のバーで調整できます。</p>
+      {journalCategories.map(category => <JournalConfirmLine
+        key={category.key}
+        id={`preview-journal-${category.key}`}
+        label={category.label}
+        amount={getJournalAmount(journal, category.key)}
+        text={category.key === "selfDecisionBalance" ? journal.selfDecisionBalance.text : journal[category.key].tags.join(" / ")}
+        onChange={value => onChange(category.key, value)}
+      />)}
     </div>
   );
 }
 
-function JournalConfirmLine({
-  label,
-  amount,
-  text,
-}: {
+function JournalConfirmLine({ id, label, amount, text, onChange }: {
+  id: string;
   label: string;
   amount: number;
   text: string;
+  onChange: (value: number) => void;
 }) {
   return (
-    <div className="journal-confirm-line">
-      <strong>{label}：{amount}</strong>
-      <span>{text}</span>
-    </div>
+    <label className="journal-confirm-line" htmlFor={id}>
+      <strong>{label}：<output htmlFor={id}>{amount}</output></strong>
+      <input id={id} type="range" min="1" max="5" step="1" value={amount} aria-label={label} aria-describedby={`${id}-hint`} onChange={event => onChange(Number(event.target.value))} />
+      <span id={`${id}-hint`}>{text}</span>
+    </label>
   );
 }
 
@@ -3432,8 +3542,13 @@ function createReceiptUrl(receipt: IssuedThinkingReceipt) {
 function clearDraftQueryParam() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  if (!url.searchParams.has(DRAFT_QUERY_KEY)) return;
+  const hash = new URLSearchParams(url.hash.slice(1));
+  if (!url.searchParams.has(DRAFT_QUERY_KEY) && !hash.has(DRAFT_QUERY_KEY)) return;
   url.searchParams.delete(DRAFT_QUERY_KEY);
+  if (hash.has(DRAFT_QUERY_KEY)) {
+    hash.delete(DRAFT_QUERY_KEY);
+    url.hash = hash.toString();
+  }
   const nextUrl = `${url.pathname}${url.search}${url.hash}`;
   window.history.replaceState({}, "", nextUrl);
 }
@@ -3442,64 +3557,11 @@ function restoreDraftConversationFromUrl() {
   if (typeof window === "undefined") return null;
 
   const params = new URLSearchParams(window.location.search);
-  const draft = params.get(DRAFT_QUERY_KEY);
+  const hash = new URLSearchParams(window.location.hash.slice(1));
+  const draft = hash.has(DRAFT_QUERY_KEY) ? hash.get(DRAFT_QUERY_KEY) : params.get(DRAFT_QUERY_KEY);
   if (!draft) return null;
 
   return parseDraftConversation(draft);
-}
-
-function parseDraftConversation(draft: string) {
-  const candidates = Array.from(
-    new Set([
-      draft,
-      safeDecodeURIComponent(draft),
-      decodeBase64UrlUtf8(draft),
-    ].filter((value): value is string => Boolean(value))),
-  );
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate) as RawConversation;
-      if (isRawConversation(parsed)) return parsed;
-    } catch {
-      // 次のデコード候補を試します。
-    }
-  }
-
-  return null;
-}
-
-function safeDecodeURIComponent(value: string) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return null;
-  }
-}
-
-function decodeBase64UrlUtf8(value: string) {
-  try {
-    const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
-    const binary = window.atob(padded);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return null;
-  }
-}
-
-function isRawConversation(value: unknown): value is RawConversation {
-  if (!value || typeof value !== "object") return false;
-  const conversation = value as RawConversation;
-  return (
-    (conversation.messages === undefined || Array.isArray(conversation.messages)) &&
-    (conversation.aiService === undefined || typeof conversation.aiService === "string") &&
-    (conversation.url === undefined || typeof conversation.url === "string") &&
-    (conversation.capturedAt === undefined || typeof conversation.capturedAt === "string") &&
-    (conversation.conversationTitle === undefined ||
-      typeof conversation.conversationTitle === "string")
-  );
 }
 
 function restoreReceiptFromUrl() {
