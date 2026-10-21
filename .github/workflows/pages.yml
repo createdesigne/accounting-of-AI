@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       production_html_sha: ${{ steps.production.outputs.html_sha }}
+      production_extension_sha: ${{ steps.production.outputs.extension_sha }}
       preview_html_sha: ${{ steps.preview.outputs.html_sha }}
       preview_extension_sha: ${{ steps.preview.outputs.extension_sha }}
       preview_commit: ${{ steps.preview.outputs.commit }}
@@ -49,8 +50,10 @@ jobs:
       - name: Build
         id: production
         run: |
+          python3 scripts/package-extension.py --check
           pnpm build
           echo "html_sha=$(sha256sum dist/index.html | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+          echo "extension_sha=$(sha256sum dist/ai-thought-receipt-bridge.zip | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout preview
         uses: actions/checkout@v4
@@ -98,6 +101,7 @@ jobs:
         env:
           PAGE_URL: ${{ steps.deployment.outputs.page_url }}
           PRODUCTION_HTML_SHA: ${{ needs.build.outputs.production_html_sha }}
+          PRODUCTION_EXTENSION_SHA: ${{ needs.build.outputs.production_extension_sha }}
           PREVIEW_HTML_SHA: ${{ needs.build.outputs.preview_html_sha }}
           PREVIEW_EXTENSION_SHA: ${{ needs.build.outputs.preview_extension_sha }}
           PREVIEW_COMMIT: ${{ needs.build.outputs.preview_commit }}
@@ -106,10 +110,12 @@ jobs:
           page_url="${PAGE_URL%/}"
           for attempt in $(seq 1 20); do
             if curl --fail --silent --show-error "$page_url/?revision=$PREVIEW_COMMIT" -o /tmp/live-production.html &&
+               curl --fail --silent --show-error "$page_url/ai-thought-receipt-bridge.zip?revision=$PREVIEW_COMMIT" -o /tmp/live-production-extension.zip &&
                curl --fail --silent --show-error "$page_url/preview/month-ledger/?revision=$PREVIEW_COMMIT" -o /tmp/live-preview.html &&
                curl --fail --silent --show-error "$page_url/preview/month-ledger/revision.txt?revision=$PREVIEW_COMMIT" -o /tmp/live-revision.txt &&
                curl --fail --silent --show-error "$page_url/preview/month-ledger/ai-thought-receipt-bridge.zip?revision=$PREVIEW_COMMIT" -o /tmp/live-extension.zip &&
                test "$(sha256sum /tmp/live-production.html | cut -d ' ' -f 1)" = "$PRODUCTION_HTML_SHA" &&
+               test "$(sha256sum /tmp/live-production-extension.zip | cut -d ' ' -f 1)" = "$PRODUCTION_EXTENSION_SHA" &&
                test "$(sha256sum /tmp/live-preview.html | cut -d ' ' -f 1)" = "$PREVIEW_HTML_SHA" &&
                test "$(sha256sum /tmp/live-extension.zip | cut -d ' ' -f 1)" = "$PREVIEW_EXTENSION_SHA" &&
                test "$(cat /tmp/live-revision.txt)" = "$PREVIEW_COMMIT"; then
