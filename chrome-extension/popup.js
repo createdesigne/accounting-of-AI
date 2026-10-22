@@ -7,6 +7,9 @@ const WEB_APP_URLS = {
 const button = document.getElementById("createReceipt");
 const statusText = document.getElementById("status");
 const destination = document.getElementById("destination");
+const extensionVersion = globalThis.chrome?.runtime?.getManifest?.().version || "不明";
+const versionText = document.getElementById("version");
+if (versionText) versionText.textContent = `バージョン ${extensionVersion}`;
 
 button.addEventListener("click", async () => {
   setStatus("会話を読み取っています...", true);
@@ -50,7 +53,7 @@ function normalizeConversation(extracted, tab) {
   const url = extracted?.url || tab.url || "";
   const title = extracted?.conversationTitle || tab.title || "無題の会話";
   const messages = Array.isArray(extracted?.messages) ? extracted.messages.filter(message => (message?.role === "user" || message?.role === "assistant") && typeof message.text === "string" && message.text.trim()) : [];
-  if (!messages.length) throw new Error("会話本文が見つかりません。会話を表示し直して、もう一度お試しください。");
+  if (!messages.length) throw new Error(`会話本文が見つかりません（${inferAiService(tab.url)}／拡張機能 ${extensionVersion}）。質問と回答が表示された会話を開き、回答の生成が終わってから実行してください。改善しない場合は会話ページを再読み込みし、このサービス名とバージョンをお知らせください。`);
 
   return {
     aiService: inferAiService(tab.url),
@@ -88,7 +91,7 @@ function inferAiService(url) {
 }
 
 // Keep this function self-contained: Chrome serializes it into the active page.
-function extractConversationFromPage() {
+async function extractConversationFromPage() {
   const services = {
     "chatgpt.com": "ChatGPT", "chat.openai.com": "ChatGPT", "claude.ai": "Claude",
     "gemini.google.com": "Gemini", "perplexity.ai": "Perplexity", "www.perplexity.ai": "Perplexity",
@@ -96,13 +99,20 @@ function extractConversationFromPage() {
   };
   const aiService = window.location.protocol === "https:" && Object.prototype.hasOwnProperty.call(services, window.location.hostname) ? services[window.location.hostname] : null;
   if (!aiService) return { messages: [] };
-  const scope = document.querySelector("main, [role='main']") || document.body;
+  // Some layouts keep a hidden/empty main before the actual conversation, or
+  // render the chat outside main. Speaker markers, not the first main, identify it.
+  const scope = document.body;
+  const navigation = "nav, aside, [role='navigation'], [role='menu']";
   const explicitRoles = {
     user: "[data-message-author-role='user']",
     assistant: "[data-message-author-role='assistant']",
   };
   const providers = {
-    ChatGPT: { ...explicitRoles, userBody: "[data-testid='user-message'], .whitespace-pre-wrap", assistantBody: ".markdown, [data-message-content]" },
+    ChatGPT: {
+      user: explicitRoles.user + ", article[data-turn='user'], [data-testid^='conversation-turn-'][data-turn='user']",
+      assistant: explicitRoles.assistant + ", article[data-turn='assistant'], [data-testid^='conversation-turn-'][data-turn='assistant']",
+      userBody: "[data-testid='user-message'], .whitespace-pre-wrap", assistantBody: ".markdown, [data-message-content]",
+    },
     Claude: {
       user: "[data-testid='user-message'], [data-message-author-role='user']",
       assistant: "[data-testid='assistant-message'], .font-claude-response, [data-message-author-role='assistant']",
@@ -121,34 +131,45 @@ function extractConversationFromPage() {
   };
   const config = providers[aiService];
   const selector = config.user + ", " + config.assistant;
-  const nodes = Array.from(scope.querySelectorAll(selector));
-  const nodeSet = new Set(nodes);
-  const messages = nodes.filter(node => {
-    if (!isVisible(node) || node.closest("nav, aside")) return false;
-    if (node.matches(config.user) && node.matches(config.assistant)) return false;
-    const role = node.matches(config.user) ? "user" : "assistant";
-    const opposite = role === "user" ? config.assistant : config.user;
-    if (node.querySelector(opposite)) return false;
-    // One DOM message may match multiple nested markers; keep its outer wrapper.
-    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
-      if (nodeSet.has(parent) && parent.matches(role === "user" ? config.user : config.assistant)
-        && !parent.querySelector(opposite)) return false;
-    }
-    return true;
-  }).map(node => {
-    const role = node.matches(config.user) ? "user" : "assistant";
-    const bodySelector = role === "user" ? config.userBody : config.assistantBody;
-    const bodies = bodySelector ? Array.from(node.querySelectorAll(bodySelector)).filter(isVisible) : [];
-    const outerBodies = bodies.filter(body => !bodies.some(parent => parent !== body && parent.contains(body)));
-    const text = (outerBodies.length ? outerBodies : [node]).map(readBodyText).filter(Boolean).join("\n\n");
-    return { role, text };
-  }).filter(message => message.text.length > 0);
+  // A bounded retry accommodates UI hydration without collecting background
+  // conversations, sending empty data, or waiting indefinitely.
+  let messages = [];
+  for (let attempt = 0; attempt < 5; attempt++) {
+    messages = readMessages();
+    if (messages.length || attempt === 4) break;
+    await new Promise(resolve => setTimeout(resolve, 300));
+  }
   return {
     aiService,
     url: window.location.href,
     conversationTitle: findTitle(),
     messages: messages.slice(-20),
   };
+
+  function readMessages() {
+    const nodes = Array.from(scope.querySelectorAll(selector));
+    const nodeSet = new Set(nodes);
+    return nodes.filter(node => {
+      if (!isVisible(node) || node.closest(navigation)) return false;
+      if (node.matches(config.user) && node.matches(config.assistant)) return false;
+      const role = node.matches(config.user) ? "user" : "assistant";
+      const opposite = role === "user" ? config.assistant : config.user;
+      if (node.querySelector(opposite)) return false;
+      // One DOM message may match multiple nested markers; keep its outer wrapper.
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        if (nodeSet.has(parent) && parent.matches(role === "user" ? config.user : config.assistant)
+          && !parent.querySelector(opposite)) return false;
+      }
+      return true;
+    }).map(node => {
+      const role = node.matches(config.user) ? "user" : "assistant";
+      const bodySelector = role === "user" ? config.userBody : config.assistantBody;
+      const bodies = bodySelector ? Array.from(node.querySelectorAll(bodySelector)).filter(isVisible) : [];
+      const outerBodies = bodies.filter(body => !bodies.some(parent => parent !== body && parent.contains(body)));
+      const text = (outerBodies.length ? outerBodies : [node]).map(readBodyText).filter(Boolean).join("\n\n");
+      return { role, text };
+    }).filter(message => message.text.length > 0);
+  }
 
   function isVisible(element) {
     for (let current = element; current; current = current.parentElement) {
@@ -164,7 +185,7 @@ function extractConversationFromPage() {
     function read(node) {
       if (node.nodeType === Node.TEXT_NODE) return node.textContent;
       if (node.nodeType !== Node.ELEMENT_NODE || !isVisible(node)
-        || node.matches("button, [role='button'], input, textarea, select, nav, aside, script, style, svg")) return "";
+        || node.matches("button, [role='button'], input, textarea, select, nav, aside, [role='navigation'], [role='menu'], script, style, svg")) return "";
       if (node.tagName === "BR") return "\n";
       const text = Array.from(node.childNodes).map(read).join("");
       return /^(P|DIV|LI|PRE|BLOCKQUOTE|H[1-6]|TR)$/.test(node.tagName) ? "\n" + text + "\n" : text;
@@ -173,7 +194,7 @@ function extractConversationFromPage() {
 
   function findTitle() {
     const selectors = "[data-testid='conversation-title'], [data-test-id='conversation-title'], [data-testid='chat-title'], h1";
-    const heading = Array.from(scope.querySelectorAll(selectors)).filter(node => isVisible(node) && !node.closest("nav, aside")).map(readBodyText)
+    const heading = Array.from(scope.querySelectorAll(selectors)).filter(node => isVisible(node) && !node.closest(navigation)).map(readBodyText)
       .find(text => text && !/^(ChatGPT|Claude|Gemini|Perplexity|NotebookLM|Copilot)$/i.test(text));
     return String(heading || document.title || "").replace(/\s*[-|–—]\s*(ChatGPT|Claude|Gemini|Perplexity|NotebookLM|Copilot).*$/i, "")
       .replace(/\s+/g, " ").trim() || aiService + "の会話";
