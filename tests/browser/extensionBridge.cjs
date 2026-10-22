@@ -21,6 +21,7 @@ function existingFixture(name) {
   visit(source); return JSON.parse(JSON.stringify(result));
 }
 const provider = process.env.AI_PROVIDER || 'ChatGPT';
+const extensionVersion = JSON.parse(fs.readFileSync(path.join(root, 'chrome-extension/manifest.json'), 'utf8')).version;
 const demo = { ...existingFixture('demoConversation'), aiService: provider };
 const samples = existingFixture('sampleThinkingLedgerReceipts');
 (async () => {
@@ -30,19 +31,24 @@ const samples = existingFixture('sampleThinkingLedgerReceipts');
     const errors = []; context.on('page', p => p.on('pageerror', e => errors.push(e.message)));
     await context.addInitScript(samples => { if (location.hostname === '127.0.0.1' && localStorage.getItem('thinkingLedger') === null) localStorage.setItem('thinkingLedger', JSON.stringify(samples)); }, samples);
     const ai = await context.newPage();
-    await ai.route(providers[provider].url, route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: conversationMarkup(provider, demo.messages, demo.conversationTitle) }));
+    let markup = conversationMarkup(provider, demo.messages, demo.conversationTitle);
+    if (provider === 'ChatGPT' && process.env.CHATGPT_LAYOUT === 'alternate') {
+      markup = '<main hidden></main>' + markup.replaceAll('<article data-message-author-role=', '<article data-turn=');
+    }
+    await ai.route(providers[provider].url, route => route.fulfill({ contentType: 'text/html; charset=utf-8', body: markup }));
     await ai.goto(providers[provider].url);
     const popup = await context.newPage(); let sentUrl;
     await popup.exposeFunction('testQuery', () => [{ id: 1, url: ai.url(), title: demo.conversationTitle }]);
     await popup.exposeFunction('testExecute', async fn => [{ result: await ai.evaluate(`(${fn})()`) }]);
     await popup.exposeFunction('testCreate', ({ url }) => { sentUrl = url; });
-    await popup.addInitScript(() => {
-      window.chrome = Object.assign(window.chrome || {}, { tabs: { query: () => window.testQuery(), create: args => window.testCreate(args) }, scripting: { executeScript: args => window.testExecute(args.func.toString()) } });
-    });
+    await popup.addInitScript(version => {
+      window.chrome = Object.assign(window.chrome || {}, { runtime: { getManifest: () => ({ version }) }, tabs: { query: () => window.testQuery(), create: args => window.testCreate(args) }, scripting: { executeScript: args => window.testExecute(args.func.toString()) } });
+    }, extensionVersion);
     const popupUrl = new URL('/extension-proof/popup.html', base).href;
     await popup.route(popupUrl, r => r.fulfill({ contentType: 'text/html; charset=utf-8', body: fs.readFileSync(path.join(root, 'chrome-extension/popup.html'), 'utf8') }));
     await popup.route(new URL('popup.js', popupUrl).href, r => r.fulfill({ contentType: 'application/javascript', body: fs.readFileSync(path.join(root, 'chrome-extension/popup.js'), 'utf8') }));
     await popup.goto(popupUrl);
+    assert.equal(await popup.locator('#version').textContent(), 'バージョン ' + extensionVersion);
     assert.equal(await popup.getByLabel('送信先').inputValue(), 'production');
     await popup.getByLabel('送信先').selectOption('local');
     await popup.getByRole('button', { name: '思考レシート化する', exact: true }).click();
