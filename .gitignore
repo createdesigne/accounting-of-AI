@@ -5,3 +5,5 @@ AGENTS.md
 .env.*
 !.env.example
 *.local
+__pycache__/
+*.py[cod]

@@ -1,0 +1,77 @@
+name: Pull request checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  application:
+    name: Unit tests, typecheck and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test in Asia/Tokyo
+        env:
+          TZ: Asia/Tokyo
+        run: node --experimental-strip-types --test tests/*.test.ts
+
+      - name: Test in America/Los_Angeles
+        env:
+          TZ: America/Los_Angeles
+        run: node --experimental-strip-types --test tests/*.test.ts
+
+      - name: Typecheck
+        run: pnpm exec tsc
+
+      - name: Build
+        run: pnpm build
+
+  extension-package:
+    name: Extension ZIP (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Test line-ending normalization
+        run: python -m unittest tests/test_package_extension.py
+
+      - name: Check extension ZIP
+        run: python scripts/package-extension.py --check
