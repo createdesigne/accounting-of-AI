@@ -1,0 +1,7 @@
+chrome-extension/manifest.json text eol=lf
+chrome-extension/popup.html text eol=lf
+chrome-extension/popup.js text eol=lf
+chrome-extension/README.md text eol=lf
+scripts/package-extension.py text eol=lf
+.github/workflows/*.yml text eol=lf
+public/ai-thought-receipt-bridge.zip binary
