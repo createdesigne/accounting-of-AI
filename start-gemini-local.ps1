@@ -22,7 +22,7 @@ try {
     $env:AI_ALLOWED_ORIGINS = "http://127.0.0.1:5173,http://localhost:5173"
     if ($EnableGemini) {
         Write-Host "このモードでは、文章の送信操作を行うとGoogleのGemini APIを利用し、料金が発生する場合があります。"
-        Write-Host "学校による外部アプリでの利用許可・モデル・利用上限・送信するデータを確認してください。"
+        Write-Host "このアプリで使用許可済みのキーを使い、モデル・利用上限・送信するデータを確認してください。"
         $consent = Read-Host "上記を確認し、Geminiへの送信を有効にしますか（はい／いいえ）"
         if ($consent -ne "はい") { Write-Host "有効化を中止しました。"; return }
         if (-not $Model) { $Model = Read-Host "学校が許可したモデルID（AI Studioに表示されるgemini-...）" }
