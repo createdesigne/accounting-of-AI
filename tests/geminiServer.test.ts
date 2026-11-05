@@ -10,7 +10,7 @@ import { createAiClient, AiClientError } from '../src/aiClient.ts';
 const testKey = 'test-key-not-a-real-api-key';
 const model = 'gemini-test-model';
 const input = { text: '元の文章です。\n\n自分の判断を残します。', instruction: '意味を変えず短く整える' };
-const success = (parts = [{ text: '接続確認用の文章（テスト応答）' }]) => ({ candidates: [{ finishReason: 'STOP', content: { parts } }] });
+const success = (content = [{ type: 'text', text: '接続確認用の文章（テスト応答）' }]) => ({ id: 'test-interaction', status: 'completed', steps: [{ type: 'model_output', content }] });
 const provider = (fetchImpl) => createGeminiProvider({ apiKey: testKey, model, fetchImpl });
 const rejectsCode = (promise, code) => assert.rejects(promise, e => e instanceof AiError && e.code === code && !e.message.includes(testKey));
 async function start(options = {}) {
@@ -28,17 +28,26 @@ test('Gemini is disabled by default, and disabled mode does not inspect keys or 
   for (const config of [{ AI_ENABLED: 'yes' }, { AI_ENABLED: 'true', AI_PROVIDER: 'unknown' }, { AI_ENABLED: 'true' }, { AI_ENABLED: 'true', GEMINI_API_KEY: testKey, GEMINI_MODEL: '../other-host' }]) assert.throws(() => providerFromEnvironment(config), e => e.code === 'INVALID_CONFIG');
 });
 
-test('Gemini request uses a fixed HTTPS endpoint, header key, selected model, no redirect/retry, and selected text only', async () => {
+test('Gemini accepts an opaque server secret binding without inspecting or printing its value', () => {
+  let calls = 0;
+  assert.ok(providerFromEnvironment({ AI_ENABLED: 'true', GEMINI_API_KEY: 'opaque proxy placeholder value' }, { fetchImpl: async () => { calls++; } }));
+  assert.equal(calls, 0);
+  assert.throws(() => createGeminiProvider({ apiKey: 'invalid\nheader', model }), e => e.code === 'INVALID_CONFIG');
+});
+
+test('Real Google SDK uses Interactions, header key, selected model, no history/retry/continuation, and selected text only', async () => {
   let calls = 0; const before = JSON.stringify(input); const controller = new AbortController();
   const adapter = provider(async (url, options) => {
     calls++;
-    assert.equal(url, `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
-    assert.ok(!url.includes(testKey)); assert.equal(options.headers['x-goog-api-key'], testKey);
-    assert.equal(options.redirect, 'error'); assert.equal(options.signal, controller.signal);
+    assert.equal(url, 'https://generativelanguage.googleapis.com/v1beta/interactions');
+    assert.ok(!url.includes(testKey)); assert.equal(new Headers(options.headers).get('x-goog-api-key'), testKey);
+    assert.equal(options.redirect, 'error'); assert.equal(options.signal.aborted, false);
     const body = JSON.parse(options.body);
-    assert.deepEqual(body.contents, [{ role: 'user', parts: [{ text: JSON.stringify(input) }] }]);
-    assert.deepEqual(body.generationConfig, { candidateCount: 1, maxOutputTokens: 2048 });
-    assert.match(body.systemInstruction.parts[0].text, /原文の事実/);
+    assert.equal(body.model, model); assert.equal(body.input, JSON.stringify(input));
+    assert.deepEqual(body.generation_config, { max_output_tokens: 2048 });
+    assert.equal(body.store, false); assert.equal(body.stream, false); assert.equal(body.background, false);
+    assert.equal(body.previous_interaction_id, undefined); assert.equal(body.tools, undefined);
+    assert.match(body.system_instruction, /原文の事実/);
     assert.ok(!options.body.includes(testKey));
     return Response.json(success());
   });
@@ -56,14 +65,14 @@ test('Gemini distinguishes permissions, quota, model errors and service errors w
 });
 
 test('Gemini blocked, truncated, malformed, oversized and empty output are never treated as generated text', async () => {
-  for (const data of [{ promptFeedback: { blockReason: 'SAFETY' } }, { candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: 'must not show' }] } }] }]) await rejectsCode(provider(async () => Response.json(data)).rewrite(input), 'CONTENT_BLOCKED');
-  await rejectsCode(provider(async () => Response.json({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'partial' }] } }] })).rewrite(input), 'OUTPUT_TRUNCATED');
-  for (const data of [null, {}, { candidates: [null] }, { candidates: [] }, success([{ text: '' }]), success([{ text: 'x'.repeat(8001) }]), success([{ functionCall: { name: 'unexpected' } }]), success([{ text: 'x'.repeat(140000) }])]) await rejectsCode(provider(async () => Response.json(data)).rewrite(input), 'INVALID_OUTPUT');
+  await rejectsCode(provider(async () => Response.json({ id: 'failed-test', status: 'failed', errors: [{ code: 'SAFETY', message: 'private details' }] })).rewrite(input), 'PROVIDER_ERROR');
+  await rejectsCode(provider(async () => Response.json({ id: 'partial-test', status: 'requires_continuation', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'partial' }] }] })).rewrite(input), 'OUTPUT_TRUNCATED');
+  for (const data of [null, {}, { id: 'x', status: 'completed', steps: [] }, success([{ type: 'text', text: '' }]), success([{ type: 'text', text: 'x'.repeat(8001) }]), success([{ type: 'function_call', name: 'unexpected' }]), success([{ type: 'text', text: 'x'.repeat(140000) }])]) await rejectsCode(provider(async () => Response.json(data)).rewrite(input), 'INVALID_OUTPUT');
   await rejectsCode(provider(async () => new Response('not JSON')).rewrite(input), 'INVALID_OUTPUT');
 });
 
 test('Gemini excludes reasoning content and preserves actual answer parts', async () => {
-  const adapter = provider(async () => Response.json(success([{ thought: true, text: 'internal reasoning' }, { text: '文章' }, { text: 'の候補' }])));
+  const adapter = provider(async () => Response.json({ ...success([{ type: 'text', text: '文章' }, { type: 'text', text: 'の候補' }]), steps: [{ type: 'thought', text: 'internal reasoning' }, ...success([{ type: 'text', text: '文章' }, { type: 'text', text: 'の候補' }]).steps] }));
   assert.deepEqual(await adapter.rewrite(input), { text: '文章の候補' });
 });
 

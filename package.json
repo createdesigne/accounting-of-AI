@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:ai": "node scripts/dev-ai.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "ai:server": "node --env-file-if-exists=server/.env server/index.mjs"

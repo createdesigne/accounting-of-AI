@@ -1,5 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { AiWritingPanel } from "./AiWritingPanel";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import { buildReportSummary } from "./reportSummary";
 import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
@@ -1849,6 +1850,7 @@ function ConversationCandidateForm({
   onChange: (field: CandidateField, value: string) => void;
   onIssue: () => void;
 }) {
+  const aiServerUrl = import.meta.env.VITE_AI_SERVER_URL?.trim();
   return (
     <div className="candidate-form">
       <div className="candidate-form-heading">
@@ -1909,6 +1911,11 @@ function ConversationCandidateForm({
         options={thinkingBalanceOptions}
         onChange={onChange}
       />
+      {aiServerUrl && <AiWritingPanel baseUrl={aiServerUrl} fields={[
+        { key: "topic", label: "相談テーマ", value: candidate.topic },
+        { key: "aiAdded", label: "AIが足したこと", value: candidate.aiAdded },
+        { key: "selfDecision", label: "自分で決めたこと", value: candidate.selfDecision },
+      ]} onApply={onChange} />}
       <button className="primary-action" type="button" onClick={onIssue}>
         <ReceiptText size={18} />
         レシートを発行する

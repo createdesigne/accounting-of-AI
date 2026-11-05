@@ -9,6 +9,9 @@ $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
 if (-not $nodeCommand) { throw "Node.js 22系以降をインストールしてから実行してください。" }
 $version = (& $nodeCommand.Source --version).Trim()
 if ($version -notmatch '^v(\d+)\.' -or [int]$Matches[1] -lt 22) { throw "Node.js 22系以降が必要です。" }
+if (-not (Test-Path (Join-Path $PSScriptRoot "server/node_modules/@google/genai/package.json"))) {
+    throw "公式SDKのインストールが必要です。このフォルダーで pnpm install --frozen-lockfile を実行してください。"
+}
 
 # No key is accepted as a command-line argument or written to a file/history.
 $names = @("AI_ENABLED", "AI_PROVIDER", "GEMINI_MODEL", "GEMINI_API_KEY", "AI_SERVER_PORT", "AI_ALLOWED_ORIGINS")
@@ -25,7 +28,7 @@ try {
         Write-Host "このアプリで使用許可済みのキーを使い、モデル・利用上限・送信するデータを確認してください。"
         $consent = Read-Host "上記を確認し、Geminiへの送信を有効にしますか（はい／いいえ）"
         if ($consent -ne "はい") { Write-Host "有効化を中止しました。"; return }
-        if (-not $Model) { $Model = Read-Host "学校が許可したモデルID（AI Studioに表示されるgemini-...）" }
+        if (-not $Model) { $Model = "gemini-3.5-flash-lite" }
         if ($Model -notmatch '^gemini-[a-zA-Z0-9._-]{1,120}$') { throw "モデルIDを確認してください。" }
         $secureKey = Read-Host "Gemini APIキー（入力は表示されず、ファイルには保存しません）" -AsSecureString
         $env:GEMINI_API_KEY = ([System.Net.NetworkCredential]::new("", $secureKey)).Password
