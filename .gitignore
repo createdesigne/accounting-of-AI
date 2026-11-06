@@ -6,6 +6,9 @@ AGENTS.md
 !.env.example
 # Server-only Gemini credentials; never commit this file.
 /server/.env
+/.env.local
+/server/.env.setup-*.tmp
+/.env.local.setup-*.tmp
 *.local
 __pycache__/
 *.py[cod]
