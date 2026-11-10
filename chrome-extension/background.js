@@ -138,6 +138,7 @@ async function handleActivity(sender, occurredAt) {
     tabId: tab.id,
     windowId: senderTab.windowId,
     activityId: createActivityId(),
+    timeZone: getLocalTimeZone(),
   });
   await saveState(state);
 }
@@ -152,6 +153,7 @@ async function startFromActiveChatGpt(state, occurredAt) {
     tabId: tab.id,
     windowId: lastFocused.id,
     activityId: createActivityId(),
+    timeZone: getLocalTimeZone(),
   });
 }
 
@@ -166,6 +168,10 @@ function isChatGptUrl(value) {
 
 function createActivityId() {
   return `chatgpt-${crypto.randomUUID()}`;
+}
+
+function getLocalTimeZone() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
 async function ensureAlarm() {

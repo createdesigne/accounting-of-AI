@@ -152,7 +152,7 @@ test('an earlier focus-loss timestamp trims time already advanced by a delayed t
   assert.equal(tracker.summary(state).totalSeconds, 12);
 });
 
-test('normalization restores an open version-three session without adding elapsed time', () => {
+test('normalization upgrades and restores an open session without adding elapsed time', () => {
   const state = enabledState();
   activity(state, 0, 'session-1');
   tracker.tick(state, 120_000);
@@ -176,14 +176,53 @@ test('legacy records and pending activity keep their ids and seconds as separate
     },
   });
 
-  assert.equal(migrated.version, 3);
+  assert.equal(migrated.version, 4);
   assert.equal(migrated.session, null);
   assert.equal(migrated.current, null);
   assert.deepEqual(Array.from(migrated.records, (record: any) => record.id), ['legacy-record', 'legacy-current']);
   assert.deepEqual(Array.from(migrated.records, (record: any) => record.sessionId), ['legacy-record', 'legacy-current']);
+  assert.equal(migrated.records[0].dailyRecords[0].recordId, 'legacy-record:day:1970-01-01');
+  assert.equal(migrated.records[1].dailyRecords[0].recordId, 'legacy-current:day:1970-01-01');
   assert.equal(tracker.summary(migrated).totalSeconds, 12);
 
   activity(migrated, 20_000, 'new-session');
   assert.equal(migrated.session.id, 'new-session');
   assert.equal(migrated.records.length, 2);
+});
+
+test('version-three session data gains daily records without changing saved ids or seconds', () => {
+  const versionThree = {
+    version: 3,
+    enabled: true,
+    session: {
+      id: 'open-v3-session', provider: 'ChatGPT', startedAt: 20_000, lastActivityAt: 30_000,
+      segments: [{
+        id: 'open-v3-segment', startedAt: 20_000, endedAt: 30_000,
+        durationMs: 10_000, durationSeconds: 10,
+      }],
+    },
+    current: null,
+    records: [{
+      id: 'saved-v3-session', sessionId: 'saved-v3-session', provider: 'ChatGPT',
+      startedAt: 1_000, endedAt: 6_000, finalizedAt: 10_000, durationSeconds: 5,
+      segments: [{
+        id: 'saved-v3-segment', startedAt: 1_000, endedAt: 6_000,
+        durationMs: 5_000, durationSeconds: 5,
+      }],
+    }],
+  };
+
+  const migrated = tracker.normalizeState(versionThree);
+  const normalizedAgain = tracker.normalizeState(JSON.parse(JSON.stringify(migrated)));
+  assert.equal(migrated.version, 4);
+  assert.equal(migrated.session.id, 'open-v3-session');
+  assert.equal(migrated.records[0].id, 'saved-v3-session');
+  assert.equal(migrated.records[0].durationSeconds, 5);
+  assert.equal(migrated.records[0].dailyRecords.length, 1);
+  assert.equal(migrated.records[0].dailyRecords[0].durationSeconds, 5);
+  assert.equal(normalizedAgain.records[0].dailyRecords.length, 1);
+  assert.equal(
+    normalizedAgain.records[0].dailyRecords[0].recordId,
+    migrated.records[0].dailyRecords[0].recordId,
+  );
 });
