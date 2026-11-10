@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const script = readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
+const protocolScript = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const conversation = { aiService: 'ChatGPT', conversationTitle: '相談 + 100% & 日本語', messages: [{ role: 'user', text: '実際の会話本文' }] };
 function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', failure = '' } = {}) {
   let click: () => Promise<void>;
@@ -66,4 +67,74 @@ test('navigation failures show an error and allow retry', async () => {
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /タブを開けませんでした/);
   assert.equal(page.elements.createReceipt.disabled, false);
+});
+
+function transferPopup(destinationValue = 'production') {
+  let transferClick: () => Promise<void>;
+  const delivered: any[] = [];
+  const activated: number[] = [];
+  const elements: any = {
+    createReceipt: { disabled: false, addEventListener() {} },
+    status: { textContent: '' },
+    destination: { value: destinationValue, disabled: false },
+    timeLedgerTransfer: {
+      disabled: false,
+      addEventListener: (_event: string, handler: () => Promise<void>) => { transferClick = handler; },
+    },
+    timeTransferStatus: { textContent: '' },
+  };
+  const sandbox: any = {
+    document: { getElementById: (id: string) => elements[id] },
+    chrome: {
+      runtime: {
+        getManifest: () => ({ version: '0.4.3' }),
+        sendMessage: async ({ type }: { type: string }) => {
+          if (type !== 'time-records:getFinalized') throw new Error('unexpected message');
+          return {
+            ok: true,
+            payload: sandbox.TimeRecordProtocol.createPayload([{
+              recordId: 'session-1:day:2026-11-10', sessionId: 'session-1', provider: 'ChatGPT',
+              localDate: '2026-11-10', timeZone: 'Asia/Tokyo', startedAt: 1_000,
+              endedAt: 61_000, durationSeconds: 60,
+            }], 'request-1'),
+          };
+        },
+      },
+      tabs: {
+        query: async () => [{ id: 7, url: 'https://createdesigne.github.io/accounting-of-AI/' }],
+        create: async ({ url }: { url: string }) => ({ id: 8, url }),
+        sendMessage: async (tabId: number, message: any) => {
+          delivered.push({ tabId, message });
+          return { ok: true };
+        },
+        update: async (tabId: number) => { activated.push(tabId); },
+      },
+      scripting: { executeScript: async () => [] },
+    },
+    URL, URLSearchParams, Date, Error, Intl, TextEncoder, encodeURIComponent, unescape,
+    setTimeout, console: { error() {} },
+  };
+  const context = vm.createContext(sandbox);
+  vm.runInContext(protocolScript, context);
+  vm.runInContext(script, context);
+  return { run: () => transferClick(), delivered, activated, elements };
+}
+
+test('time transfer sends finalized records to an existing approved Web app tab', async () => {
+  const page = transferPopup();
+  await page.run();
+  assert.equal(page.delivered.length, 1);
+  assert.equal(page.delivered[0].tabId, 7);
+  assert.equal(page.delivered[0].message.type, 'time-records:deliver');
+  assert.equal(page.activated[0], 7);
+  assert.match(page.elements.timeTransferStatus.textContent, /1件/);
+  assert.match(page.elements.timeTransferStatus.textContent, /まだ帳簿には保存されていません/);
+});
+
+test('time transfer refuses a destination that is not on the allowlist', async () => {
+  const page = transferPopup('unapproved');
+  await page.run();
+  assert.equal(page.delivered.length, 0);
+  assert.equal(page.activated.length, 0);
+  assert.match(page.elements.timeTransferStatus.textContent, /許可されていない送信先/);
 });

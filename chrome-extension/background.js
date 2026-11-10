@@ -1,8 +1,9 @@
-importScripts("activityTracker.js");
+importScripts("activityTracker.js", "timeRecordProtocol.js");
 
 const STORAGE_KEY = "chatgptActiveTimeTrackingV1";
 const ALARM_NAME = "chatgpt-active-time-tick";
 const tracker = globalThis.ActivityTrackerCore;
+const timeRecordProtocol = globalThis.TimeRecordProtocol;
 let statePromise;
 let workQueue = Promise.resolve();
 
@@ -86,6 +87,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "tracking:pageInactive") {
     enqueue(() => pauseAndSave(receivedAt));
     return false;
+  }
+
+  if (message?.type === "time-records:getFinalized") {
+    enqueue(async () => {
+      const state = await loadState();
+      await reconcileCurrentEnvironment(state, receivedAt);
+      await saveState(state);
+      const payload = timeRecordProtocol.createPayload(
+        getFinalizedDailyRecords(state),
+        `time-transfer-${crypto.randomUUID()}`,
+      );
+      sendResponse({ ok: true, payload });
+    }).catch((error) => {
+      console.error("Time-record transfer failed", error);
+      sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : "利用時間を準備できませんでした。",
+      });
+    });
+    return true;
   }
 
   if (message?.type === "tracking:get" || message?.type === "tracking:setEnabled") {
@@ -172,6 +193,12 @@ function createActivityId() {
 
 function getLocalTimeZone() {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+function getFinalizedDailyRecords(state) {
+  return state.records.flatMap((record) => (
+    Array.isArray(record.dailyRecords) ? record.dailyRecords : []
+  ));
 }
 
 async function ensureAlarm() {

@@ -641,6 +641,33 @@ button {
   margin-bottom: 14px;
 }
 
+.time-record-preview {
+  margin-bottom: 14px;
+  border-color: rgba(5, 150, 105, 0.3);
+  background: linear-gradient(145deg, #ffffff, #f0fdf4);
+}
+
+.time-record-preview-total {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 12px;
+  border-radius: 16px;
+  color: #065f46;
+  background: #ecfdf5;
+}
+
+.time-record-preview-total strong {
+  font-size: 22px;
+}
+
+.time-record-preview-total span {
+  font-size: 14px;
+  font-weight: 800;
+}
+
 .extension-setup-hint {
   margin: 0;
   color: #475569;

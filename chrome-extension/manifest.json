@@ -12,6 +12,14 @@
       "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
       "js": ["activity.js"],
       "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://createdesigne.github.io/accounting-of-AI/*",
+        "http://localhost:5173/accounting-of-AI/*"
+      ],
+      "js": ["timeRecordProtocol.js", "timeRecordBridge.js"],
+      "run_at": "document_start"
     }
   ],
   "action": {

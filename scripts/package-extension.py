@@ -11,6 +11,8 @@ FILES = [
     "activityTracker.js",
     "background.js",
     "activity.js",
+    "timeRecordProtocol.js",
+    "timeRecordBridge.js",
     "README.md",
 ]
 ARCHIVE_ROOT = "ai-thought-receipt-bridge/"

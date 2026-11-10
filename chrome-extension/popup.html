@@ -58,6 +58,7 @@
       .tracking-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
       .tracking-actions button { min-height: 40px; }
       #trackingStop { color: #334155; background: #e2e8f0; }
+      #timeLedgerTransfer { margin-top: 10px; background: #047857; }
     </style>
   </head>
   <body>
@@ -74,8 +75,11 @@
         <button id="trackingStop" type="button">計測を停止</button>
       </div>
       <p id="trackingStatus" role="status" aria-live="polite">計測状態を確認しています…</p>
+      <button id="timeLedgerTransfer" type="button">帳簿へ連携</button>
+      <p id="timeTransferStatus" role="status" aria-live="polite">確定済みの利用時間だけを選択した送信先へ渡します。この操作だけでは帳簿へ保存されません。</p>
     </section>
     <p id="version" aria-label="拡張機能のバージョン"></p>
+    <script src="timeRecordProtocol.js"></script>
     <script src="popup.js"></script>
   </body>
 </html>

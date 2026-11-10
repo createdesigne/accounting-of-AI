@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
 const coreSource = readFileSync(new URL('../chrome-extension/activityTracker.js', import.meta.url), 'utf8');
+const protocolSource = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const backgroundSource = readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8');
 
 type Listener = (...args: any[]) => any;
@@ -90,8 +91,13 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
     Date: FakeDate,
     importScripts() {},
     URL,
+    Intl,
+    TextEncoder,
+    encodeURIComponent,
+    unescape,
   });
   vm.runInContext(coreSource, context);
+  vm.runInContext(protocolSource, context);
   vm.runInContext(backgroundSource, context);
 
   async function send(message: any, tabId?: number) {
@@ -142,6 +148,7 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
     setNow(value: number) { now = value; },
     enable: () => send({ type: 'tracking:setEnabled', enabled: true }),
     disable: () => send({ type: 'tracking:setEnabled', enabled: false }),
+    finalizedRecords: () => send({ type: 'time-records:getFinalized' }),
     activity,
     focus,
     alarm,
@@ -308,4 +315,25 @@ test('duplicate focus and status events never count an interval twice', async ()
   assert.equal((await app.focus(-1)).totalSeconds, 25);
   assert.equal(app.stored().records.length, 0);
   assert.equal(app.stored().session.segments.length, 1);
+});
+
+test('exports only finalized daily records with the minimum transfer fields', async () => {
+  const app = createHarness();
+  await app.enable();
+  app.setNow(30_000);
+  const whileActive = await app.finalizedRecords();
+  assert.equal(whileActive.ok, true);
+  assert.equal(whileActive.payload.records.length, 0);
+
+  app.setNow(60_000);
+  await app.disable();
+  const finalized = await app.finalizedRecords();
+  assert.equal(finalized.ok, true);
+  assert.equal(finalized.payload.records.length, 1);
+  assert.deepEqual(Object.keys(finalized.payload.records[0]), [
+    'recordId', 'sessionId', 'provider', 'localDate', 'timeZone',
+    'startedAt', 'endedAt', 'durationSeconds',
+  ]);
+  assert.equal(finalized.payload.records[0].durationSeconds, 60);
+  assert.equal(JSON.stringify(finalized.payload).includes('tabId'), false);
 });

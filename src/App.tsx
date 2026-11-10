@@ -5,6 +5,16 @@ import { buildReportSummary } from "./reportSummary";
 import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
 import { type RawConversation, parseDraftConversation } from "./conversationDraft";
 import {
+  TIME_RECORD_READY_SOURCE,
+  TIME_RECORD_READY_TYPE,
+  TIME_RECORD_WINDOW_MESSAGE_TYPE,
+  TIME_RECORD_WINDOW_SOURCE,
+  formatTimeRecordDuration,
+  mergeTimeRecordPreviews,
+  parseTimeRecordPayload,
+  type TimeRecordPreview,
+} from "./timeRecordTransfer";
+import {
   ArrowLeft,
   ArrowRight,
   BarChart3,
@@ -528,8 +538,13 @@ function App() {
   const [qrMessage, setQrMessage] = useState("");
   const [ledgerMessage, setLedgerMessage] = useState("");
   const [receiptActionMessage, setReceiptActionMessage] = useState("");
+  const [timeRecordPreview, setTimeRecordPreview] = useState<TimeRecordPreview[]>([]);
   const [thinkingLedger, setThinkingLedger] = useState<IssuedThinkingReceipt[]>([]);
   const [ledgerStatus, setLedgerStatus] = useState<"loading" | "ready" | "error">("loading");
+  const timeRecordTotalSeconds = useMemo(
+    () => timeRecordPreview.reduce((sum, record) => sum + record.durationSeconds, 0),
+    [timeRecordPreview],
+  );
   const refreshLedger = useCallback(() => {
     try {
       setThinkingLedger(loadThinkingLedger());
@@ -556,6 +571,25 @@ function App() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refreshLedger]);
+
+  useEffect(() => {
+    const receiveTimeRecords = (event: MessageEvent) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.source !== TIME_RECORD_WINDOW_SOURCE
+        || event.data?.type !== TIME_RECORD_WINDOW_MESSAGE_TYPE) return;
+      const payload = parseTimeRecordPayload(event.data.payload);
+      if (!payload) return;
+      setTimeRecordPreview((current) => mergeTimeRecordPreviews(current, payload.records));
+      setIsSettlementOpen(false);
+      setActiveTab("home");
+    };
+    window.addEventListener("message", receiveTimeRecords);
+    window.postMessage({
+      source: TIME_RECORD_READY_SOURCE,
+      type: TIME_RECORD_READY_TYPE,
+    }, window.location.origin);
+    return () => window.removeEventListener("message", receiveTimeRecords);
+  }, []);
 
   function persistLedger(records: IssuedThinkingReceipt[]) {
     localStorage.setItem(THINKING_LEDGER_KEY, JSON.stringify(records));
@@ -1071,6 +1105,21 @@ function App() {
       <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
         <Header onOpenSettlement={openSettlement} />
         <div className="screen" ref={screenRef}>
+          {!isSettlementOpen && activeTab === "home" && timeRecordPreview.length > 0 && (
+            <section className="extension-import-card time-record-preview" aria-label="利用時間の連携内容">
+              <div className="import-card-heading">
+                <strong>利用時間の連携内容を確認</strong>
+                <p>Chrome拡張機能から確定済みの利用時間を受信しました。この時点では仕訳を作成せず、帳簿にも保存していません。</p>
+              </div>
+              <p className="time-record-preview-total" role="status">
+                <strong>{timeRecordPreview.length}件</strong>
+                <span>合計 {formatTimeRecordDuration(timeRecordTotalSeconds)}</span>
+              </p>
+              <button className="secondary-action" type="button" onClick={() => setTimeRecordPreview([])}>
+                確認画面を閉じる
+              </button>
+            </section>
+          )}
           {!isSettlementOpen && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
             <HomeScreen
               stats={stats}
