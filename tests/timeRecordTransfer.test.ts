@@ -29,6 +29,7 @@ test('accepts the minimal transfer payload and rejects extra or invalid data', (
   assert.equal(parseTimeRecordPayload(payload([record()]))?.records.length, 1);
   assert.equal(parseTimeRecordPayload(payload([record({ conversationText: 'must not arrive' })])), null);
   assert.equal(parseTimeRecordPayload(payload([record({ durationSeconds: -1 })])), null);
+  assert.equal(parseTimeRecordPayload(payload([record({ durationSeconds: 0 })])), null);
   assert.equal(parseTimeRecordPayload(payload([record({ timeZone: 'Invalid/Zone' })])), null);
   assert.equal(parseTimeRecordPayload(payload([record({ localDate: '2026-02-30' })])), null);
   assert.equal(parseTimeRecordPayload({ ...payload([record()]), conversationText: 'not allowed' }), null);
@@ -38,10 +39,10 @@ test('rejects duplicate ids inside one received message', () => {
   assert.equal(parseTimeRecordPayload(payload([record(), record()])), null);
 });
 
-test('merges repeated deliveries without duplicating or overwriting the first preview', () => {
+test('merges identical deliveries without duplication and rejects changed content', () => {
   const first = parseTimeRecordPayload(payload([record()]))!.records;
   const resent = parseTimeRecordPayload(payload([
-    record({ durationSeconds: 999 }),
+    record(),
     record({ recordId: 'session-2:day:2026-11-11', sessionId: 'session-2', localDate: '2026-11-11' }),
   ]))!.records;
   const merged = mergeTimeRecordPreviews(first, resent);
@@ -50,6 +51,10 @@ test('merges repeated deliveries without duplicating or overwriting the first pr
   assert.equal(merged[0].recordId, 'session-1:day:2026-11-10');
   assert.equal(merged[0].durationSeconds, 60);
   assert.equal(merged[1].recordId, 'session-2:day:2026-11-11');
+  assert.throws(
+    () => mergeTimeRecordPreviews(first, [{ ...first[0], durationSeconds: 999 }]),
+    /同じ記録IDに異なる内容/,
+  );
 });
 
 test('formats the confirmation total in Japanese seconds', () => {

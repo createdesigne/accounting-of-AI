@@ -1,6 +1,7 @@
 importScripts("activityTracker.js", "timeRecordProtocol.js");
 
 const STORAGE_KEY = "chatgptActiveTimeTrackingV1";
+const IMPORT_STATUS_KEY = "chatgptTimeAccountingImportsV1";
 const ALARM_NAME = "chatgpt-active-time-tick";
 const tracker = globalThis.ActivityTrackerCore;
 const timeRecordProtocol = globalThis.TimeRecordProtocol;
@@ -91,11 +92,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "time-records:getFinalized") {
     enqueue(async () => {
+      const destination = requireDestination(message.destination);
       const state = await loadState();
       await reconcileCurrentEnvironment(state, receivedAt);
       await saveState(state);
+      const importStatus = await loadImportStatus();
       const payload = timeRecordProtocol.createPayload(
-        getFinalizedDailyRecords(state),
+        getPendingDailyRecords(state, importStatus, destination),
         `time-transfer-${crypto.randomUUID()}`,
       );
       sendResponse({ ok: true, payload });
@@ -104,6 +107,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({
         ok: false,
         message: error instanceof Error ? error.message : "利用時間を準備できませんでした。",
+      });
+    });
+    return true;
+  }
+
+  if (message?.type === "time-records:ackImported") {
+    enqueue(async () => {
+      const destination = requireDestination(message.destination);
+      const validation = timeRecordProtocol.validatePayload(message.payload);
+      if (!validation.ok) throw new Error(validation.error);
+      const state = await loadState();
+      const finalized = new Map(getFinalizedDailyRecords(state).map((record) => [record.recordId, record]));
+      const importStatus = await loadImportStatus();
+      const next = normalizeImportStatus(importStatus);
+      for (const record of message.payload.records) {
+        const source = finalized.get(record.recordId);
+        if (!source || timeRecordProtocol.recordFingerprint(source) !== timeRecordProtocol.recordFingerprint(record)) {
+          throw new Error(`保存済み記録と拡張機能の記録が一致しません: ${record.recordId}`);
+        }
+        next.destinations[destination][record.recordId] = {
+          fingerprint: timeRecordProtocol.recordFingerprint(record),
+          importedAt: receivedAt,
+        };
+      }
+      await chrome.storage.local.set({ [IMPORT_STATUS_KEY]: next });
+      sendResponse({ ok: true, acknowledgedCount: message.payload.records.length });
+    }).catch((error) => {
+      console.error("Time-record acknowledgement failed", error);
+      sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : "取込完了を記録できませんでした。",
       });
     });
     return true;
@@ -198,7 +232,49 @@ function getLocalTimeZone() {
 function getFinalizedDailyRecords(state) {
   return state.records.flatMap((record) => (
     Array.isArray(record.dailyRecords) ? record.dailyRecords : []
+  )).filter((record) => record.durationSeconds > 0);
+}
+
+function getPendingDailyRecords(state, importStatus, destination) {
+  const imported = importStatus.destinations[destination];
+  return getFinalizedDailyRecords(state).filter((record) => (
+    imported[record.recordId]?.fingerprint !== timeRecordProtocol.recordFingerprint(record)
   ));
+}
+
+function requireDestination(value) {
+  if (value === "production" || value === "preview" || value === "local") return value;
+  throw new Error("許可されていない送信先です。");
+}
+
+async function loadImportStatus() {
+  const stored = await chrome.storage.local.get(IMPORT_STATUS_KEY);
+  return normalizeImportStatus(stored[IMPORT_STATUS_KEY]);
+}
+
+function normalizeImportStatus(value) {
+  const normalized = {
+    version: 1,
+    destinations: {
+      production: Object.create(null),
+      preview: Object.create(null),
+      local: Object.create(null),
+    },
+  };
+  if (!value || value.version !== 1 || !value.destinations) return normalized;
+  for (const destination of ["production", "preview", "local"]) {
+    const records = value.destinations[destination];
+    if (!records || typeof records !== "object" || Array.isArray(records)) continue;
+    for (const [recordId, status] of Object.entries(records)) {
+      if (typeof recordId !== "string" || !status || typeof status.fingerprint !== "string"
+        || !Number.isFinite(status.importedAt) || status.importedAt < 0) continue;
+      normalized.destinations[destination][recordId] = {
+        fingerprint: status.fingerprint,
+        importedAt: status.importedAt,
+      };
+    }
+  }
+  return normalized;
 }
 
 async function ensureAlarm() {

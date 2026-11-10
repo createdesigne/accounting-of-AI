@@ -104,7 +104,11 @@ async function transferFinalizedTimeRecords() {
   timeLedgerTransfer.disabled = true;
   timeTransferStatus.textContent = "確定済みの利用時間を準備しています…";
   try {
-    const response = await chrome.runtime.sendMessage({ type: "time-records:getFinalized" });
+    const destinationName = destination.value;
+    const response = await chrome.runtime.sendMessage({
+      type: "time-records:getFinalized",
+      destination: destinationName,
+    });
     if (!response?.ok) throw new Error(response?.message || "利用時間を準備できませんでした。");
     const validation = timeRecordProtocol.validatePayload(response.payload);
     if (!validation.ok) throw new Error(validation.error);
@@ -113,7 +117,6 @@ async function transferFinalizedTimeRecords() {
       return;
     }
 
-    const destinationName = destination.value;
     const targetUrl = timeRecordProtocol.DESTINATIONS[destinationName];
     if (!targetUrl || !timeRecordProtocol.isAllowedAppUrl(targetUrl)) {
       throw new Error("許可されていない送信先です。");

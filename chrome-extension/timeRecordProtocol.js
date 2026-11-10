@@ -6,6 +6,10 @@
   const WINDOW_MESSAGE_TYPE = "AI_TIME_RECORDS_PREVIEW";
   const WINDOW_READY_SOURCE = "ai-time-record-web-app";
   const WINDOW_READY_TYPE = "AI_TIME_RECORDS_PREVIEW_READY";
+  const WINDOW_ACK_SOURCE = "ai-time-record-web-app";
+  const WINDOW_ACK_TYPE = "AI_TIME_RECORDS_IMPORT_ACK";
+  const WINDOW_ACK_RESULT_SOURCE = "ai-time-record-extension";
+  const WINDOW_ACK_RESULT_TYPE = "AI_TIME_RECORDS_IMPORT_ACK_RESULT";
   const MAX_RECORDS = 500;
   const MAX_PAYLOAD_BYTES = 192 * 1024;
   const MAX_ID_LENGTH = 160;
@@ -52,6 +56,13 @@
     } catch {
       return false;
     }
+  }
+
+  function destinationForUrl(value) {
+    if (isDestinationUrl(value, "preview")) return "preview";
+    if (isDestinationUrl(value, "local")) return "local";
+    if (isDestinationUrl(value, "production")) return "production";
+    return null;
   }
 
   function createPayload(sourceRecords, requestId) {
@@ -121,7 +132,22 @@
     if (!isSafeText(value.timeZone, MAX_TIME_ZONE_LENGTH) || !isValidTimeZone(value.timeZone)) return false;
     if (!Number.isFinite(value.startedAt) || !Number.isFinite(value.endedAt)
       || value.startedAt < 0 || value.endedAt < value.startedAt) return false;
-    return Number.isInteger(value.durationSeconds) && value.durationSeconds >= 0;
+    return Number.isInteger(value.durationSeconds) && value.durationSeconds > 0;
+  }
+
+  function recordFingerprint(record) {
+    const projected = projectRecord(record);
+    if (!projected) throw new TypeError("time record is invalid");
+    return JSON.stringify([
+      projected.recordId,
+      projected.sessionId,
+      projected.provider,
+      projected.localDate,
+      projected.timeZone,
+      projected.startedAt,
+      projected.endedAt,
+      projected.durationSeconds,
+    ]);
   }
 
   function isSafeText(value, maximumLength) {
@@ -163,13 +189,19 @@
     WINDOW_MESSAGE_TYPE,
     WINDOW_READY_SOURCE,
     WINDOW_READY_TYPE,
+    WINDOW_ACK_SOURCE,
+    WINDOW_ACK_TYPE,
+    WINDOW_ACK_RESULT_SOURCE,
+    WINDOW_ACK_RESULT_TYPE,
     MAX_RECORDS,
     MAX_PAYLOAD_BYTES,
     DESTINATIONS,
     ALLOWED_KEYS,
     isAllowedAppUrl,
     isDestinationUrl,
+    destinationForUrl,
     createPayload,
     validatePayload,
+    recordFingerprint,
   });
 })(globalThis);

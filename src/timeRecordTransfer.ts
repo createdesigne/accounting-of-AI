@@ -3,6 +3,10 @@ export const TIME_RECORD_WINDOW_SOURCE = "ai-time-record-extension";
 export const TIME_RECORD_WINDOW_MESSAGE_TYPE = "AI_TIME_RECORDS_PREVIEW";
 export const TIME_RECORD_READY_SOURCE = "ai-time-record-web-app";
 export const TIME_RECORD_READY_TYPE = "AI_TIME_RECORDS_PREVIEW_READY";
+export const TIME_RECORD_ACK_SOURCE = "ai-time-record-web-app";
+export const TIME_RECORD_ACK_TYPE = "AI_TIME_RECORDS_IMPORT_ACK";
+export const TIME_RECORD_ACK_RESULT_SOURCE = "ai-time-record-extension";
+export const TIME_RECORD_ACK_RESULT_TYPE = "AI_TIME_RECORDS_IMPORT_ACK_RESULT";
 export const TIME_RECORD_MAX_COUNT = 500;
 export const TIME_RECORD_MAX_BYTES = 192 * 1024;
 
@@ -44,7 +48,7 @@ export function parseTimeRecordPayload(value: unknown): TimeRecordPayload | null
   const seen = new Set<string>();
   const records: TimeRecordPreview[] = [];
   for (const candidate of value.records) {
-    const record = parseTimeRecord(candidate);
+    const record = parseTimeRecordPreview(candidate);
     if (!record || seen.has(record.recordId)) return null;
     seen.add(record.recordId);
     records.push(record);
@@ -58,13 +62,36 @@ export function parseTimeRecordPayload(value: unknown): TimeRecordPayload | null
   return payload;
 }
 
+export function createTimeRecordPayload(records: TimeRecordPreview[], requestId: string): TimeRecordPayload {
+  const payload = parseTimeRecordPayload({ protocol: TIME_RECORD_PROTOCOL, requestId, records });
+  if (!payload) throw new Error("利用時間の完了通知データが正しくありません。");
+  return payload;
+}
+
+export function timeRecordFingerprint(record: TimeRecordPreview) {
+  return JSON.stringify([
+    record.recordId,
+    record.sessionId,
+    record.provider,
+    record.localDate,
+    record.timeZone,
+    record.startedAt,
+    record.endedAt,
+    record.durationSeconds,
+  ]);
+}
+
 export function mergeTimeRecordPreviews(
   current: TimeRecordPreview[],
   received: TimeRecordPreview[],
 ) {
   const byId = new Map(current.map((record) => [record.recordId, record]));
   for (const record of received) {
-    if (!byId.has(record.recordId)) byId.set(record.recordId, record);
+    const existing = byId.get(record.recordId);
+    if (existing && timeRecordFingerprint(existing) !== timeRecordFingerprint(record)) {
+      throw new Error(`同じ記録IDに異なる内容が届きました: ${record.recordId}`);
+    }
+    if (!existing) byId.set(record.recordId, record);
   }
   return [...byId.values()].sort((left, right) => (
     left.localDate.localeCompare(right.localDate) || left.recordId.localeCompare(right.recordId)
@@ -79,7 +106,44 @@ export function formatTimeRecordDuration(totalSeconds: number) {
   return hours > 0 ? `${hours}時間${minutes}分${rest}秒` : `${minutes}分${rest}秒`;
 }
 
-function parseTimeRecord(value: unknown): TimeRecordPreview | null {
+export function acknowledgeImportedTimeRecords(
+  records: TimeRecordPreview[],
+  timeoutMs = 4_000,
+): Promise<void> {
+  const requestId = `time-import-ack-${crypto.randomUUID()}`;
+  const payload = createTimeRecordPayload(records, requestId);
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      cleanup();
+      reject(new Error("拡張機能への取込完了通知がタイムアウトしました。"));
+    }, timeoutMs);
+    const receiveResult = (event: MessageEvent) => {
+      if (event.source !== window || event.origin !== window.location.origin
+        || event.data?.source !== TIME_RECORD_ACK_RESULT_SOURCE
+        || event.data?.type !== TIME_RECORD_ACK_RESULT_TYPE
+        || event.data?.requestId !== requestId) return;
+      cleanup();
+      if (event.data.ok === true) resolve();
+      else reject(new Error(
+        typeof event.data.message === "string" && event.data.message
+          ? event.data.message
+          : "拡張機能へ取込完了を通知できませんでした。",
+      ));
+    };
+    function cleanup() {
+      window.clearTimeout(timeout);
+      window.removeEventListener("message", receiveResult);
+    }
+    window.addEventListener("message", receiveResult);
+    window.postMessage({
+      source: TIME_RECORD_ACK_SOURCE,
+      type: TIME_RECORD_ACK_TYPE,
+      payload,
+    }, window.location.origin);
+  });
+}
+
+export function parseTimeRecordPreview(value: unknown): TimeRecordPreview | null {
   if (!isObject(value)) return null;
   const keys = Object.keys(value);
   if (keys.length !== recordKeys.length || keys.some((key) => !recordKeys.includes(key as typeof recordKeys[number]))) {
@@ -92,7 +156,7 @@ function parseTimeRecord(value: unknown): TimeRecordPreview | null {
     || typeof value.startedAt !== "number" || !Number.isFinite(value.startedAt) || value.startedAt < 0
     || typeof value.endedAt !== "number" || !Number.isFinite(value.endedAt) || value.endedAt < value.startedAt
     || typeof value.durationSeconds !== "number" || !Number.isInteger(value.durationSeconds)
-    || value.durationSeconds < 0) return null;
+    || value.durationSeconds <= 0) return null;
   return {
     recordId: value.recordId,
     sessionId: value.sessionId,

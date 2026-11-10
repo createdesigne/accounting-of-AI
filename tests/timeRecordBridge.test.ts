@@ -6,10 +6,14 @@ import vm from 'node:vm';
 const protocolSource = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const bridgeSource = readFileSync(new URL('../chrome-extension/timeRecordBridge.js', import.meta.url), 'utf8');
 
-function createBridge(url = 'https://createdesigne.github.io/accounting-of-AI/') {
+function createBridge(
+  url = 'https://createdesigne.github.io/accounting-of-AI/',
+  ackResult: any = { ok: true, acknowledgedCount: 1 },
+) {
   const runtimeListeners: Array<(message: any, sender: any, respond: (value: any) => void) => any> = [];
   const windowListeners: Array<(event: any) => void> = [];
   const posted: Array<{ message: any; targetOrigin: string }> = [];
+  const runtimeSent: any[] = [];
   const parsed = new URL(url);
   const fakeWindow: any = {
     location: { href: url, origin: parsed.origin },
@@ -22,6 +26,7 @@ function createBridge(url = 'https://createdesigne.github.io/accounting-of-AI/')
     runtime: {
       id: 'extension-id',
       onMessage: { addListener(listener: any) { runtimeListeners.push(listener); } },
+      sendMessage: async (message: any) => { runtimeSent.push(message); return ackResult; },
     },
   };
   const context = vm.createContext({
@@ -35,7 +40,7 @@ function createBridge(url = 'https://createdesigne.github.io/accounting-of-AI/')
     localDate: '2026-11-10', timeZone: 'Asia/Tokyo', startedAt: 1_000,
     endedAt: 61_000, durationSeconds: 60,
   }], 'request-1');
-  return { runtimeListeners, windowListeners, posted, fakeWindow, protocol, payload };
+  return { runtimeListeners, windowListeners, posted, runtimeSent, fakeWindow, protocol, payload };
 }
 
 function sendToBridge(app: ReturnType<typeof createBridge>, message: any, senderId = 'extension-id') {
@@ -86,4 +91,40 @@ test('replays the pending payload when the Web app announces readiness', () => {
   });
   assert.equal(app.posted.length, 2);
   assert.deepEqual(app.posted[0].message.payload, app.posted[1].message.payload);
+});
+
+test('relays a valid save acknowledgement to the extension and returns its result', async () => {
+  const app = createBridge();
+  await app.windowListeners[0]({
+    source: app.fakeWindow,
+    origin: app.fakeWindow.location.origin,
+    data: {
+      source: app.protocol.WINDOW_ACK_SOURCE,
+      type: app.protocol.WINDOW_ACK_TYPE,
+      payload: app.payload,
+    },
+  });
+  assert.equal(app.runtimeSent.length, 1);
+  assert.equal(app.runtimeSent[0].type, 'time-records:ackImported');
+  assert.equal(app.runtimeSent[0].destination, 'production');
+  assert.equal(app.posted.at(-1)?.message.type, app.protocol.WINDOW_ACK_RESULT_TYPE);
+  assert.equal(app.posted.at(-1)?.message.ok, true);
+});
+
+test('reports acknowledgement failure without changing the transferred records', async () => {
+  const app = createBridge(
+    'https://createdesigne.github.io/accounting-of-AI/',
+    { ok: false, message: 'simulated response failure' },
+  );
+  await app.windowListeners[0]({
+    source: app.fakeWindow,
+    origin: app.fakeWindow.location.origin,
+    data: {
+      source: app.protocol.WINDOW_ACK_SOURCE,
+      type: app.protocol.WINDOW_ACK_TYPE,
+      payload: app.payload,
+    },
+  });
+  assert.equal(app.posted.at(-1)?.message.ok, false);
+  assert.equal(app.posted.at(-1)?.message.message, 'simulated response failure');
 });

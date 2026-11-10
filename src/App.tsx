@@ -10,10 +10,15 @@ import {
   TIME_RECORD_WINDOW_MESSAGE_TYPE,
   TIME_RECORD_WINDOW_SOURCE,
   formatTimeRecordDuration,
+  acknowledgeImportedTimeRecords,
   mergeTimeRecordPreviews,
   parseTimeRecordPayload,
   type TimeRecordPreview,
 } from "./timeRecordTransfer";
+import {
+  TIME_ACCOUNTING_STORAGE_BASE_KEY,
+  importTimeRecords,
+} from "./timeAccountingStore";
 import {
   ArrowLeft,
   ArrowRight,
@@ -107,6 +112,7 @@ const STORAGE_PREFIX = IS_PREVIEW ? "preview-month-ledger:" : "";
 const STORAGE_KEY = `${STORAGE_PREFIX}watashi-to-ai-thought-receipts`;
 const RAW_CONVERSATION_KEY = `${STORAGE_PREFIX}aiConversationRaw`;
 const THINKING_LEDGER_KEY = `${STORAGE_PREFIX}thinkingLedger`;
+const TIME_ACCOUNTING_STORAGE_KEY = `${STORAGE_PREFIX}${TIME_ACCOUNTING_STORAGE_BASE_KEY}`;
 const RECEIPT_HASH_KEY = "receipt";
 const DRAFT_QUERY_KEY = "draft";
 
@@ -539,6 +545,9 @@ function App() {
   const [ledgerMessage, setLedgerMessage] = useState("");
   const [receiptActionMessage, setReceiptActionMessage] = useState("");
   const [timeRecordPreview, setTimeRecordPreview] = useState<TimeRecordPreview[]>([]);
+  const timeRecordPreviewRef = useRef<TimeRecordPreview[]>([]);
+  const [timeImportBusy, setTimeImportBusy] = useState(false);
+  const [timeImportMessage, setTimeImportMessage] = useState("");
   const [thinkingLedger, setThinkingLedger] = useState<IssuedThinkingReceipt[]>([]);
   const [ledgerStatus, setLedgerStatus] = useState<"loading" | "ready" | "error">("loading");
   const timeRecordTotalSeconds = useMemo(
@@ -579,7 +588,16 @@ function App() {
         || event.data?.type !== TIME_RECORD_WINDOW_MESSAGE_TYPE) return;
       const payload = parseTimeRecordPayload(event.data.payload);
       if (!payload) return;
-      setTimeRecordPreview((current) => mergeTimeRecordPreviews(current, payload.records));
+      try {
+        const merged = mergeTimeRecordPreviews(timeRecordPreviewRef.current, payload.records);
+        timeRecordPreviewRef.current = merged;
+        setTimeRecordPreview(merged);
+        setTimeImportMessage("");
+      } catch (error) {
+        setTimeImportMessage(
+          error instanceof Error ? error.message : "同じ記録IDに異なる内容が届きました。",
+        );
+      }
       setIsSettlementOpen(false);
       setActiveTab("home");
     };
@@ -605,6 +623,41 @@ function App() {
 
   function deleteLedgerReceipt(receiptNo: string) {
     persistLedger(loadThinkingLedger().filter((item) => item.receiptNo !== receiptNo));
+  }
+
+  async function importTimeRecordPreview() {
+    if (timeImportBusy || timeRecordPreview.length === 0) return;
+    setTimeImportBusy(true);
+    setTimeImportMessage("時間会計へ保存しています…");
+    try {
+      const result = await importTimeRecords(timeRecordPreview, {
+        storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      });
+      try {
+        await acknowledgeImportedTimeRecords([...result.records]);
+      } catch {
+        setTimeImportMessage(
+          "会計への保存は完了しましたが、拡張機能へ完了を通知できませんでした。もう一度連携して同じボタンを押すと、仕訳を増やさず再通知できます。",
+        );
+        return;
+      }
+      setTimeRecordPreview([]);
+      timeRecordPreviewRef.current = [];
+      setTimeImportMessage("");
+      if (result.importedCount > 0) {
+        showToast(
+          `${result.importedCount}件・合計${formatTimeRecordDuration(result.importedSeconds)}を時間会計へ取り込みました。`,
+        );
+      } else {
+        showToast(`${result.skippedCount}件は取り込み済みでした。完了通知を更新しました。`);
+      }
+    } catch (error) {
+      setTimeImportMessage(
+        error instanceof Error ? error.message : "利用時間を会計へ取り込めませんでした。",
+      );
+    } finally {
+      setTimeImportBusy(false);
+    }
   }
   const stats = useMemo(() => buildStats(receiptData), [receiptData]);
 
@@ -1115,9 +1168,15 @@ function App() {
                 <strong>{timeRecordPreview.length}件</strong>
                 <span>合計 {formatTimeRecordDuration(timeRecordTotalSeconds)}</span>
               </p>
-              <button className="secondary-action" type="button" onClick={() => setTimeRecordPreview([])}>
-                確認画面を閉じる
+              <button
+                className="extension-import-button"
+                type="button"
+                disabled={timeImportBusy}
+                onClick={importTimeRecordPreview}
+              >
+                会計に取り込む
               </button>
+              {timeImportMessage && <p className="candidate-message" role="status">{timeImportMessage}</p>}
             </section>
           )}
           {!isSettlementOpen && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (

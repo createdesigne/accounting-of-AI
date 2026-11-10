@@ -53,6 +53,7 @@ test('projects only the minimum time fields and never sends page or secret data'
 test('rejects malformed records, duplicate ids and oversized payloads', () => {
   const valid = protocol.createPayload([record()], 'request-valid');
   assert.equal(protocol.validatePayload({ ...valid, records: [record({ durationSeconds: -1 })] }).ok, false);
+  assert.equal(protocol.validatePayload({ ...valid, records: [record({ durationSeconds: 0 })] }).ok, false);
   assert.equal(protocol.validatePayload({ ...valid, records: [record(), record()] }).ok, false);
   assert.equal(protocol.validatePayload({ ...valid, records: [{ ...record(), conversationText: 'not allowed' }] }).ok, false);
   assert.equal(protocol.validatePayload({ ...valid, conversationText: 'not allowed' }).ok, false);

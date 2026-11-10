@@ -19,7 +19,10 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
 } = {}) {
   let now = initialNow;
   let uuid = initialUuid;
-  let stored: any = initialStored ? JSON.parse(JSON.stringify(initialStored)) : undefined;
+  const storageValues = new Map<string, any>();
+  if (initialStored) {
+    storageValues.set('chatgptActiveTimeTrackingV1', JSON.parse(JSON.stringify(initialStored)));
+  }
   let alarmExists = false;
   let lastFocusedWindowId = 10;
   const tabs = new Map<number, any>([
@@ -76,9 +79,11 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
     },
     storage: {
       local: {
-        get: async (key: string) => ({ [key]: stored }),
+        get: async (key: string) => ({ [key]: storageValues.get(key) }),
         set: async (value: Record<string, any>) => {
-          stored = JSON.parse(JSON.stringify(Object.values(value)[0]));
+          for (const [key, item] of Object.entries(value)) {
+            storageValues.set(key, JSON.parse(JSON.stringify(item)));
+          }
         },
       },
     },
@@ -148,13 +153,19 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
     setNow(value: number) { now = value; },
     enable: () => send({ type: 'tracking:setEnabled', enabled: true }),
     disable: () => send({ type: 'tracking:setEnabled', enabled: false }),
-    finalizedRecords: () => send({ type: 'time-records:getFinalized' }),
+    finalizedRecords: (destination = 'production') => send({
+      type: 'time-records:getFinalized', destination,
+    }),
+    acknowledge: (payload: any, destination = 'production') => send({
+      type: 'time-records:ackImported', destination, payload,
+    }),
     activity,
     focus,
     alarm,
     startup,
     summary,
-    stored: () => stored,
+    stored: () => storageValues.get('chatgptActiveTimeTrackingV1'),
+    importStatus: () => storageValues.get('chatgptTimeAccountingImportsV1'),
     alarmExists: () => alarmExists,
   };
 }
@@ -336,4 +347,28 @@ test('exports only finalized daily records with the minimum transfer fields', as
   ]);
   assert.equal(finalized.payload.records[0].durationSeconds, 60);
   assert.equal(JSON.stringify(finalized.payload).includes('tabId'), false);
+});
+
+test('marks records imported only after a matching acknowledgement and per destination', async () => {
+  const app = createHarness();
+  await app.enable();
+  app.setNow(60_000);
+  await app.disable();
+  const pending = await app.finalizedRecords('production');
+  assert.equal(pending.payload.records.length, 1);
+  assert.equal((await app.finalizedRecords('production')).payload.records.length, 1);
+
+  const invalidPayload = {
+    ...pending.payload,
+    records: [{ ...pending.payload.records[0], durationSeconds: 61 }],
+  };
+  assert.equal((await app.acknowledge(invalidPayload, 'production')).ok, false);
+  assert.equal((await app.finalizedRecords('production')).payload.records.length, 1);
+
+  const acknowledged = await app.acknowledge(pending.payload, 'production');
+  assert.equal(acknowledged.ok, true);
+  assert.equal(acknowledged.acknowledgedCount, 1);
+  assert.equal((await app.finalizedRecords('production')).payload.records.length, 0);
+  assert.equal((await app.finalizedRecords('preview')).payload.records.length, 1);
+  assert.ok(app.importStatus().destinations.production[pending.payload.records[0].recordId]);
 });
