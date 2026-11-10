@@ -4,7 +4,15 @@ from pathlib import Path
 from zipfile import BadZipFile, ZipFile, ZipInfo, ZIP_DEFLATED
 import sys
 
-FILES = ["manifest.json", "popup.html", "popup.js", "README.md"]
+FILES = [
+    "manifest.json",
+    "popup.html",
+    "popup.js",
+    "activityTracker.js",
+    "background.js",
+    "activity.js",
+    "README.md",
+]
 ARCHIVE_ROOT = "ai-thought-receipt-bridge/"
 
 

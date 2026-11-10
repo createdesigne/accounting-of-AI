@@ -11,6 +11,16 @@ const extensionVersion = globalThis.chrome?.runtime?.getManifest?.().version || 
 const versionText = document.getElementById("version");
 if (versionText) versionText.textContent = `バージョン ${extensionVersion}`;
 
+const trackingStart = document.getElementById("trackingStart");
+const trackingStop = document.getElementById("trackingStop");
+const trackingStatus = document.getElementById("trackingStatus");
+
+if (trackingStart && trackingStop && trackingStatus && chrome.runtime?.sendMessage) {
+  trackingStart.addEventListener("click", () => updateTracking(true));
+  trackingStop.addEventListener("click", () => updateTracking(false));
+  refreshTracking();
+}
+
 button.addEventListener("click", async () => {
   setStatus("会話を読み取っています...", true);
 
@@ -46,6 +56,49 @@ function setStatus(message, busy) {
   statusText.textContent = message;
   button.disabled = busy;
   destination.disabled = busy;
+}
+
+async function refreshTracking() {
+  await sendTrackingMessage({ type: "tracking:get" });
+}
+
+async function updateTracking(enabled) {
+  trackingStart.disabled = true;
+  trackingStop.disabled = true;
+  trackingStatus.textContent = enabled ? "計測を開始しています…" : "計測を停止しています…";
+  await sendTrackingMessage({ type: "tracking:setEnabled", enabled });
+}
+
+async function sendTrackingMessage(message) {
+  try {
+    const result = await chrome.runtime.sendMessage(message);
+    if (!result?.ok) throw new Error(result?.message || "計測状態を確認できませんでした。");
+    renderTracking(result);
+  } catch (error) {
+    trackingStatus.textContent = error instanceof Error ? error.message : "計測状態を確認できませんでした。";
+    trackingStart.disabled = false;
+    trackingStop.disabled = false;
+  }
+}
+
+function renderTracking(state) {
+  trackingStart.disabled = state.enabled;
+  trackingStop.disabled = !state.enabled;
+  if (!state.enabled) {
+    trackingStatus.textContent = `停止中（保存済み ${formatDuration(state.totalSeconds)}）`;
+  } else if (state.active) {
+    trackingStatus.textContent = `計測中（合計 ${formatDuration(state.totalSeconds)}）`;
+  } else {
+    trackingStatus.textContent = `待機中：ChatGPTで操作すると計測します（合計 ${formatDuration(state.totalSeconds)}）`;
+  }
+}
+
+function formatDuration(totalSeconds) {
+  const seconds = Math.max(0, Number.isFinite(totalSeconds) ? Math.floor(totalSeconds) : 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return hours ? `${hours}時間${minutes}分${rest}秒` : `${minutes}分${rest}秒`;
 }
 
 function normalizeConversation(extracted, tab) {

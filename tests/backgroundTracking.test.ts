@@ -1,0 +1,248 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import vm from 'node:vm';
+
+const coreSource = readFileSync(new URL('../chrome-extension/activityTracker.js', import.meta.url), 'utf8');
+const backgroundSource = readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8');
+
+type Listener = (...args: any[]) => any;
+
+function eventHook() {
+  const listeners: Listener[] = [];
+  return { listeners, addListener(listener: Listener) { listeners.push(listener); } };
+}
+
+function createHarness({ initialStored, initialNow = 0 }: { initialStored?: any; initialNow?: number } = {}) {
+  let now = initialNow;
+  let uuid = 0;
+  let stored: any = initialStored ? JSON.parse(JSON.stringify(initialStored)) : undefined;
+  let alarmExists = false;
+  let lastFocusedWindowId = 10;
+  const tabs = new Map<number, any>([
+    [1, { id: 1, windowId: 10, active: true, url: 'https://chatgpt.com/c/one' }],
+    [2, { id: 2, windowId: 20, active: true, url: 'https://chatgpt.com/c/two' }],
+  ]);
+  const windows = new Map<number, any>([
+    [10, { id: 10, focused: true }],
+    [20, { id: 20, focused: false }],
+  ]);
+  const hooks = {
+    installed: eventHook(), startup: eventHook(), message: eventHook(), alarm: eventHook(),
+    activated: eventHook(), updated: eventHook(), removed: eventHook(), focusChanged: eventHook(),
+  };
+
+  class FakeDate extends Date {
+    static now() { return now; }
+  }
+
+  const chrome = {
+    runtime: {
+      onInstalled: hooks.installed,
+      onStartup: hooks.startup,
+      onMessage: hooks.message,
+    },
+    alarms: {
+      get: async () => alarmExists ? { name: 'chatgpt-active-time-tick' } : undefined,
+      create: async () => { alarmExists = true; },
+      onAlarm: hooks.alarm,
+    },
+    tabs: {
+      onActivated: hooks.activated,
+      onUpdated: hooks.updated,
+      onRemoved: hooks.removed,
+      get: async (id: number) => {
+        const tab = tabs.get(id);
+        if (!tab) throw new Error('Unknown tab');
+        return { ...tab };
+      },
+      query: async ({ active, windowId }: { active?: boolean; windowId?: number }) => (
+        [...tabs.values()].filter(tab => (!active || tab.active) && (windowId === undefined || tab.windowId === windowId))
+          .map(tab => ({ ...tab }))
+      ),
+    },
+    windows: {
+      WINDOW_ID_NONE: -1,
+      onFocusChanged: hooks.focusChanged,
+      get: async (id: number) => {
+        const window = windows.get(id);
+        if (!window) throw new Error('Unknown window');
+        return { ...window };
+      },
+      getLastFocused: async () => ({ ...windows.get(lastFocusedWindowId) }),
+    },
+    storage: {
+      local: {
+        get: async (key: string) => ({ [key]: stored }),
+        set: async (value: Record<string, any>) => {
+          stored = JSON.parse(JSON.stringify(Object.values(value)[0]));
+        },
+      },
+    },
+  };
+
+  const context = vm.createContext({
+    chrome,
+    console: { error() {} },
+    crypto: { randomUUID: () => `uuid-${++uuid}` },
+    Date: FakeDate,
+    importScripts() {},
+    URL,
+  });
+  vm.runInContext(coreSource, context);
+  vm.runInContext(backgroundSource, context);
+
+  async function send(message: any, tabId?: number) {
+    const listener = hooks.message.listeners[0];
+    const sender = tabId ? { tab: { ...tabs.get(tabId) } } : {};
+    if (message.type === 'tracking:activity' || message.type === 'tracking:pageInactive') {
+      listener(message, sender, () => {});
+      return;
+    }
+    return new Promise<any>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('message timeout')), 1000);
+      listener(message, sender, (response: any) => {
+        clearTimeout(timeout);
+        resolve(response);
+      });
+    });
+  }
+
+  async function summary() {
+    return send({ type: 'tracking:get' });
+  }
+
+  async function activity(tabId: number) {
+    await send({ type: 'tracking:activity' }, tabId);
+    return summary();
+  }
+
+  async function focus(windowId: number) {
+    for (const window of windows.values()) window.focused = window.id === windowId;
+    if (windowId !== -1) lastFocusedWindowId = windowId;
+    hooks.focusChanged.listeners[0](windowId);
+    return summary();
+  }
+
+  async function alarm() {
+    hooks.alarm.listeners[0]({ name: 'chatgpt-active-time-tick' });
+    return summary();
+  }
+
+  return {
+    tabs,
+    windows,
+    setNow(value: number) { now = value; },
+    enable: () => send({ type: 'tracking:setEnabled', enabled: true }),
+    disable: () => send({ type: 'tracking:setEnabled', enabled: false }),
+    activity,
+    focus,
+    alarm,
+    summary,
+    stored: () => stored,
+    alarmExists: () => alarmExists,
+  };
+}
+
+test('enabling on ChatGPT starts the five-minute allowance without another page operation', async () => {
+  const app = createHarness();
+  const started = await app.enable();
+  assert.equal(started.active, true);
+  assert.equal(started.totalSeconds, 0);
+
+  app.setNow(360_000);
+  const afterSixMinutes = await app.alarm();
+  assert.equal(afterSixMinutes.active, false);
+  assert.equal(afterSixMinutes.totalSeconds, 300);
+  assert.equal(app.stored().records.length, 1);
+  assert.equal(app.stored().records[0].durationSeconds, 300);
+});
+
+test('service worker restart restores the pending activity and keeps the first five minutes', async () => {
+  const firstWorker = createHarness();
+  await firstWorker.enable();
+  firstWorker.setNow(120_000);
+  assert.equal((await firstWorker.alarm()).totalSeconds, 120);
+  const persisted = firstWorker.stored();
+
+  const restartedWorker = createHarness({ initialStored: persisted, initialNow: 360_000 });
+  const afterDelayedAlarm = await restartedWorker.alarm();
+  assert.equal(afterDelayedAlarm.active, false);
+  assert.equal(afterDelayedAlarm.totalSeconds, 300);
+  assert.equal(restartedWorker.stored().records[0].durationSeconds, 300);
+  assert.equal(restartedWorker.alarmExists(), true);
+});
+
+test('Windows app switch stops immediately and returning to Chrome does not backfill time', async () => {
+  const app = createHarness();
+  await app.enable();
+  await app.activity(1);
+  app.setNow(12_000);
+  const away = await app.focus(-1);
+  assert.equal(away.totalSeconds, 12);
+  assert.equal(away.active, false);
+
+  app.setNow(112_000);
+  const returned = await app.focus(10);
+  assert.equal(returned.totalSeconds, 12);
+  assert.equal(returned.active, false);
+
+  app.setNow(113_000);
+  await app.activity(1);
+  app.setNow(118_000);
+  const resumed = await app.activity(1);
+  assert.equal(resumed.totalSeconds, 17);
+  assert.equal(app.stored().records.length, 1);
+  assert.notEqual(app.stored().current.id, app.stored().records[0].id);
+});
+
+test('periodic focus recheck rejects external-app time when the focus event is missed', async () => {
+  const app = createHarness();
+  await app.enable();
+  await app.activity(1);
+  app.setNow(10_000);
+  assert.equal((await app.alarm()).totalSeconds, 10);
+
+  app.windows.get(10).focused = false;
+  app.setNow(40_000);
+  const checkedAway = await app.alarm();
+  assert.equal(checkedAway.totalSeconds, 10);
+  assert.equal(checkedAway.active, false);
+
+  app.windows.get(10).focused = true;
+  app.setNow(100_000);
+  await app.focus(10);
+  assert.equal((await app.activity(1)).totalSeconds, 10);
+});
+
+test('switching between Chrome windows closes one activity before another starts', async () => {
+  const app = createHarness();
+  await app.enable();
+  await app.activity(1);
+  app.setNow(8_000);
+  const switched = await app.focus(20);
+  assert.equal(switched.totalSeconds, 8);
+  assert.equal(switched.active, false);
+
+  await app.activity(2);
+  app.setNow(13_000);
+  await app.activity(2);
+  assert.equal((await app.summary()).totalSeconds, 13);
+  assert.equal(app.stored().records.length, 1);
+  assert.notEqual(app.stored().records[0].id, app.stored().current.id);
+});
+
+test('duplicate focus and status events never count an interval twice', async () => {
+  const app = createHarness();
+  await app.enable();
+  await app.activity(1);
+  app.setNow(20_000);
+  assert.equal((await app.summary()).totalSeconds, 20);
+  assert.equal((await app.summary()).totalSeconds, 20);
+  assert.equal((await app.alarm()).totalSeconds, 20);
+
+  app.setNow(25_000);
+  assert.equal((await app.focus(-1)).totalSeconds, 25);
+  assert.equal((await app.focus(-1)).totalSeconds, 25);
+  assert.equal(app.stored().records.length, 1);
+});

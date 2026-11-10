@@ -1,9 +1,19 @@
 {
   "manifest_version": 3,
   "name": "AI Thought Receipt Bridge",
-  "version": "0.3.1",
-  "description": "AI conversation pages can be sent to the thought receipt web app.",
-  "permissions": ["activeTab", "scripting", "tabs"],
+  "version": "0.4.3",
+  "description": "AI conversation pages can be sent to the thought receipt web app, with optional on-device ChatGPT active-time tracking.",
+  "permissions": ["activeTab", "scripting", "tabs", "storage", "alarms"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*", "https://chat.openai.com/*"],
+      "js": ["activity.js"],
+      "run_at": "document_start"
+    }
+  ],
   "action": {
     "default_title": "思考レシート化する",
     "default_popup": "popup.html"
