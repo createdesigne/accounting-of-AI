@@ -13,9 +13,11 @@ function eventHook() {
   return { listeners, addListener(listener: Listener) { listeners.push(listener); } };
 }
 
-function createHarness({ initialStored, initialNow = 0 }: { initialStored?: any; initialNow?: number } = {}) {
+function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
+  initialStored?: any; initialNow?: number; initialUuid?: number;
+} = {}) {
   let now = initialNow;
-  let uuid = 0;
+  let uuid = initialUuid;
   let stored: any = initialStored ? JSON.parse(JSON.stringify(initialStored)) : undefined;
   let alarmExists = false;
   let lastFocusedWindowId = 10;
@@ -129,6 +131,11 @@ function createHarness({ initialStored, initialNow = 0 }: { initialStored?: any;
     return summary();
   }
 
+  async function startup() {
+    hooks.startup.listeners[0]();
+    return summary();
+  }
+
   return {
     tabs,
     windows,
@@ -138,13 +145,14 @@ function createHarness({ initialStored, initialNow = 0 }: { initialStored?: any;
     activity,
     focus,
     alarm,
+    startup,
     summary,
     stored: () => stored,
     alarmExists: () => alarmExists,
   };
 }
 
-test('enabling on ChatGPT starts the five-minute allowance without another page operation', async () => {
+test('five-minute allowance stops measuring but keeps the logical session open until twenty minutes', async () => {
   const app = createHarness();
   const started = await app.enable();
   assert.equal(started.active, true);
@@ -153,12 +161,19 @@ test('enabling on ChatGPT starts the five-minute allowance without another page 
   app.setNow(360_000);
   const afterSixMinutes = await app.alarm();
   assert.equal(afterSixMinutes.active, false);
+  assert.equal(afterSixMinutes.sessionOpen, true);
   assert.equal(afterSixMinutes.totalSeconds, 300);
+  assert.equal(app.stored().records.length, 0);
+  assert.equal(app.stored().session.segments[0].durationSeconds, 300);
+
+  app.setNow(1_200_000);
+  const finalized = await app.alarm();
+  assert.equal(finalized.sessionOpen, false);
   assert.equal(app.stored().records.length, 1);
   assert.equal(app.stored().records[0].durationSeconds, 300);
 });
 
-test('service worker restart restores the pending activity and keeps the first five minutes', async () => {
+test('service worker restart restores the active segment and keeps the first five minutes', async () => {
   const firstWorker = createHarness();
   await firstWorker.enable();
   firstWorker.setNow(120_000);
@@ -168,9 +183,54 @@ test('service worker restart restores the pending activity and keeps the first f
   const restartedWorker = createHarness({ initialStored: persisted, initialNow: 360_000 });
   const afterDelayedAlarm = await restartedWorker.alarm();
   assert.equal(afterDelayedAlarm.active, false);
+  assert.equal(afterDelayedAlarm.sessionOpen, true);
   assert.equal(afterDelayedAlarm.totalSeconds, 300);
-  assert.equal(restartedWorker.stored().records[0].durationSeconds, 300);
+  assert.equal(restartedWorker.stored().records.length, 0);
+  assert.equal(restartedWorker.stored().session.segments[0].durationSeconds, 300);
   assert.equal(restartedWorker.alarmExists(), true);
+});
+
+test('browser restart ends the active segment at the last saved instant without counting closed time', async () => {
+  const firstWorker = createHarness();
+  await firstWorker.enable();
+  firstWorker.setNow(120_000);
+  assert.equal((await firstWorker.alarm()).totalSeconds, 120);
+  const originalSessionId = firstWorker.stored().session.id;
+
+  const restartedWorker = createHarness({ initialStored: firstWorker.stored(), initialNow: 360_000 });
+  const afterStartup = await restartedWorker.startup();
+  assert.equal(afterStartup.totalSeconds, 120);
+  assert.equal(afterStartup.active, false);
+  assert.equal(afterStartup.sessionOpen, true);
+  assert.equal(restartedWorker.stored().session.id, originalSessionId);
+  assert.equal(restartedWorker.stored().session.segments[0].endedAt, 120_000);
+
+  restartedWorker.setNow(361_000);
+  await restartedWorker.activity(1);
+  restartedWorker.setNow(366_000);
+  const resumed = await restartedWorker.activity(1);
+  assert.equal(resumed.currentSessionId, originalSessionId);
+  assert.equal(resumed.totalSeconds, 125);
+});
+
+test('browser restart after twenty minutes finalizes the saved session and the next activity starts another', async () => {
+  const firstWorker = createHarness();
+  await firstWorker.enable();
+  firstWorker.setNow(120_000);
+  await firstWorker.alarm();
+  const originalSessionId = firstWorker.stored().session.id;
+
+  const restartedWorker = createHarness({
+    initialStored: firstWorker.stored(), initialNow: 1_300_000, initialUuid: 100,
+  });
+  const afterStartup = await restartedWorker.startup();
+  assert.equal(afterStartup.totalSeconds, 120);
+  assert.equal(afterStartup.sessionOpen, false);
+  assert.equal(restartedWorker.stored().records[0].sessionId, originalSessionId);
+
+  await restartedWorker.activity(1);
+  assert.equal(restartedWorker.stored().records.length, 1);
+  assert.notEqual(restartedWorker.stored().session.id, originalSessionId);
 });
 
 test('Windows app switch stops immediately and returning to Chrome does not backfill time', async () => {
@@ -192,8 +252,9 @@ test('Windows app switch stops immediately and returning to Chrome does not back
   app.setNow(118_000);
   const resumed = await app.activity(1);
   assert.equal(resumed.totalSeconds, 17);
-  assert.equal(app.stored().records.length, 1);
-  assert.notEqual(app.stored().current.id, app.stored().records[0].id);
+  assert.equal(app.stored().records.length, 0);
+  assert.equal(app.stored().session.segments.length, 1);
+  assert.equal(resumed.currentSessionId, app.stored().session.id);
 });
 
 test('periodic focus recheck rejects external-app time when the focus event is missed', async () => {
@@ -228,8 +289,9 @@ test('switching between Chrome windows closes one activity before another starts
   app.setNow(13_000);
   await app.activity(2);
   assert.equal((await app.summary()).totalSeconds, 13);
-  assert.equal(app.stored().records.length, 1);
-  assert.notEqual(app.stored().records[0].id, app.stored().current.id);
+  assert.equal(app.stored().records.length, 0);
+  assert.equal(app.stored().session.segments.length, 1);
+  assert.equal(app.stored().current.sessionId, app.stored().session.id);
 });
 
 test('duplicate focus and status events never count an interval twice', async () => {
@@ -244,5 +306,6 @@ test('duplicate focus and status events never count an interval twice', async ()
   app.setNow(25_000);
   assert.equal((await app.focus(-1)).totalSeconds, 25);
   assert.equal((await app.focus(-1)).totalSeconds, 25);
-  assert.equal(app.stored().records.length, 1);
+  assert.equal(app.stored().records.length, 0);
+  assert.equal(app.stored().session.segments.length, 1);
 });

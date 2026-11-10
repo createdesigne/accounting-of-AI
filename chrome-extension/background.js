@@ -16,9 +16,11 @@ chrome.runtime.onStartup.addListener(() => {
   ensureAlarm();
   enqueue(async () => {
     const state = await loadState();
-    // Never bridge time across a browser restart. A fresh page operation starts
-    // a new activity while keeping all completed records.
+    // Never bridge measured time across a browser restart. The logical session
+    // may remain open for up to 20 minutes, but its active segment ends at the
+    // last instant that was already persisted before Chrome stopped.
     if (state.current) tracker.pause(state, state.current.accountedThrough);
+    tracker.tick(state, Date.now());
     await saveState(state);
   });
 });
@@ -195,13 +197,16 @@ async function saveState(state) {
 
 async function pauseAndSave(now) {
   const state = await loadState();
-  if (!state.current) return;
   tracker.pause(state, now);
+  tracker.tick(state, now);
   await saveState(state);
 }
 
 async function reconcileCurrentEnvironment(state, now) {
-  if (!state.current) return;
+  if (!state.current) {
+    tracker.tick(state, now);
+    return;
+  }
   const current = state.current;
   const [tab, window, lastFocused] = await Promise.all([
     chrome.tabs.get(current.tabId).catch(() => null),
@@ -217,5 +222,8 @@ async function reconcileCurrentEnvironment(state, now) {
     && lastFocused.id === current.windowId,
   );
   if (isEligible) tracker.tick(state, now);
-  else tracker.pause(state, current.accountedThrough);
+  else {
+    tracker.pause(state, current.accountedThrough);
+    tracker.tick(state, now);
+  }
 }
