@@ -1479,6 +1479,11 @@ button {
   background: linear-gradient(180deg, #fffdf7, #fffbeb);
 }
 
+.time-journal-entry.reregistration {
+  border-color: rgba(5, 150, 105, 0.25);
+  background: linear-gradient(180deg, #ffffff, #ecfdf5);
+}
+
 .time-journal-entry-heading {
   display: flex;
   justify-content: space-between;
@@ -1528,6 +1533,11 @@ button {
 .time-journal-entry.reversal .time-journal-entry-status em {
   color: #92400e;
   background: #fef3c7;
+}
+
+.time-journal-entry.reregistration .time-journal-entry-status em {
+  color: #047857;
+  background: #d1fae5;
 }
 
 .time-journal-entry dl {
@@ -1688,6 +1698,11 @@ button {
   background: #fef3c7;
 }
 
+.time-import-history-item summary > span.reregistered {
+  color: #047857;
+  background: #d1fae5;
+}
+
 .time-import-history-item dl {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1723,6 +1738,11 @@ button {
   grid-column: 1 / -1;
 }
 
+.time-import-history-item .history-action {
+  grid-column: 1 / -1;
+  background: #f8fafc;
+}
+
 .history-record-id dd {
   overflow-wrap: anywhere;
 }
@@ -1735,6 +1755,19 @@ button {
   border-radius: 13px;
   color: #92400e;
   background: #fffbeb;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.time-reregistration-button {
+  width: calc(100% - 24px);
+  min-height: 42px;
+  margin: 0 12px 12px;
+  border: 1px solid rgba(5, 150, 105, 0.24);
+  border-radius: 13px;
+  color: #047857;
+  background: #ecfdf5;
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
@@ -1791,8 +1824,20 @@ button {
   cursor: pointer;
 }
 
+.time-reregistration-confirm {
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: #047857;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .time-cancellation-confirm:disabled,
-.time-cancellation-button:disabled {
+.time-cancellation-button:disabled,
+.time-reregistration-confirm:disabled,
+.time-reregistration-button:disabled {
   cursor: wait;
   opacity: 0.6;
 }

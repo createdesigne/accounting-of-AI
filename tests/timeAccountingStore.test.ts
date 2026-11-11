@@ -7,6 +7,8 @@ import {
   cancelImportedTimeRecord,
   importTimeRecords,
   loadTimeAccountingStore,
+  reregisterImportedTimeRecord,
+  reregistrationEntryIdForTimeRecord,
   reversalEntryIdForTimeRecord,
 } from '../src/timeAccountingStore.ts';
 import type { TimeRecordPreview } from '../src/timeRecordTransfer.ts';
@@ -240,6 +242,94 @@ test('keeps a closed month unchanged and posts the correction into a later open 
   });
   assert.deepEqual(corrected.store.ledger.entries.slice(0, 2), adjustedLedger.entries);
   assert.equal(corrected.store.ledger.entries[2].postedOn, '2026-10-01');
+  const restored = await reregisterImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse('2026-10-02T12:00:00Z'),
+  });
+  assert.deepEqual(restored.store.ledger.entries.slice(0, 2), adjustedLedger.entries);
+  assert.equal(restored.store.ledger.entries[3].postedOn, '2026-10-02');
+});
+
+test('re-registers 61 seconds with a third linked journal while preserving the original and reversal', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('reregister:day:2026-11-10', 61);
+  await importTimeRecords([record], options(storage, locks));
+  await cancelImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse('2026-11-11T03:00:00Z'),
+  });
+  const before = loadTimeAccountingStore(storage);
+  const originalAndReversal = JSON.stringify(before.ledger.entries);
+  const result = await reregisterImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse('2026-11-12T03:00:00Z'),
+  });
+  assert.equal(result.reregistered, true);
+  assert.equal(result.alreadyRegistered, false);
+  assert.equal(JSON.stringify(result.store.ledger.entries.slice(0, 2)), originalAndReversal);
+  assert.equal(result.store.ledger.measurements[0].actualInputSeconds, 61);
+  assert.equal(result.store.ledger.entries.length, 3);
+  const reregistration = result.store.ledger.entries[2];
+  assert.equal(reregistration.id, reregistrationEntryIdForTimeRecord(record.recordId));
+  assert.equal(reregistration.kind, 'usage-reregistration');
+  assert.equal(reregistration.restoresEntryId, result.store.ledger.entries[1].id);
+  assert.deepEqual(reregistration.lines.map((line) => [line.side, line.account, line.seconds]), [
+    ['debit', TIME_ACCOUNTS.aiClearing, 61],
+    ['credit', TIME_ACCOUNTS.timeContribution, 61],
+  ]);
+  assert.deepEqual(result.store.importedRecords[0].actions?.map((action) => action.kind), [
+    'cancellation', 'reregistration',
+  ]);
+  const resent = await importTimeRecords([record], options(storage, locks));
+  assert.equal(resent.importedCount, 0);
+  assert.equal(resent.store.ledger.entries.length, 3);
+});
+
+test('serializes concurrent re-registration and permits one later re-cancellation', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('reregister-concurrent:day:2026-11-10', 60);
+  await importTimeRecords([record], options(storage, locks));
+  await cancelImportedTimeRecord(record.recordId, options(storage, locks));
+  const operationOptions = {
+    storage, locks, now: () => Date.parse('2026-11-12T03:00:00Z'),
+  };
+  const results = await Promise.all([
+    reregisterImportedTimeRecord(record.recordId, operationOptions),
+    reregisterImportedTimeRecord(record.recordId, operationOptions),
+  ]);
+  assert.deepEqual(results.map((result) => result.reregistered).sort(), [false, true]);
+  const restored = loadTimeAccountingStore(storage);
+  assert.equal(restored.ledger.entries.filter((entry) => entry.kind === 'usage-reregistration').length, 1);
+  const recancelled = await cancelImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse('2026-11-13T03:00:00Z'),
+  });
+  assert.equal(recancelled.cancelled, true);
+  assert.equal(recancelled.reversalEntryId, reversalEntryIdForTimeRecord(record.recordId, 2));
+  assert.equal(recancelled.store.ledger.entries.length, 4);
+  assert.equal(recancelled.store.ledger.entries[3].reversesEntryId, restored.ledger.entries[2].id);
+  assert.deepEqual(recancelled.store.importedRecords[0].actions?.map((action) => action.kind), [
+    'cancellation', 'reregistration', 'cancellation',
+  ]);
+});
+
+test('a failed re-registration save changes nothing and retries without a duplicate', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('reregister-retry:day:2026-11-10', 59);
+  await importTimeRecords([record], options(storage, locks));
+  await cancelImportedTimeRecord(record.recordId, options(storage, locks));
+  const snapshot = storage.getItem(TIME_ACCOUNTING_STORAGE_BASE_KEY);
+  storage.failNextSet = true;
+  await assert.rejects(
+    () => reregisterImportedTimeRecord(record.recordId, options(storage, locks)),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'SAVE_FAILED',
+  );
+  assert.equal(storage.getItem(TIME_ACCOUNTING_STORAGE_BASE_KEY), snapshot);
+  assert.equal(loadTimeAccountingStore(storage).ledger.entries.length, 2);
+  const retry = await reregisterImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(retry.reregistered, true);
+  const lostResponseRetry = await reregisterImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(lostResponseRetry.alreadyRegistered, true);
+  assert.equal(lostResponseRetry.store.ledger.entries.length, 3);
 });
 
 test('restores the dedicated ledger after a page reload', async () => {

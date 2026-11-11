@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTimeAccountingLedger, recordAiUsage } from "../src/timeAccounting.ts";
-import { cancelImportedTimeRecord, importTimeRecords, loadTimeAccountingStore } from "../src/timeAccountingStore.ts";
+import { cancelImportedTimeRecord, importTimeRecords, loadTimeAccountingStore, reregisterImportedTimeRecord } from "../src/timeAccountingStore.ts";
 import { buildTimeAccountingView, buildTimeImportHistory } from "../src/timeAccountingView.ts";
 import type { TimeRecordPreview } from "../src/timeRecordTransfer.ts";
 
@@ -42,6 +42,7 @@ test("保存済み61秒を今月の合計と時間仕訳に表示する", () => 
     durationSeconds: 61,
     entryKind: "usage",
     status: "有効",
+    isActive: true,
     debitAccount: "AI仮受品",
     creditAccount: "時間拠出",
   });
@@ -124,6 +125,7 @@ test("取り込み履歴を再読み込み後も正確な日時・秒数・仕�
     status: "取り込み済み",
     debitAccount: "AI仮受品",
     creditAccount: "時間拠出",
+    actions: [],
   });
 });
 
@@ -172,4 +174,24 @@ test("取消後も実測秒数を保持し、元仕訳・取消仕訳と取消�
   assert.equal(history[0].status, "取消済み");
   assert.equal(history[0].reversalEntryId, reversal?.id);
   assert.equal(history[0].cancelledAt, "2026-11-12T03:04:05.000Z");
+
+  await reregisterImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse("2026-11-13T03:04:05Z"),
+  });
+  const reregisteredStore = loadTimeAccountingStore(storage);
+  const restoredView = buildTimeAccountingView(reregisteredStore.ledger, new Date(2026, 10, 15));
+  assert.equal(restoredView.currentMonthSeconds, 61);
+  assert.equal(restoredView.rows.length, 3);
+  const usageRow = restoredView.rows.find((row) => row.entryKind === "usage");
+  assert.equal(usageRow?.status, "再登録済み");
+  assert.equal(usageRow?.isActive, true);
+  const reregistration = restoredView.rows.find((row) => row.entryKind === "reregistration");
+  assert.equal(reregistration?.durationSeconds, 61);
+  assert.equal(reregistration?.debitAccount, "AI仮受品");
+  assert.equal(reregistration?.creditAccount, "時間拠出");
+  const restoredHistory = buildTimeImportHistory(reregisteredStore);
+  assert.equal(restoredHistory[0].status, "再登録済み");
+  assert.deepEqual(restoredHistory[0].actions.map((action) => action.kind), [
+    "cancellation", "reregistration",
+  ]);
 });

@@ -89,8 +89,44 @@ const initialStore = {
     await page.getByText('取り込み履歴を見る', { exact: true }).click();
     await page.locator('.time-import-history-item > summary').click();
     assert.equal(await page.getByRole('button', { name: 'この取り込みを取り消す', exact: true }).count(), 0);
+    const cancelledSnapshot = await page.evaluate(key => localStorage.getItem(key), storageKey);
+    await page.getByRole('button', { name: '再登録する', exact: true }).click();
+    await page.getByRole('dialog', { name: 'この取り込みを再登録しますか？', exact: true }).waitFor();
+    assert.equal(await page.evaluate(key => localStorage.getItem(key), storageKey), cancelledSnapshot,
+      'opening the re-registration confirmation must not change accounting data');
+    await page.getByRole('button', { name: '再登録仕訳を追加する', exact: true }).click();
+    await page.getByText('再登録済み', { exact: true }).first().waitFor();
+
+    const reregistered = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), storageKey);
+    assert.equal(reregistered.ledger.entries.length, 3);
+    assert.deepEqual(reregistered.ledger.entries.slice(0, 2), saved.ledger.entries);
+    assert.equal(reregistered.ledger.entries[2].kind, 'usage-reregistration');
+    assert.equal(reregistered.ledger.entries[2].restoresEntryId, saved.ledger.entries[1].id);
+    assert.deepEqual(reregistered.ledger.entries[2].lines.map(line => [line.side, line.account, line.seconds]), [
+      ['debit', 'AI仮受品', 61],
+      ['credit', '時間拠出', 61],
+    ]);
+    assert.deepEqual(reregistered.importedRecords[0].actions.map(action => action.kind), [
+      'cancellation', 'reregistration',
+    ]);
+    assert.equal(await page.locator('.time-journal-summary > strong').textContent(), '1分1秒');
+
+    await page.reload();
+    await nav.getByRole('button', { name: '仕訳', exact: true }).click();
+    await page.getByRole('button', { name: '時間仕訳', exact: true }).click();
+    await page.getByText('取り込み履歴を見る', { exact: true }).click();
+    await page.locator('.time-import-history-item > summary').click();
+    await page.getByRole('button', { name: 'この取り込みを取り消す', exact: true }).click();
+    await page.getByRole('button', { name: '取消仕訳を追加する', exact: true }).click();
+    await page.getByText('取消済み', { exact: true }).first().waitFor();
+    const recancelled = await page.evaluate(key => JSON.parse(localStorage.getItem(key)), storageKey);
+    assert.equal(recancelled.ledger.entries.length, 4);
+    assert.deepEqual(recancelled.ledger.entries.slice(0, 3), reregistered.ledger.entries);
+    assert.equal(recancelled.ledger.entries[3].kind, 'usage-reversal');
+    assert.equal(recancelled.ledger.entries[3].reversesEntryId, reregistered.ledger.entries[2].id);
+    assert.equal(await page.locator('.time-journal-summary > strong').textContent(), '0分0秒');
     assert.deepEqual(errors, []);
-    console.log('PASS: cancellation confirmation, inverse journal, original/raw preservation, persistence and no second cancellation.');
+    console.log('PASS: cancellation, explicit re-registration, persistence, append-only links and later re-cancellation.');
   } finally {
     await browser.close();
   }

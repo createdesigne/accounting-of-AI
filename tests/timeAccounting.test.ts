@@ -11,6 +11,7 @@ import {
   migrateTimeAccountingLedger,
   recordAiUsage,
   recordMonthEndAdjustment,
+  reregisterAiUsage,
   reverseAiUsage,
   summarizeTimeMeasurements,
 } from '../src/timeAccounting.ts';
@@ -118,6 +119,45 @@ test('protects a closed period and posts its reversal only after the closing ent
   assert.deepEqual(corrected.entries.slice(0, 2), adjusted.entries);
   assert.equal(corrected.entries[2].postedOn, '2026-11-01');
   assert.equal(corrected.entries[2].reversesEntryId, usage.entryId);
+});
+
+test('re-registers a reversed usage and permits a later append-only re-cancellation', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const reversed = reverseAiUsage(used, {
+    entryId: 'reversal-1', sourceEventId: usage.sourceEventId, postedOn: '2026-10-21',
+  });
+  const restored = reregisterAiUsage(reversed, {
+    entryId: 'reregistration-1', sourceEventId: usage.sourceEventId, postedOn: '2026-10-22',
+  });
+  assert.deepEqual(restored.entries.slice(0, 2), reversed.entries);
+  assert.deepEqual(restored.entries[2], {
+    id: 'reregistration-1', kind: 'usage-reregistration', postedOn: '2026-10-22',
+    sourceEventId: usage.sourceEventId, restoresEntryId: 'reversal-1',
+    lines: [
+      { side: 'debit', account: 'AI仮受品', seconds: 3_600, measurement: 'actual-input' },
+      { side: 'credit', account: '時間拠出', seconds: 3_600, measurement: 'actual-input' },
+    ],
+  });
+  assert.deepEqual(restored.measurements[0].correctionEntryIds, ['reversal-1', 'reregistration-1']);
+  assert.equal(accountBalanceSeconds(restored, TIME_ACCOUNTS.aiClearing), 3_600);
+  assert.equal(accountBalanceSeconds(restored, TIME_ACCOUNTS.timeContribution), -3_600);
+  assert.throws(
+    () => reregisterAiUsage(restored, {
+      entryId: 'duplicate-reregistration', sourceEventId: usage.sourceEventId, postedOn: '2026-10-23',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'ALREADY_REGISTERED',
+  );
+  const reversedAgain = reverseAiUsage(restored, {
+    entryId: 'reversal-2', sourceEventId: usage.sourceEventId, postedOn: '2026-10-23',
+  });
+  assert.deepEqual(reversedAgain.entries.slice(0, 3), restored.entries);
+  assert.equal(reversedAgain.entries[3].reversesEntryId, 'reregistration-1');
+  assert.deepEqual(reversedAgain.measurements[0].correctionEntryIds, [
+    'reversal-1', 'reregistration-1', 'reversal-2',
+  ]);
+  assert.ok(reversedAgain.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(reversedAgain, TIME_ACCOUNTS.aiClearing), 0);
+  assert.equal(accountBalanceSeconds(reversedAgain, TIME_ACCOUNTS.timeContribution), 0);
 });
 
 test('migrates legacy whole minutes to exact seconds only once', () => {
