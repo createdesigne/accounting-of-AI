@@ -13,6 +13,7 @@ import {
   acknowledgeImportedTimeRecords,
   mergeTimeRecordPreviews,
   parseTimeRecordPayload,
+  requestAutomaticTimeRecords,
   type TimeRecordPreview,
 } from "./timeRecordTransfer";
 import {
@@ -22,6 +23,12 @@ import {
   type TimeAccountingStore,
 } from "./timeAccountingStore";
 import { buildTimeAccountingView, type TimeJournalRow } from "./timeAccountingView";
+import {
+  TIME_AUTO_IMPORT_SETTINGS_BASE_KEY,
+  loadAutomaticTimeImportEnabled,
+  runAutomaticTimeImport,
+  saveAutomaticTimeImportEnabled,
+} from "./timeAccountingAutoImport";
 import {
   ArrowLeft,
   ArrowRight,
@@ -116,6 +123,7 @@ const STORAGE_KEY = `${STORAGE_PREFIX}watashi-to-ai-thought-receipts`;
 const RAW_CONVERSATION_KEY = `${STORAGE_PREFIX}aiConversationRaw`;
 const THINKING_LEDGER_KEY = `${STORAGE_PREFIX}thinkingLedger`;
 const TIME_ACCOUNTING_STORAGE_KEY = `${STORAGE_PREFIX}${TIME_ACCOUNTING_STORAGE_BASE_KEY}`;
+const TIME_AUTO_IMPORT_SETTINGS_KEY = `${STORAGE_PREFIX}${TIME_AUTO_IMPORT_SETTINGS_BASE_KEY}`;
 const RECEIPT_HASH_KEY = "receipt";
 const DRAFT_QUERY_KEY = "draft";
 
@@ -551,6 +559,12 @@ function App() {
   const timeRecordPreviewRef = useRef<TimeRecordPreview[]>([]);
   const [timeImportBusy, setTimeImportBusy] = useState(false);
   const [timeImportMessage, setTimeImportMessage] = useState("");
+  const [automaticTimeImportEnabled, setAutomaticTimeImportEnabled] = useState(() => (
+    loadAutomaticTimeImportEnabled(localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY)
+  ));
+  const [automaticTimeImportBusy, setAutomaticTimeImportBusy] = useState(false);
+  const [automaticTimeImportMessage, setAutomaticTimeImportMessage] = useState("");
+  const automaticTimeImportAttemptRef = useRef(0);
   const [timeAccountingStore, setTimeAccountingStore] = useState<TimeAccountingStore | null>(() => {
     try {
       return loadTimeAccountingStore(localStorage, TIME_ACCOUNTING_STORAGE_KEY);
@@ -619,6 +633,61 @@ function App() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refreshTimeAccounting]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== TIME_AUTO_IMPORT_SETTINGS_KEY && event.key !== null) return;
+      setAutomaticTimeImportEnabled(
+        loadAutomaticTimeImportEnabled(localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY),
+      );
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useEffect(() => {
+    const attempt = ++automaticTimeImportAttemptRef.current;
+    if (!automaticTimeImportEnabled) {
+      setAutomaticTimeImportBusy(false);
+      setAutomaticTimeImportMessage("");
+      return;
+    }
+    let cancelled = false;
+    setAutomaticTimeImportBusy(true);
+    setAutomaticTimeImportMessage("確定済みの利用時間を確認しています…");
+    void runAutomaticTimeImport({
+      enabled: true,
+      requestRecords: async () => {
+        const payload = await requestAutomaticTimeRecords();
+        return cancelled ? [] : payload.records;
+      },
+      importRecords: (records) => importTimeRecords(records, {
+        storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      }),
+      acknowledge: acknowledgeImportedTimeRecords,
+      onSaved: (result) => setTimeAccountingStore(result.store),
+    }).then((outcome) => {
+      if (cancelled) return;
+      setAutomaticTimeImportMessage("");
+      if (outcome.status === "completed" && outcome.result.importedCount > 0) {
+        showToast(
+          `${outcome.result.importedCount}件・合計${formatTimeRecordDuration(outcome.result.importedSeconds)}を自動で取り込みました。`,
+        );
+      }
+    }).catch((error) => {
+      if (cancelled) return;
+      setAutomaticTimeImportMessage(
+        `${error instanceof Error ? error.message : "自動取り込みに失敗しました。"} 記録は削除せず、次回起動時に再試行します。`,
+      );
+    }).finally(() => {
+      if (!cancelled && automaticTimeImportAttemptRef.current === attempt) {
+        setAutomaticTimeImportBusy(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [automaticTimeImportEnabled]);
 
   useEffect(() => {
     const receiveTimeRecords = (event: MessageEvent) => {
@@ -699,6 +768,16 @@ function App() {
       );
     } finally {
       setTimeImportBusy(false);
+    }
+  }
+
+  function updateAutomaticTimeImport(enabled: boolean) {
+    try {
+      saveAutomaticTimeImportEnabled(enabled, localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY);
+      setAutomaticTimeImportEnabled(enabled);
+      setAutomaticTimeImportMessage("");
+    } catch {
+      setAutomaticTimeImportMessage("自動取り込み設定を保存できませんでした。設定は変更していません。");
     }
   }
   const stats = useMemo(() => buildStats(receiptData), [receiptData]);
@@ -1227,6 +1306,10 @@ function App() {
               receipts={receiptData}
               measuredTimeSeconds={timeAccountingView.currentMonthSeconds}
               measuredTimeRecordCount={timeAccountingView.currentMonthRecordCount}
+              automaticTimeImportEnabled={automaticTimeImportEnabled}
+              automaticTimeImportBusy={automaticTimeImportBusy}
+              automaticTimeImportMessage={automaticTimeImportMessage}
+              onAutomaticTimeImportChange={updateAutomaticTimeImport}
               onShowAnalysis={showAnalysis}
               onShowReceipts={showReceipts}
               onStartReader={openReader}
@@ -1880,6 +1963,10 @@ function HomeScreen({
   receipts,
   measuredTimeSeconds,
   measuredTimeRecordCount,
+  automaticTimeImportEnabled,
+  automaticTimeImportBusy,
+  automaticTimeImportMessage,
+  onAutomaticTimeImportChange,
   onShowAnalysis,
   onShowReceipts,
   onStartReader,
@@ -1889,6 +1976,10 @@ function HomeScreen({
   receipts: ThoughtReceipt[];
   measuredTimeSeconds: number;
   measuredTimeRecordCount: number;
+  automaticTimeImportEnabled: boolean;
+  automaticTimeImportBusy: boolean;
+  automaticTimeImportMessage: string;
+  onAutomaticTimeImportChange: (enabled: boolean) => void;
   onShowAnalysis: (focus?: AnalysisFocus) => void;
   onShowReceipts: (filter?: ReceiptFilter | null) => void;
   onStartReader: () => void;
@@ -1925,6 +2016,29 @@ function HomeScreen({
           <strong>{formatTimeRecordDuration(measuredTimeSeconds)}</strong>
           <p>拡張機能で計測し、会計に取り込んだ{measuredTimeRecordCount}件の合計</p>
         </div>
+      </section>
+
+      <section className="card auto-time-import-card" aria-labelledby="autoTimeImportTitle">
+        <div>
+          <strong id="autoTimeImportTitle">自動取り込み</strong>
+          <p>Webアプリを開いたとき、確定済みで未取り込みの利用時間だけを帳簿へ保存します。</p>
+        </div>
+        <label className="auto-time-import-toggle">
+          <input
+            type="checkbox"
+            checked={automaticTimeImportEnabled}
+            onChange={(event) => onAutomaticTimeImportChange(event.target.checked)}
+          />
+          <span aria-hidden="true" />
+          <b>{automaticTimeImportEnabled ? "ON" : "OFF"}</b>
+        </label>
+        <small>初期設定はOFFです。手動の「会計に取り込む」も引き続き利用できます。</small>
+        {automaticTimeImportBusy && !automaticTimeImportMessage && (
+          <p className="auto-time-import-status" role="status">確認しています…</p>
+        )}
+        {automaticTimeImportMessage && (
+          <p className="auto-time-import-status" role="status">{automaticTimeImportMessage}</p>
+        )}
       </section>
 
       <button

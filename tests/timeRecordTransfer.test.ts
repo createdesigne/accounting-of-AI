@@ -2,7 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   TIME_RECORD_PROTOCOL,
+  TIME_RECORD_AUTO_REQUEST_TYPE,
+  TIME_RECORD_AUTO_RESULT_TYPE,
+  TIME_RECORD_WINDOW_SOURCE,
   formatTimeRecordDuration,
+  requestAutomaticTimeRecords,
   mergeTimeRecordPreviews,
   parseTimeRecordPayload,
 } from '../src/timeRecordTransfer.ts';
@@ -60,4 +64,40 @@ test('merges identical deliveries without duplication and rejects changed conten
 test('formats the confirmation total in Japanese seconds', () => {
   assert.equal(formatTimeRecordDuration(59), '0分59秒');
   assert.equal(formatTimeRecordDuration(3_661), '1時間1分1秒');
+});
+
+test('requests automatic records with a correlated response and validates the payload', async () => {
+  const listeners = new Set<(event: any) => void>();
+  const sent: any[] = [];
+  const channel: any = {
+    location: { origin: 'https://createdesigne.github.io' },
+    setTimeout: (handler: () => void, timeout: number) => setTimeout(handler, timeout) as any,
+    clearTimeout,
+    addEventListener: (_type: string, listener: (event: any) => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: (event: any) => void) => listeners.delete(listener),
+    postMessage(message: any, targetOrigin: string) {
+      sent.push({ message, targetOrigin });
+      const responsePayload = payload([record()]);
+      queueMicrotask(() => {
+        for (const listener of listeners) listener({
+          source: channel,
+          origin: channel.location.origin,
+          data: {
+            source: TIME_RECORD_WINDOW_SOURCE,
+            type: TIME_RECORD_AUTO_RESULT_TYPE,
+            requestId: message.requestId,
+            ok: true,
+            payload: responsePayload,
+          },
+        });
+      });
+    },
+  };
+
+  const result = await requestAutomaticTimeRecords(100, channel);
+  assert.equal(result.records.length, 1);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].message.type, TIME_RECORD_AUTO_REQUEST_TYPE);
+  assert.equal(sent[0].targetOrigin, channel.location.origin);
+  assert.equal(listeners.size, 0);
 });

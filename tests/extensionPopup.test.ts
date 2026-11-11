@@ -13,7 +13,7 @@ function popup({ source = 'https://chatgpt.com/c/example', result = conversation
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
-    chrome: { runtime: { getManifest: () => ({ version: '0.4.3' }) }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; return [{ result }]; } } },
+    chrome: { runtime: { getManifest: () => ({ version: '0.4.4' }) }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; return [{ result }]; } } },
     URL, URLSearchParams, Date, Error, console: { error() {} },
   });
   return { run: () => click(), created, elements, injections: () => injected };
@@ -53,7 +53,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
   assert.equal(page.elements.createReceipt.disabled, false);
-  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.4\.3/);
+  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.4\.4/);
   assert.match(page.elements.status.textContent, /回答の生成が終わってから/);
 });
 test('unsupported or lookalike domains are not read', async () => {
@@ -87,7 +87,7 @@ function transferPopup(destinationValue = 'production') {
     document: { getElementById: (id: string) => elements[id] },
     chrome: {
       runtime: {
-        getManifest: () => ({ version: '0.4.3' }),
+        getManifest: () => ({ version: '0.4.4' }),
         sendMessage: async ({ type }: { type: string }) => {
           if (type !== 'time-records:getFinalized') throw new Error('unexpected message');
           return {

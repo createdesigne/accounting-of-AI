@@ -7,6 +7,8 @@ export const TIME_RECORD_ACK_SOURCE = "ai-time-record-web-app";
 export const TIME_RECORD_ACK_TYPE = "AI_TIME_RECORDS_IMPORT_ACK";
 export const TIME_RECORD_ACK_RESULT_SOURCE = "ai-time-record-extension";
 export const TIME_RECORD_ACK_RESULT_TYPE = "AI_TIME_RECORDS_IMPORT_ACK_RESULT";
+export const TIME_RECORD_AUTO_REQUEST_TYPE = "AI_TIME_RECORDS_AUTO_REQUEST";
+export const TIME_RECORD_AUTO_RESULT_TYPE = "AI_TIME_RECORDS_AUTO_RESULT";
 export const TIME_RECORD_MAX_COUNT = 500;
 export const TIME_RECORD_MAX_BYTES = 192 * 1024;
 
@@ -38,6 +40,15 @@ export type TimeRecordPayload = {
   records: TimeRecordPreview[];
 };
 
+type TimeRecordMessageChannel = {
+  location: { origin: string };
+  setTimeout: (handler: () => void, timeout?: number) => number;
+  clearTimeout: (id: number) => void;
+  addEventListener: (type: "message", listener: (event: MessageEvent) => void) => void;
+  removeEventListener: (type: "message", listener: (event: MessageEvent) => void) => void;
+  postMessage: (message: unknown, targetOrigin: string) => void;
+};
+
 export function parseTimeRecordPayload(value: unknown): TimeRecordPayload | null {
   if (!isObject(value) || value.protocol !== TIME_RECORD_PROTOCOL
     || !isSafeText(value.requestId, 160) || !Array.isArray(value.records)
@@ -62,8 +73,8 @@ export function parseTimeRecordPayload(value: unknown): TimeRecordPayload | null
   return payload;
 }
 
-export function createTimeRecordPayload(records: TimeRecordPreview[], requestId: string): TimeRecordPayload {
-  const payload = parseTimeRecordPayload({ protocol: TIME_RECORD_PROTOCOL, requestId, records });
+export function createTimeRecordPayload(records: readonly TimeRecordPreview[], requestId: string): TimeRecordPayload {
+  const payload = parseTimeRecordPayload({ protocol: TIME_RECORD_PROTOCOL, requestId, records: [...records] });
   if (!payload) throw new Error("利用時間の完了通知データが正しくありません。");
   return payload;
 }
@@ -107,7 +118,7 @@ export function formatTimeRecordDuration(totalSeconds: number) {
 }
 
 export function acknowledgeImportedTimeRecords(
-  records: TimeRecordPreview[],
+  records: readonly TimeRecordPreview[],
   timeoutMs = 4_000,
 ): Promise<void> {
   const requestId = `time-import-ack-${crypto.randomUUID()}`;
@@ -140,6 +151,47 @@ export function acknowledgeImportedTimeRecords(
       type: TIME_RECORD_ACK_TYPE,
       payload,
     }, window.location.origin);
+  });
+}
+
+export function requestAutomaticTimeRecords(
+  timeoutMs = 4_000,
+  channel: TimeRecordMessageChannel = window,
+): Promise<TimeRecordPayload> {
+  const requestId = `time-auto-import-${crypto.randomUUID()}`;
+  return new Promise((resolve, reject) => {
+    const timeout = channel.setTimeout(() => {
+      cleanup();
+      reject(new Error("Chrome拡張機能から利用時間を取得できませんでした。"));
+    }, timeoutMs);
+    const receiveResult = (event: MessageEvent) => {
+      if (event.source !== channel || event.origin !== channel.location.origin
+        || event.data?.source !== TIME_RECORD_WINDOW_SOURCE
+        || event.data?.type !== TIME_RECORD_AUTO_RESULT_TYPE
+        || event.data?.requestId !== requestId) return;
+      cleanup();
+      if (event.data.ok !== true) {
+        reject(new Error(
+          typeof event.data.message === "string" && event.data.message
+            ? event.data.message
+            : "Chrome拡張機能から利用時間を取得できませんでした。",
+        ));
+        return;
+      }
+      const payload = parseTimeRecordPayload(event.data.payload);
+      if (payload) resolve(payload);
+      else reject(new Error("Chrome拡張機能から不正な利用時間データを受信しました。"));
+    };
+    function cleanup() {
+      channel.clearTimeout(timeout);
+      channel.removeEventListener("message", receiveResult);
+    }
+    channel.addEventListener("message", receiveResult);
+    channel.postMessage({
+      source: TIME_RECORD_READY_SOURCE,
+      type: TIME_RECORD_AUTO_REQUEST_TYPE,
+      requestId,
+    }, channel.location.origin);
   });
 }
 

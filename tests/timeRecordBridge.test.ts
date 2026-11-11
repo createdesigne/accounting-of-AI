@@ -8,7 +8,7 @@ const bridgeSource = readFileSync(new URL('../chrome-extension/timeRecordBridge.
 
 function createBridge(
   url = 'https://createdesigne.github.io/accounting-of-AI/',
-  ackResult: any = { ok: true, acknowledgedCount: 1 },
+  runtimeResult: any = { ok: true, acknowledgedCount: 1 },
 ) {
   const runtimeListeners: Array<(message: any, sender: any, respond: (value: any) => void) => any> = [];
   const windowListeners: Array<(event: any) => void> = [];
@@ -26,7 +26,10 @@ function createBridge(
     runtime: {
       id: 'extension-id',
       onMessage: { addListener(listener: any) { runtimeListeners.push(listener); } },
-      sendMessage: async (message: any) => { runtimeSent.push(message); return ackResult; },
+      sendMessage: async (message: any) => {
+        runtimeSent.push(message);
+        return typeof runtimeResult === 'function' ? runtimeResult(message) : runtimeResult;
+      },
     },
   };
   const context = vm.createContext({
@@ -127,4 +130,44 @@ test('reports acknowledgement failure without changing the transferred records',
   });
   assert.equal(app.posted.at(-1)?.message.ok, false);
   assert.equal(app.posted.at(-1)?.message.message, 'simulated response failure');
+});
+
+test('requests pending finalized records for automatic import only through the approved bridge', async () => {
+  let app: ReturnType<typeof createBridge>;
+  app = createBridge(
+    'https://createdesigne.github.io/accounting-of-AI/',
+    (message: any) => message.type === 'time-records:getFinalized'
+      ? { ok: true, payload: app.payload }
+      : { ok: false, message: 'unexpected message' },
+  );
+  await app.windowListeners[0]({
+    source: app.fakeWindow,
+    origin: app.fakeWindow.location.origin,
+    data: {
+      source: app.protocol.WINDOW_READY_SOURCE,
+      type: app.protocol.WINDOW_AUTO_REQUEST_TYPE,
+      requestId: 'auto-request-1',
+    },
+  });
+
+  assert.equal(app.runtimeSent.length, 1);
+  assert.equal(app.runtimeSent[0].type, 'time-records:getFinalized');
+  assert.equal(app.runtimeSent[0].destination, 'production');
+  assert.equal(app.posted.at(-1)?.message.type, app.protocol.WINDOW_AUTO_RESULT_TYPE);
+  assert.equal(app.posted.at(-1)?.message.ok, true);
+  assert.equal(app.posted.at(-1)?.message.payload.records.length, 1);
+});
+
+test('rejects malformed automatic requests without contacting the extension background', async () => {
+  const app = createBridge();
+  await app.windowListeners[0]({
+    source: app.fakeWindow,
+    origin: app.fakeWindow.location.origin,
+    data: {
+      source: app.protocol.WINDOW_READY_SOURCE,
+      type: app.protocol.WINDOW_AUTO_REQUEST_TYPE,
+      requestId: '',
+    },
+  });
+  assert.equal(app.runtimeSent.length, 0);
 });

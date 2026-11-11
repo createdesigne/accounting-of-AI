@@ -10,6 +10,8 @@
   const WINDOW_ACK_TYPE = "AI_TIME_RECORDS_IMPORT_ACK";
   const WINDOW_ACK_RESULT_SOURCE = "ai-time-record-extension";
   const WINDOW_ACK_RESULT_TYPE = "AI_TIME_RECORDS_IMPORT_ACK_RESULT";
+  const WINDOW_AUTO_REQUEST_TYPE = "AI_TIME_RECORDS_AUTO_REQUEST";
+  const WINDOW_AUTO_RESULT_TYPE = "AI_TIME_RECORDS_AUTO_RESULT";
   const MAX_RECORDS = 500;
   const MAX_PAYLOAD_BYTES = 192 * 1024;
   const MAX_ID_LENGTH = 160;
@@ -150,6 +152,10 @@
     ]);
   }
 
+  function isValidRequestId(value) {
+    return isSafeText(value, MAX_ID_LENGTH);
+  }
+
   function isSafeText(value, maximumLength) {
     return typeof value === "string" && value.length > 0 && value.length <= maximumLength
       && !/[\u0000-\u001f\u007f]/.test(value);
@@ -193,6 +199,8 @@
     WINDOW_ACK_TYPE,
     WINDOW_ACK_RESULT_SOURCE,
     WINDOW_ACK_RESULT_TYPE,
+    WINDOW_AUTO_REQUEST_TYPE,
+    WINDOW_AUTO_RESULT_TYPE,
     MAX_RECORDS,
     MAX_PAYLOAD_BYTES,
     DESTINATIONS,
@@ -203,5 +211,6 @@
     createPayload,
     validatePayload,
     recordFingerprint,
+    isValidRequestId,
   });
 })(globalThis);

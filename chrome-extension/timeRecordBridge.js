@@ -25,6 +25,11 @@
   window.addEventListener("message", async (event) => {
     if (event.source !== window || event.origin !== window.location.origin) return;
     if (event.data?.source === protocol.WINDOW_READY_SOURCE
+      && event.data?.type === protocol.WINDOW_AUTO_REQUEST_TYPE) {
+      await requestAutomaticRecords(event.data.requestId);
+      return;
+    }
+    if (event.data?.source === protocol.WINDOW_READY_SOURCE
       && event.data?.type === protocol.WINDOW_READY_TYPE) {
       postPendingPayload();
       return;
@@ -61,6 +66,42 @@
       source: protocol.WINDOW_SOURCE,
       type: protocol.WINDOW_MESSAGE_TYPE,
       payload: pendingPayload,
+    }, window.location.origin);
+  }
+
+  async function requestAutomaticRecords(requestId) {
+    if (!protocol.isValidRequestId(requestId)) return;
+    const destination = protocol.destinationForUrl(window.location.href);
+    if (!destination) {
+      postAutomaticResult(requestId, { ok: false, message: "許可されていない送信先です。" });
+      return;
+    }
+    try {
+      const response = await chrome.runtime.sendMessage({
+        type: "time-records:getFinalized",
+        destination,
+      });
+      const validation = protocol.validatePayload(response?.payload);
+      if (!response?.ok || !validation.ok) {
+        throw new Error(response?.message || validation.error || "利用時間を取得できませんでした。");
+      }
+      postAutomaticResult(requestId, { ok: true, payload: response.payload });
+    } catch (error) {
+      postAutomaticResult(requestId, {
+        ok: false,
+        message: error instanceof Error ? error.message : "利用時間を取得できませんでした。",
+      });
+    }
+  }
+
+  function postAutomaticResult(requestId, result) {
+    window.postMessage({
+      source: protocol.WINDOW_SOURCE,
+      type: protocol.WINDOW_AUTO_RESULT_TYPE,
+      requestId,
+      ok: result.ok === true,
+      payload: result.ok === true ? result.payload : undefined,
+      message: result.ok === true ? "" : result.message,
     }, window.location.origin);
   }
 
