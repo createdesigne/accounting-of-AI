@@ -29,8 +29,12 @@ const ledgerKey = prefix + 'thinkingLedger';
     const p = await context.newPage(); const errors = []; p.on('pageerror', e => errors.push(e.message));
     p.setDefaultTimeout(10000);
     const read = () => p.evaluate(key => JSON.parse(localStorage.getItem(key)), ledgerKey);
+    async function openDevTools() {
+      const tools = p.locator('.extension-import-card details.dev-tools').first();
+      if (!(await tools.evaluate(element => element.open))) await tools.locator('summary').click();
+    }
     const home = async () => {
-      await p.getByRole('button', { name: '思考レシートを読み取る' }).waitFor();
+      await p.getByText('Chrome拡張機能から取り込む', { exact: true }).waitFor();
       assert.equal(await p.locator('.issued-receipt-panel').count(), 0);
       assert.equal(new URL(p.url()).hash, '');
       assert.equal(await p.locator('#receipt-page-size').count(), 0);
@@ -40,7 +44,7 @@ const ledgerKey = prefix + 'thinkingLedger';
       assert.equal(new URL(p.url()).hash, '');
       assert.equal(await p.locator('.issued-receipt-panel').count(), 0);
       // The isolated report preview intentionally opens the settlement tab on load.
-      if (prefix) await p.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: 'レシート', exact: true }).click();
+      if (prefix) await p.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: 'ホーム', exact: true }).click();
       await home();
     }
     async function printAndCheck(name) {
@@ -80,7 +84,8 @@ const ledgerKey = prefix + 'thinkingLedger';
       return height;
     }
     await p.goto(base);
-    await p.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: 'レシート', exact: true }).click();
+    await p.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: 'ホーム', exact: true }).click();
+    await openDevTools();
     await p.getByRole('button', { name: 'サンプル会話を読み込む', exact: true }).click();
     await p.getByRole('button', { name: 'レシートを発行する', exact: true }).click();
     await printAndCheck('issued-receipt');
@@ -110,7 +115,7 @@ const ledgerKey = prefix + 'thinkingLedger';
         assert.deepEqual(await read(), samples, 'saving an existing receipt must not duplicate it');
         const nav = p.getByRole('navigation', { name: '画面切り替え' });
         await nav.getByRole('button', { name: '帳簿', exact: true }).click();
-        await nav.getByRole('button', { name: 'レシート', exact: true }).click();
+        await nav.getByRole('button', { name: 'ホーム', exact: true }).click();
       } else {
         await p.getByRole('button', { name: 'レシート画面に戻る', exact: true }).click();
       }
