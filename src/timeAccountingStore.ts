@@ -2,6 +2,8 @@ import {
   createTimeAccountingLedger,
   migrateTimeAccountingLedger,
   recordAiUsage,
+  reverseAiUsage,
+  TimeAccountingError,
   type TimeAccountingLedger,
 } from "./timeAccounting.ts";
 import {
@@ -19,6 +21,8 @@ export type ImportedTimeRecord = Readonly<{
   sourceEventId: string;
   entryId: string;
   importedAt: string;
+  reversalEntryId?: string;
+  cancelledAt?: string;
 }>;
 
 export type TimeAccountingStore = Readonly<{
@@ -33,6 +37,14 @@ export type TimeImportResult = Readonly<{
   importedSeconds: number;
   processedSeconds: number;
   records: readonly TimeRecordPreview[];
+  store: TimeAccountingStore;
+}>;
+
+export type TimeCancellationResult = Readonly<{
+  recordId: string;
+  reversalEntryId: string;
+  cancelled: boolean;
+  alreadyCancelled: boolean;
   store: TimeAccountingStore;
 }>;
 
@@ -53,16 +65,47 @@ export type TimeAccountingImportOptions = {
 };
 
 export class TimeAccountingImportError extends Error {
-  readonly code: "INVALID_RECORD" | "CONTENT_MISMATCH" | "LOCK_UNAVAILABLE" | "STORE_INVALID" | "SAVE_FAILED";
+  readonly code:
+    | "INVALID_RECORD"
+    | "CONTENT_MISMATCH"
+    | "LOCK_UNAVAILABLE"
+    | "STORE_INVALID"
+    | "SAVE_FAILED"
+    | "UNKNOWN_RECORD"
+    | "CLOSED_PERIOD";
 
   constructor(
-    code: "INVALID_RECORD" | "CONTENT_MISMATCH" | "LOCK_UNAVAILABLE" | "STORE_INVALID" | "SAVE_FAILED",
+    code: TimeAccountingImportError["code"],
     message: string,
   ) {
     super(message);
     this.name = "TimeAccountingImportError";
     this.code = code;
   }
+}
+
+export async function cancelImportedTimeRecord(
+  recordId: string,
+  options: TimeAccountingImportOptions = {},
+): Promise<TimeCancellationResult> {
+  if (typeof recordId !== "string" || recordId.trim().length === 0) {
+    throw new TimeAccountingImportError("INVALID_RECORD", "取り消す記録IDが正しくありません。");
+  }
+  const storage = options.storage ?? window.localStorage;
+  const locks = options.locks === null
+    ? undefined
+    : options.locks ?? globalThis.navigator?.locks as unknown as LockManagerLike | undefined;
+  const storageKey = options.storageKey ?? TIME_ACCOUNTING_STORAGE_BASE_KEY;
+  const now = options.now ?? Date.now;
+  if (!locks?.request) {
+    throw new TimeAccountingImportError(
+      "LOCK_UNAVAILABLE",
+      "安全な排他制御を利用できないため、取り消しを開始できません。",
+    );
+  }
+  return locks.request(TIME_ACCOUNTING_IMPORT_LOCK, { mode: "exclusive" }, async () => (
+    cancelUnderLock(recordId, storage, storageKey, now)
+  ));
 }
 
 export async function importTimeRecords(
@@ -219,6 +262,89 @@ async function importUnderLock(
   });
 }
 
+async function cancelUnderLock(
+  recordId: string,
+  storage: StorageLike,
+  storageKey: string,
+  now: () => number,
+): Promise<TimeCancellationResult> {
+  const current = loadTimeAccountingStore(storage, storageKey);
+  const importedIndex = current.importedRecords.findIndex((record) => record.recordId === recordId);
+  if (importedIndex < 0) {
+    throw new TimeAccountingImportError("UNKNOWN_RECORD", "取り消す利用時間の記録が見つかりません。");
+  }
+  const imported = current.importedRecords[importedIndex];
+  const measurement = current.ledger.measurements.find(
+    (item) => item.sourceEventId === imported.sourceEventId,
+  );
+  if (!measurement || measurement.usageEntryId !== imported.entryId) {
+    throw new TimeAccountingImportError("STORE_INVALID", "取り消す時間仕訳の関連情報が壊れています。");
+  }
+  if (measurement.reversalEntryId !== undefined) {
+    return Object.freeze({
+      recordId,
+      reversalEntryId: measurement.reversalEntryId,
+      cancelled: false,
+      alreadyCancelled: true,
+      store: current,
+    });
+  }
+
+  const cancelledAtValue = now();
+  const cancelledDate = new Date(cancelledAtValue);
+  if (!Number.isFinite(cancelledDate.getTime())) {
+    throw new TimeAccountingImportError("INVALID_RECORD", "取消日時が正しくありません。");
+  }
+  const cancelledAt = cancelledDate.toISOString();
+  const postedOn = localDate(cancelledDate);
+  const reversalEntryId = reversalEntryIdForTimeRecord(recordId);
+  let ledger: TimeAccountingLedger;
+  try {
+    ledger = reverseAiUsage(current.ledger, {
+      entryId: reversalEntryId,
+      sourceEventId: imported.sourceEventId,
+      postedOn,
+    });
+  } catch (error) {
+    if (error instanceof TimeAccountingError && error.code === "REVERSAL_IN_CLOSED_PERIOD") {
+      throw new TimeAccountingImportError(
+        "CLOSED_PERIOD",
+        "締め済みの利用記録は、締め日より後の未締め期間で取り消してください。",
+      );
+    }
+    throw error;
+  }
+
+  const importedRecords = [...current.importedRecords];
+  importedRecords[importedIndex] = Object.freeze({
+    ...imported,
+    reversalEntryId,
+    cancelledAt,
+  });
+  const next = createStore(ledger, importedRecords);
+  try {
+    storage.setItem(storageKey, JSON.stringify(next));
+  } catch {
+    throw new TimeAccountingImportError("SAVE_FAILED", "取消仕訳を保存できませんでした。");
+  }
+  const verified = loadTimeAccountingStore(storage, storageKey);
+  const saved = verified.importedRecords.find((record) => record.recordId === recordId);
+  const savedMeasurement = verified.ledger.measurements.find(
+    (item) => item.sourceEventId === imported.sourceEventId,
+  );
+  if (saved?.reversalEntryId !== reversalEntryId || saved.cancelledAt !== cancelledAt
+    || savedMeasurement?.reversalEntryId !== reversalEntryId) {
+    throw new TimeAccountingImportError("SAVE_FAILED", "取消仕訳の保存を確認できませんでした。");
+  }
+  return Object.freeze({
+    recordId,
+    reversalEntryId,
+    cancelled: true,
+    alreadyCancelled: false,
+    store: verified,
+  });
+}
+
 function prepareRecords(input: readonly TimeRecordPreview[]) {
   if (!Array.isArray(input)) {
     throw new TimeAccountingImportError("INVALID_RECORD", "利用時間の記録形式が正しくありません。");
@@ -244,12 +370,26 @@ function parseImportedRecord(value: unknown): ImportedTimeRecord {
     || typeof value.importedAt !== "string" || !Number.isFinite(Date.parse(value.importedAt))) {
     throw new Error("invalid imported record");
   }
+  const reversalEntryId = value.reversalEntryId === undefined
+    ? undefined
+    : typeof value.reversalEntryId === "string" && value.reversalEntryId
+      ? value.reversalEntryId
+      : (() => { throw new Error("invalid reversal entry id"); })();
+  const cancelledAt = value.cancelledAt === undefined
+    ? undefined
+    : typeof value.cancelledAt === "string" && Number.isFinite(Date.parse(value.cancelledAt))
+      ? value.cancelledAt
+      : (() => { throw new Error("invalid cancellation time"); })();
+  if ((reversalEntryId === undefined) !== (cancelledAt === undefined)) {
+    throw new Error("incomplete cancellation metadata");
+  }
   return Object.freeze({
     recordId: value.recordId,
     fingerprint: value.fingerprint,
     sourceEventId: value.sourceEventId,
     entryId: value.entryId,
     importedAt: value.importedAt,
+    ...(reversalEntryId === undefined ? {} : { reversalEntryId, cancelledAt }),
   });
 }
 
@@ -275,7 +415,23 @@ function validateImportedRecordLinks(
     if (!measurement || measurement.usageEntryId !== imported.entryId) {
       throw new Error("imported record link is invalid");
     }
+    if (imported.reversalEntryId !== undefined) {
+      const reversal = ledger.entries.find((entry) => entry.id === imported.reversalEntryId);
+      if (measurement.reversalEntryId !== imported.reversalEntryId
+        || !reversal || reversal.kind !== "usage-reversal"
+        || reversal.reversesEntryId !== imported.entryId) {
+        throw new Error("imported record reversal link is invalid");
+      }
+    }
   }
+}
+
+export function reversalEntryIdForTimeRecord(recordId: string) {
+  return `ai-usage-reversal:${recordId}`;
+}
+
+function localDate(value: Date) {
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
 }
 
 function contentMismatch(recordId: string): never {

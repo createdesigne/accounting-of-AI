@@ -18,6 +18,7 @@ import {
 } from "./timeRecordTransfer";
 import {
   TIME_ACCOUNTING_STORAGE_BASE_KEY,
+  cancelImportedTimeRecord,
   importTimeRecords,
   loadTimeAccountingStore,
   type TimeAccountingStore,
@@ -775,6 +776,18 @@ function App() {
     }
   }
 
+  async function cancelTimeRecord(recordId: string) {
+    const result = await cancelImportedTimeRecord(recordId, {
+      storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+    });
+    setTimeAccountingStore(result.store);
+    if (result.cancelled) {
+      showToast("取消仕訳を保存しました。元の利用記録と仕訳はそのまま残しています。");
+    } else {
+      showToast("この取り込みはすでに取消済みです。仕訳は追加していません。");
+    }
+  }
+
   function updateAutomaticTimeImport(enabled: boolean) {
     try {
       saveAutomaticTimeImportEnabled(enabled, localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY);
@@ -1416,6 +1429,7 @@ function App() {
               highlightedReceiptId={highlightedReceiptId}
               timeRows={timeAccountingView.rows}
               timeImportHistory={timeImportHistory}
+              onCancelTimeRecord={cancelTimeRecord}
             />
           )}
           {!isSettlementOpen && activeTab === "receipts" && (
@@ -2595,12 +2609,14 @@ function JournalScreen({
   highlightedReceiptId,
   timeRows,
   timeImportHistory,
+  onCancelTimeRecord,
 }: {
   receipts: ThoughtReceipt[];
   monthLabel: string;
   highlightedReceiptId: string | null;
   timeRows: readonly TimeJournalRow[];
   timeImportHistory: readonly TimeImportHistoryRow[];
+  onCancelTimeRecord: (recordId: string) => Promise<void>;
 }) {
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
   const [journalKind, setJournalKind] = useState<"thought" | "time">("thought");
@@ -2695,7 +2711,7 @@ function JournalScreen({
         receipt={selectedReceipt}
         onClose={() => setSelectedReceipt(null)}
       />
-      </> : <TimeJournalEntries rows={timeRows} historyRows={timeImportHistory} />}
+      </> : <TimeJournalEntries rows={timeRows} historyRows={timeImportHistory} onCancel={onCancelTimeRecord} />}
     </section>
   );
 }
@@ -2703,17 +2719,25 @@ function JournalScreen({
 function TimeJournalEntries({
   rows,
   historyRows,
+  onCancel,
 }: {
   rows: readonly TimeJournalRow[];
   historyRows: readonly TimeImportHistoryRow[];
+  onCancel: (recordId: string) => Promise<void>;
 }) {
-  const totalSeconds = rows.reduce((sum, row) => sum + row.durationSeconds, 0);
+  const usageRows = rows.filter((row) => row.entryKind === "usage");
+  const reversalRows = rows.filter((row) => row.entryKind === "reversal");
+  const measuredSeconds = usageRows.reduce((sum, row) => sum + row.durationSeconds, 0);
+  const effectiveSeconds = usageRows.reduce(
+    (sum, row) => sum + (row.status === "有効" ? row.durationSeconds : 0),
+    0,
+  );
   return <>
     <section className="journal-summary-card time-journal-summary">
-      <span>保存済みの実測利用時間</span>
-      <strong>{formatTimeRecordDuration(totalSeconds)}</strong>
-      <p>時間仕訳 {rows.length}件</p>
-      <small>思考仕訳とは別の時間会計専用ストアを表示しています。</small>
+      <span>有効な会計上の利用時間</span>
+      <strong>{formatTimeRecordDuration(effectiveSeconds)}</strong>
+      <p>利用記録 {usageRows.length}件 / 取消 {reversalRows.length}件</p>
+      <small>実測した生データは {formatTimeRecordDuration(measuredSeconds)} のまま保持しています。</small>
     </section>
 
     <section className="section-block">
@@ -2726,30 +2750,60 @@ function TimeJournalEntries({
       ) : (
         <div className="time-journal-list">
           {rows.map((row) => (
-            <article className="time-journal-entry" key={row.id}>
+            <article className={`time-journal-entry ${row.entryKind === "reversal" ? "reversal" : row.status === "取消済み" ? "cancelled" : ""}`} key={row.id}>
               <div className="time-journal-entry-heading">
                 <div>
-                  <span>{formatFullDate(row.usedOn)}</span>
+                  <span>{row.entryKind === "reversal" ? "取消日" : "利用日"}：{formatFullDate(row.postedOn)}</span>
                   <strong>{row.serviceName}</strong>
                 </div>
-                <b>{formatTimeRecordDuration(row.durationSeconds)}</b>
+                <div className="time-journal-entry-status">
+                  <em>{row.status}</em>
+                  <b>{row.entryKind === "reversal" ? "−" : ""}{formatTimeRecordDuration(row.durationSeconds)}</b>
+                </div>
               </div>
               <dl>
                 <div><dt>借方</dt><dd>{row.debitAccount}</dd></div>
                 <div><dt>貸方</dt><dd>{row.creditAccount}</dd></div>
               </dl>
+              {row.relatedEntryId && <p className="time-journal-related-id">
+                {row.entryKind === "reversal" ? "元仕訳" : "取消仕訳"}：{row.relatedEntryId}
+              </p>}
             </article>
           ))}
         </div>
       )}
     </section>
 
-    <TimeImportHistory rows={historyRows} />
+    <TimeImportHistory rows={historyRows} onCancel={onCancel} />
   </>;
 }
 
-function TimeImportHistory({ rows }: { rows: readonly TimeImportHistoryRow[] }) {
-  return (
+function TimeImportHistory({
+  rows,
+  onCancel,
+}: {
+  rows: readonly TimeImportHistoryRow[];
+  onCancel: (recordId: string) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<TimeImportHistoryRow | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+
+  async function confirmCancellation() {
+    if (!selected || busy) return;
+    setBusy(true);
+    setErrorMessage("");
+    try {
+      await onCancel(selected.recordId);
+      setSelected(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "取消仕訳を保存できませんでした。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
     <details className="card time-import-history">
       <summary>
         <span>取り込み履歴を見る</span>
@@ -2767,7 +2821,7 @@ function TimeImportHistory({ rows }: { rows: readonly TimeImportHistoryRow[] }) 
                 <strong>{row.serviceName}</strong>
               </div>
               <b>{formatTimeRecordDuration(row.durationSeconds)}</b>
-              <span>{row.status}</span>
+              <span className={row.status === "取消済み" ? "cancelled" : ""}>{row.status}</span>
               <ChevronRight size={16} aria-hidden="true" />
             </summary>
             <dl>
@@ -2775,13 +2829,52 @@ function TimeImportHistory({ rows }: { rows: readonly TimeImportHistoryRow[] }) 
               <div><dt>貸方</dt><dd>{row.creditAccount}</dd></div>
               <div><dt>記録秒数</dt><dd>{row.durationSeconds}秒</dd></div>
               <div><dt>取り込み日時</dt><dd>{formatImportDateTime(row.importedAt)}</dd></div>
+              <div><dt>元仕訳ID</dt><dd>{row.entryId}</dd></div>
               <div className="history-record-id"><dt>記録ID</dt><dd>{row.recordId}</dd></div>
+              {row.reversalEntryId && <>
+                <div><dt>取消日</dt><dd>{formatFullDate(row.reversalPostedOn ?? row.usedOn)}</dd></div>
+                <div><dt>取消仕訳ID</dt><dd>{row.reversalEntryId}</dd></div>
+                {row.cancelledAt && <div><dt>取消日時</dt><dd>{formatImportDateTime(row.cancelledAt)}</dd></div>}
+              </>}
             </dl>
+            {row.status !== "取消済み" && (
+              <button className="time-cancellation-button" type="button" onClick={() => {
+                setErrorMessage("");
+                setSelected(row);
+              }}>
+                この取り込みを取り消す
+              </button>
+            )}
           </details>
         ))}
       </div>
     </details>
-  );
+    {selected && (
+      <div className="reader-backdrop" role="dialog" aria-modal="true" aria-labelledby="time-cancellation-title">
+        <div className="reader-modal time-cancellation-modal">
+          <button className="reader-close" type="button" aria-label="閉じる" disabled={busy} onClick={() => setSelected(null)}><X size={18} /></button>
+          <div className="reader-panel">
+            <p className="eyebrow">時間仕訳の取り消し</p>
+            <h2 id="time-cancellation-title">この取り込みを取り消しますか？</h2>
+            <p className="reader-description">元の利用記録と仕訳は削除せず、貸借を反転した同じ秒数の取消仕訳を追加します。</p>
+            <div className="time-cancellation-summary">
+              <span>{formatFullDate(selected.usedOn)} / {selected.serviceName}</span>
+              <strong>{formatTimeRecordDuration(selected.durationSeconds)}</strong>
+              <small>借方「{selected.creditAccount}」／貸方「{selected.debitAccount}」を追加</small>
+            </div>
+            <p className="time-cancellation-warning">取消後に同じ記録を再送しても、自動で再登録されません。部分訂正や再登録はできません。</p>
+            {errorMessage && <p className="candidate-message" role="alert">{errorMessage}</p>}
+            <div className="time-cancellation-actions">
+              <button className="secondary-action" type="button" disabled={busy} onClick={() => setSelected(null)}>戻る</button>
+              <button className="time-cancellation-confirm" type="button" disabled={busy} onClick={confirmCancellation}>
+                {busy ? "保存しています…" : "取消仕訳を追加する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </>;
 }
 
 function JournalDonutChart({

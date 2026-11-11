@@ -14,7 +14,7 @@ export const TIME_ACCOUNTS = {
 
 export type TimeAccount = typeof TIME_ACCOUNTS[keyof typeof TIME_ACCOUNTS];
 export type JournalSide = "debit" | "credit";
-export type TimeJournalEntryKind = "ai-usage" | "month-end-adjustment";
+export type TimeJournalEntryKind = "ai-usage" | "month-end-adjustment" | "usage-reversal";
 
 export type TimeJournalLine = Readonly<{
   side: JournalSide;
@@ -28,6 +28,8 @@ export type TimeJournalEntry = Readonly<{
   kind: TimeJournalEntryKind;
   postedOn: string;
   sourceEventId: string;
+  /** Present only on a reversal and points to the original usage entry. */
+  reversesEntryId?: string;
   lines: readonly [TimeJournalLine, TimeJournalLine];
 }>;
 
@@ -39,6 +41,7 @@ export type AiTimeMeasurement = Readonly<{
   estimatedSavedSeconds: number;
   usageEntryId: string;
   monthEndAdjustmentEntryId?: string;
+  reversalEntryId?: string;
 }>;
 
 export type TimeAccountingLedger = Readonly<{
@@ -62,6 +65,12 @@ export type RecordMonthEndAdjustmentInput = Readonly<{
   postedOn: string;
 }>;
 
+export type ReverseAiUsageInput = Readonly<{
+  entryId: string;
+  sourceEventId: string;
+  postedOn: string;
+}>;
+
 export type TimeAccountingErrorCode =
   | "INVALID_IDENTIFIER"
   | "INVALID_DATE"
@@ -72,7 +81,10 @@ export type TimeAccountingErrorCode =
   | "DUPLICATE_SOURCE_EVENT"
   | "UNKNOWN_SOURCE_EVENT"
   | "ALREADY_ADJUSTED"
-  | "ADJUSTMENT_BEFORE_USAGE";
+  | "ADJUSTMENT_BEFORE_USAGE"
+  | "ALREADY_REVERSED"
+  | "REVERSAL_BEFORE_USAGE"
+  | "REVERSAL_IN_CLOSED_PERIOD";
 
 export class TimeAccountingError extends Error {
   readonly code: TimeAccountingErrorCode;
@@ -159,6 +171,12 @@ export function recordMonthEndAdjustment(
     );
   }
   const measurement = ledger.measurements[measurementIndex];
+  if (measurement.reversalEntryId !== undefined) {
+    throw new TimeAccountingError(
+      "ALREADY_REVERSED",
+      `A reversed AI-use event cannot be adjusted: ${input.sourceEventId}`,
+    );
+  }
   if (measurement.monthEndAdjustmentEntryId !== undefined) {
     throw new TimeAccountingError(
       "ALREADY_ADJUSTED",
@@ -188,6 +206,80 @@ export function recordMonthEndAdjustment(
     measurement.actualInputSeconds,
   );
 
+  return freezeLedger(measurements, [...ledger.entries, entry]);
+}
+
+/** Records the exact opposite of the original usage without deleting it. */
+export function reverseAiUsage(
+  ledger: TimeAccountingLedger,
+  input: ReverseAiUsageInput,
+): TimeAccountingLedger {
+  requireIdentifier(input.entryId, "entryId");
+  requireIdentifier(input.sourceEventId, "sourceEventId");
+  requireCalendarDate(input.postedOn, "postedOn");
+  requireUniqueEntryId(ledger, input.entryId);
+
+  const measurementIndex = ledger.measurements.findIndex(
+    ({ sourceEventId }) => sourceEventId === input.sourceEventId,
+  );
+  if (measurementIndex < 0) {
+    throw new TimeAccountingError(
+      "UNKNOWN_SOURCE_EVENT",
+      `AI-use event is not recorded: ${input.sourceEventId}`,
+    );
+  }
+  const measurement = ledger.measurements[measurementIndex];
+  if (measurement.reversalEntryId !== undefined) {
+    throw new TimeAccountingError(
+      "ALREADY_REVERSED",
+      `AI-use event is already reversed: ${input.sourceEventId}`,
+    );
+  }
+  if (input.postedOn < measurement.occurredOn) {
+    throw new TimeAccountingError(
+      "REVERSAL_BEFORE_USAGE",
+      "A reversal cannot be posted before the AI-use event.",
+    );
+  }
+  if (measurement.monthEndAdjustmentEntryId !== undefined) {
+    const adjustment = ledger.entries.find(
+      ({ id }) => id === measurement.monthEndAdjustmentEntryId,
+    );
+    if (!adjustment || input.postedOn <= adjustment.postedOn) {
+      throw new TimeAccountingError(
+        "REVERSAL_IN_CLOSED_PERIOD",
+        "A closed-period usage must be reversed in a later open period.",
+      );
+    }
+  }
+
+  const usage = ledger.entries.find(({ id }) => id === measurement.usageEntryId);
+  if (!usage || usage.kind !== "ai-usage") {
+    return invalidLedger("Measurement usage entry is missing or inconsistent.");
+  }
+  const debit = usage.lines.find((line) => line.side === "debit");
+  const credit = usage.lines.find((line) => line.side === "credit");
+  if (!debit || !credit || debit.seconds !== measurement.actualInputSeconds
+    || credit.seconds !== measurement.actualInputSeconds) {
+    return invalidLedger("Measurement usage entry is missing or inconsistent.");
+  }
+
+  const reversedMeasurement: AiTimeMeasurement = Object.freeze({
+    ...measurement,
+    reversalEntryId: input.entryId,
+  });
+  const measurements = [...ledger.measurements];
+  measurements[measurementIndex] = reversedMeasurement;
+  const entry = createEntry(
+    input.entryId,
+    "usage-reversal",
+    input.postedOn,
+    input.sourceEventId,
+    credit.account,
+    debit.account,
+    measurement.actualInputSeconds,
+    measurement.usageEntryId,
+  );
   return freezeLedger(measurements, [...ledger.entries, entry]);
 }
 
@@ -245,6 +337,7 @@ function createEntry(
   debitAccount: TimeAccount,
   creditAccount: TimeAccount,
   seconds: number,
+  reversesEntryId?: string,
 ): TimeJournalEntry {
   const debit: TimeJournalLine = Object.freeze({
     side: "debit",
@@ -259,7 +352,14 @@ function createEntry(
     measurement: "actual-input",
   });
   const lines = Object.freeze([debit, credit]) as readonly [TimeJournalLine, TimeJournalLine];
-  return Object.freeze({ id, kind, postedOn, sourceEventId, lines });
+  return Object.freeze({
+    id,
+    kind,
+    postedOn,
+    sourceEventId,
+    ...(reversesEntryId === undefined ? {} : { reversesEntryId }),
+    lines,
+  });
 }
 
 function freezeLedger(
@@ -292,6 +392,9 @@ function normalizeLedger(raw: Record<string, unknown>, fromMinutes: boolean): Ti
     const monthEndAdjustmentEntryId = item.monthEndAdjustmentEntryId === undefined
       ? undefined
       : ledgerIdentifier(item.monthEndAdjustmentEntryId, "monthEndAdjustmentEntryId");
+    const reversalEntryId = item.reversalEntryId === undefined
+      ? undefined
+      : ledgerIdentifier(item.reversalEntryId, "reversalEntryId");
     return Object.freeze({
       sourceEventId,
       occurredOn,
@@ -299,6 +402,7 @@ function normalizeLedger(raw: Record<string, unknown>, fromMinutes: boolean): Ti
       estimatedSavedSeconds,
       usageEntryId,
       ...(monthEndAdjustmentEntryId === undefined ? {} : { monthEndAdjustmentEntryId }),
+      ...(reversalEntryId === undefined ? {} : { reversalEntryId }),
     });
   });
 
@@ -307,11 +411,17 @@ function normalizeLedger(raw: Record<string, unknown>, fromMinutes: boolean): Ti
       return invalidLedger("Journal entry must contain exactly two lines.");
     }
     const id = ledgerIdentifier(item.id, "entry id");
-    const kind = item.kind === "ai-usage" || item.kind === "month-end-adjustment"
+    const kind = item.kind === "ai-usage" || item.kind === "month-end-adjustment" || item.kind === "usage-reversal"
       ? item.kind
       : invalidLedger("Journal entry kind is invalid.");
     const postedOn = ledgerDate(item.postedOn, "postedOn");
     const sourceEventId = ledgerIdentifier(item.sourceEventId, "sourceEventId");
+    const reversesEntryId = item.reversesEntryId === undefined
+      ? undefined
+      : ledgerIdentifier(item.reversesEntryId, "reversesEntryId");
+    if ((kind === "usage-reversal") !== (reversesEntryId !== undefined)) {
+      return invalidLedger("Only a usage reversal may identify the reversed entry.");
+    }
     const lines = item.lines.map((line): TimeJournalLine => {
       if (!isObject(line)) return invalidLedger("Journal line must be an object.");
       const side = line.side === "debit" || line.side === "credit"
@@ -329,6 +439,7 @@ function normalizeLedger(raw: Record<string, unknown>, fromMinutes: boolean): Ti
       kind,
       postedOn,
       sourceEventId,
+      ...(reversesEntryId === undefined ? {} : { reversesEntryId }),
       lines: Object.freeze(lines) as readonly [TimeJournalLine, TimeJournalLine],
     });
     if (new Set(lines.map(({ side }) => side)).size !== 2 || !isBalancedJournalEntry(entry)) {
@@ -367,9 +478,28 @@ function validateLedgerLinks(
         invalidLedger("Measurement adjustment entry is missing or inconsistent.");
       }
     }
+    if (measurement.reversalEntryId !== undefined) {
+      const reversal = entriesById.get(measurement.reversalEntryId);
+      const usageDebit = usage.lines.find((line) => line.side === "debit");
+      const usageCredit = usage.lines.find((line) => line.side === "credit");
+      const reversalDebit = reversal?.lines.find((line) => line.side === "debit");
+      const reversalCredit = reversal?.lines.find((line) => line.side === "credit");
+      if (!reversal || reversal.kind !== "usage-reversal"
+        || reversal.sourceEventId !== measurement.sourceEventId
+        || reversal.reversesEntryId !== measurement.usageEntryId
+        || reversal.lines[0].seconds !== measurement.actualInputSeconds
+        || reversalDebit?.account !== usageCredit?.account
+        || reversalCredit?.account !== usageDebit?.account) {
+        invalidLedger("Measurement reversal entry is missing or inconsistent.");
+      }
+    }
   }
   if (entries.some(entry => !measurementsBySource.has(entry.sourceEventId))) {
     invalidLedger("Journal entry has no matching measurement.");
+  }
+  if (entries.some((entry) => entry.kind === "usage-reversal"
+    && measurementsBySource.get(entry.sourceEventId)?.reversalEntryId !== entry.id)) {
+    invalidLedger("Reversal entry is not linked from its measurement.");
   }
 }
 

@@ -1,11 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isBalancedJournalEntry, TIME_ACCOUNTS } from '../src/timeAccounting.ts';
+import { isBalancedJournalEntry, recordMonthEndAdjustment, TIME_ACCOUNTS } from '../src/timeAccounting.ts';
 import {
   TIME_ACCOUNTING_STORAGE_BASE_KEY,
   TimeAccountingImportError,
+  cancelImportedTimeRecord,
   importTimeRecords,
   loadTimeAccountingStore,
+  reversalEntryIdForTimeRecord,
 } from '../src/timeAccountingStore.ts';
 import type { TimeRecordPreview } from '../src/timeRecordTransfer.ts';
 
@@ -139,6 +141,105 @@ test('recovers from storage failure and from a lost acknowledgement without doub
   assert.equal(retry.importedCount, 0);
   assert.equal(retry.skippedCount, 1);
   assert.equal(retry.store.ledger.entries.length, 1);
+});
+
+test('cancels an imported record with one balanced inverse journal and restores its history links', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('cancel:day:2026-11-10', 61);
+  const imported = await importTimeRecords([record], options(storage, locks));
+  const originalSnapshot = JSON.stringify(imported.store.ledger.entries[0]);
+  const result = await cancelImportedTimeRecord(record.recordId, {
+    ...options(storage, locks),
+    now: () => Date.parse('2026-11-11T03:00:00Z'),
+  });
+
+  assert.equal(result.cancelled, true);
+  assert.equal(result.alreadyCancelled, false);
+  assert.equal(JSON.stringify(result.store.ledger.entries[0]), originalSnapshot);
+  assert.equal(result.store.ledger.measurements[0].actualInputSeconds, 61);
+  assert.equal(result.store.ledger.entries.length, 2);
+  const reversal = result.store.ledger.entries[1];
+  assert.equal(reversal.id, reversalEntryIdForTimeRecord(record.recordId));
+  assert.equal(reversal.reversesEntryId, imported.store.ledger.entries[0].id);
+  assert.deepEqual(reversal.lines.map((line) => [line.side, line.account, line.seconds]), [
+    ['debit', TIME_ACCOUNTS.timeContribution, 61],
+    ['credit', TIME_ACCOUNTS.aiClearing, 61],
+  ]);
+  assert.equal(isBalancedJournalEntry(reversal), true);
+  const restored = loadTimeAccountingStore(storage);
+  assert.equal(restored.importedRecords[0].reversalEntryId, reversal.id);
+  assert.equal(restored.ledger.measurements[0].reversalEntryId, reversal.id);
+});
+
+test('double clicks, concurrent tabs and a resent source record never create another reversal or usage', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('cancel-concurrent:day:2026-11-10', 60);
+  await importTimeRecords([record], options(storage, locks));
+  const cancelOptions = {
+    ...options(storage, locks),
+    now: () => Date.parse('2026-11-11T03:00:00Z'),
+  };
+  const results = await Promise.all([
+    cancelImportedTimeRecord(record.recordId, cancelOptions),
+    cancelImportedTimeRecord(record.recordId, cancelOptions),
+  ]);
+  assert.deepEqual(results.map((result) => result.cancelled).sort(), [false, true]);
+  const resent = await importTimeRecords([record], options(storage, locks));
+  assert.equal(resent.importedCount, 0);
+  assert.equal(resent.skippedCount, 1);
+  assert.equal(resent.store.ledger.entries.filter((entry) => entry.kind === 'ai-usage').length, 1);
+  assert.equal(resent.store.ledger.entries.filter((entry) => entry.kind === 'usage-reversal').length, 1);
+});
+
+test('a failed cancellation save changes nothing and a retry creates exactly one reversal', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('cancel-retry:day:2026-11-10', 59);
+  await importTimeRecords([record], options(storage, locks));
+  const snapshot = storage.getItem(TIME_ACCOUNTING_STORAGE_BASE_KEY);
+  storage.failNextSet = true;
+  await assert.rejects(
+    () => cancelImportedTimeRecord(record.recordId, options(storage, locks)),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'SAVE_FAILED',
+  );
+  assert.equal(storage.getItem(TIME_ACCOUNTING_STORAGE_BASE_KEY), snapshot);
+  assert.equal(loadTimeAccountingStore(storage).ledger.entries.length, 1);
+  const retry = await cancelImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(retry.cancelled, true);
+  const lostResponseRetry = await cancelImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(lostResponseRetry.alreadyCancelled, true);
+  assert.equal(lostResponseRetry.store.ledger.entries.length, 2);
+});
+
+test('keeps a closed month unchanged and posts the correction into a later open month', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('closed:day:2026-09-30', 60, '2026-09-30');
+  const imported = await importTimeRecords([record], options(storage, locks));
+  const adjustedLedger = recordMonthEndAdjustment(imported.store.ledger, {
+    entryId: 'closed-month-adjustment',
+    sourceEventId: imported.store.importedRecords[0].sourceEventId,
+    postedOn: '2026-09-30',
+  });
+  storage.setItem(TIME_ACCOUNTING_STORAGE_BASE_KEY, JSON.stringify({
+    ...imported.store,
+    ledger: adjustedLedger,
+  }));
+  const closedSnapshot = JSON.stringify(adjustedLedger.entries);
+  await assert.rejects(
+    () => cancelImportedTimeRecord(record.recordId, {
+      storage, locks, now: () => Date.parse('2026-09-30T12:00:00Z'),
+    }),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'CLOSED_PERIOD',
+  );
+  assert.equal(JSON.stringify(loadTimeAccountingStore(storage).ledger.entries), closedSnapshot);
+  const corrected = await cancelImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse('2026-10-01T12:00:00Z'),
+  });
+  assert.deepEqual(corrected.store.ledger.entries.slice(0, 2), adjustedLedger.entries);
+  assert.equal(corrected.store.ledger.entries[2].postedOn, '2026-10-01');
 });
 
 test('restores the dedicated ledger after a page reload', async () => {

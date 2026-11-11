@@ -11,6 +11,7 @@ import {
   migrateTimeAccountingLedger,
   recordAiUsage,
   recordMonthEndAdjustment,
+  reverseAiUsage,
   summarizeTimeMeasurements,
 } from '../src/timeAccounting.ts';
 
@@ -68,6 +69,55 @@ test('moves the same seconds to thought exploration expense at month end', () =>
   assert.equal(accountBalanceSeconds(adjusted, TIME_ACCOUNTS.aiClearing), 0);
   assert.equal(accountBalanceSeconds(adjusted, TIME_ACCOUNTS.timeContribution), -3_600);
   assert.deepEqual(calculateTimeProfitAndLoss(adjusted), { thoughtExplorationExpenseSeconds: 3_600 });
+});
+
+test('adds one balanced inverse entry without deleting the original usage', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const reversed = reverseAiUsage(used, {
+    entryId: 'entry-reversal-001', sourceEventId: usage.sourceEventId, postedOn: '2026-10-21',
+  });
+  assert.equal(reversed.entries.length, 2);
+  assert.deepEqual(reversed.entries[0], used.entries[0]);
+  assert.deepEqual(reversed.entries[1], {
+    id: 'entry-reversal-001', kind: 'usage-reversal', postedOn: '2026-10-21',
+    sourceEventId: usage.sourceEventId, reversesEntryId: usage.entryId,
+    lines: [
+      { side: 'debit', account: '時間拠出', seconds: 3_600, measurement: 'actual-input' },
+      { side: 'credit', account: 'AI仮受品', seconds: 3_600, measurement: 'actual-input' },
+    ],
+  });
+  assert.equal(reversed.measurements[0].actualInputSeconds, 3_600);
+  assert.equal(reversed.measurements[0].reversalEntryId, 'entry-reversal-001');
+  assert.ok(reversed.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(reversed, TIME_ACCOUNTS.aiClearing), 0);
+  assert.equal(accountBalanceSeconds(reversed, TIME_ACCOUNTS.timeContribution), 0);
+  assert.throws(
+    () => reverseAiUsage(reversed, {
+      entryId: 'entry-reversal-002', sourceEventId: usage.sourceEventId, postedOn: '2026-10-22',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'ALREADY_REVERSED',
+  );
+});
+
+test('protects a closed period and posts its reversal only after the closing entry', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const adjusted = recordMonthEndAdjustment(used, {
+    entryId: 'entry-close-001', sourceEventId: usage.sourceEventId, postedOn: '2026-10-31',
+  });
+  const snapshot = JSON.stringify(adjusted);
+  assert.throws(
+    () => reverseAiUsage(adjusted, {
+      entryId: 'closed-reversal', sourceEventId: usage.sourceEventId, postedOn: '2026-10-31',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'REVERSAL_IN_CLOSED_PERIOD',
+  );
+  assert.equal(JSON.stringify(adjusted), snapshot);
+  const corrected = reverseAiUsage(adjusted, {
+    entryId: 'open-reversal', sourceEventId: usage.sourceEventId, postedOn: '2026-11-01',
+  });
+  assert.deepEqual(corrected.entries.slice(0, 2), adjusted.entries);
+  assert.equal(corrected.entries[2].postedOn, '2026-11-01');
+  assert.equal(corrected.entries[2].reversesEntryId, usage.entryId);
 });
 
 test('migrates legacy whole minutes to exact seconds only once', () => {

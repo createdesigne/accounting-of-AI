@@ -1,14 +1,18 @@
-import { TIME_ACCOUNTS, type TimeAccountingLedger } from "./timeAccounting.ts";
+import { TIME_ACCOUNTS, type TimeAccount, type TimeAccountingLedger } from "./timeAccounting.ts";
 import type { TimeAccountingStore } from "./timeAccountingStore.ts";
 
 export type TimeJournalRow = Readonly<{
   id: string;
   sourceEventId: string;
   usedOn: string;
+  postedOn: string;
   serviceName: string;
   durationSeconds: number;
-  debitAccount: typeof TIME_ACCOUNTS.aiClearing;
-  creditAccount: typeof TIME_ACCOUNTS.timeContribution;
+  entryKind: "usage" | "reversal";
+  status: "有効" | "取消済み" | "取消仕訳";
+  relatedEntryId?: string;
+  debitAccount: TimeAccount;
+  creditAccount: TimeAccount;
 }>;
 
 export type TimeAccountingView = Readonly<{
@@ -26,9 +30,12 @@ export type TimeImportHistoryRow = Readonly<{
   serviceName: string;
   durationSeconds: number;
   importedAt: string;
-  status: "取り込み済み";
+  status: "取り込み済み" | "取消済み";
   debitAccount: typeof TIME_ACCOUNTS.aiClearing;
   creditAccount: typeof TIME_ACCOUNTS.timeContribution;
+  reversalEntryId?: string;
+  reversalPostedOn?: string;
+  cancelledAt?: string;
 }>;
 
 /**
@@ -54,23 +61,50 @@ export function buildTimeAccountingView(
     const credit = entry.lines.find((line) => line.side === "credit");
     if (debit?.account !== TIME_ACCOUNTS.aiClearing
       || credit?.account !== TIME_ACCOUNTS.timeContribution) return [];
-    return [Object.freeze({
+    const serviceName = measurement.sourceEventId.startsWith("chrome-time:") ? "ChatGPT" : "AI";
+    const usageRow: TimeJournalRow = Object.freeze({
       id: entry.id,
       sourceEventId: measurement.sourceEventId,
       usedOn: measurement.occurredOn,
-      serviceName: measurement.sourceEventId.startsWith("chrome-time:") ? "ChatGPT" : "AI",
+      postedOn: entry.postedOn,
+      serviceName,
       durationSeconds: measurement.actualInputSeconds,
+      entryKind: "usage",
+      status: measurement.reversalEntryId === undefined ? "有効" : "取消済み",
+      ...(measurement.reversalEntryId === undefined ? {} : { relatedEntryId: measurement.reversalEntryId }),
       debitAccount: debit.account,
       creditAccount: credit.account,
+    });
+    if (measurement.reversalEntryId === undefined) return [usageRow];
+    const reversal = ledger.entries.find((item) => item.id === measurement.reversalEntryId);
+    if (!reversal || reversal.kind !== "usage-reversal") return [usageRow];
+    const reversalDebit = reversal.lines.find((line) => line.side === "debit");
+    const reversalCredit = reversal.lines.find((line) => line.side === "credit");
+    if (!reversalDebit || !reversalCredit) return [usageRow];
+    return [usageRow, Object.freeze({
+      id: reversal.id,
+      sourceEventId: measurement.sourceEventId,
+      usedOn: measurement.occurredOn,
+      postedOn: reversal.postedOn,
+      serviceName,
+      durationSeconds: measurement.actualInputSeconds,
+      entryKind: "reversal" as const,
+      status: "取消仕訳" as const,
+      relatedEntryId: measurement.usageEntryId,
+      debitAccount: reversalDebit.account,
+      creditAccount: reversalCredit.account,
     })];
   }).sort((left, right) => (
-    right.usedOn.localeCompare(left.usedOn) || left.id.localeCompare(right.id)
+    right.postedOn.localeCompare(left.postedOn)
+      || (left.entryKind === right.entryKind ? left.id.localeCompare(right.id) : left.entryKind === "reversal" ? -1 : 1)
   ));
-  const currentRows = rows.filter((row) => row.usedOn.startsWith(`${currentMonth}-`));
+  const currentMeasurements = ledger.measurements.filter(
+    (measurement) => measurement.occurredOn.startsWith(`${currentMonth}-`),
+  );
   return freezeView(
     currentMonth,
-    currentRows.reduce((sum, row) => sum + row.durationSeconds, 0),
-    currentRows.length,
+    currentMeasurements.reduce((sum, measurement) => sum + measurement.actualInputSeconds, 0),
+    currentMeasurements.length,
     rows,
   );
 }
@@ -95,6 +129,9 @@ export function buildTimeImportHistory(
     if (debit?.account !== TIME_ACCOUNTS.aiClearing
       || credit?.account !== TIME_ACCOUNTS.timeContribution) continue;
     seen.add(imported.recordId);
+    const reversal = measurement.reversalEntryId === undefined
+      ? undefined
+      : entries.get(measurement.reversalEntryId);
     rows.push(Object.freeze({
       recordId: imported.recordId,
       entryId: imported.entryId,
@@ -103,9 +140,14 @@ export function buildTimeImportHistory(
       serviceName: serviceNameFromFingerprint(imported.fingerprint),
       durationSeconds: measurement.actualInputSeconds,
       importedAt: imported.importedAt,
-      status: "取り込み済み",
+      status: reversal?.kind === "usage-reversal" ? "取消済み" : "取り込み済み",
       debitAccount: debit.account,
       creditAccount: credit.account,
+      ...(reversal?.kind === "usage-reversal" ? {
+        reversalEntryId: reversal.id,
+        reversalPostedOn: reversal.postedOn,
+        ...(imported.cancelledAt === undefined ? {} : { cancelledAt: imported.cancelledAt }),
+      } : {}),
     }));
   }
 

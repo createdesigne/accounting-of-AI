@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTimeAccountingLedger, recordAiUsage } from "../src/timeAccounting.ts";
-import { importTimeRecords, loadTimeAccountingStore } from "../src/timeAccountingStore.ts";
+import { cancelImportedTimeRecord, importTimeRecords, loadTimeAccountingStore } from "../src/timeAccountingStore.ts";
 import { buildTimeAccountingView, buildTimeImportHistory } from "../src/timeAccountingView.ts";
 import type { TimeRecordPreview } from "../src/timeRecordTransfer.ts";
 
@@ -37,8 +37,11 @@ test("保存済み61秒を今月の合計と時間仕訳に表示する", () => 
     id: "ai-usage:record-61",
     sourceEventId: "chrome-time:record-61",
     usedOn: "2026-11-11",
+    postedOn: "2026-11-11",
     serviceName: "ChatGPT",
     durationSeconds: 61,
+    entryKind: "usage",
+    status: "有効",
     debitAccount: "AI仮受品",
     creditAccount: "時間拠出",
   });
@@ -135,4 +138,38 @@ test("取り込みメタデータがない旧時間仕訳を履歴として捏�
     getItem: () => JSON.stringify({ storeVersion: 1, ledger, importedRecords: [] }),
   });
   assert.deepEqual(buildTimeImportHistory(restored), []);
+});
+
+test("取消後も実測秒数を保持し、元仕訳・取消仕訳と取消履歴を復元する", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record: TimeRecordPreview = {
+    recordId: "view-cancel:day:2026-11-11",
+    sessionId: "view-cancel",
+    provider: "ChatGPT",
+    localDate: "2026-11-11",
+    timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-11T10:00:00+09:00"),
+    endedAt: Date.parse("2026-11-11T10:01:01+09:00"),
+    durationSeconds: 61,
+  };
+  await importTimeRecords([record], { storage, locks, now: () => Date.parse("2026-11-11T02:00:00Z") });
+  await cancelImportedTimeRecord(record.recordId, {
+    storage, locks, now: () => Date.parse("2026-11-12T03:04:05Z"),
+  });
+
+  const restored = loadTimeAccountingStore(storage);
+  const view = buildTimeAccountingView(restored.ledger, new Date(2026, 10, 15));
+  assert.equal(view.currentMonthSeconds, 61);
+  assert.equal(view.currentMonthRecordCount, 1);
+  assert.equal(view.rows.length, 2);
+  assert.equal(view.rows.find((row) => row.entryKind === "usage")?.status, "取消済み");
+  const reversal = view.rows.find((row) => row.entryKind === "reversal");
+  assert.equal(reversal?.durationSeconds, 61);
+  assert.equal(reversal?.debitAccount, "時間拠出");
+  assert.equal(reversal?.creditAccount, "AI仮受品");
+  const history = buildTimeImportHistory(restored);
+  assert.equal(history[0].status, "取消済み");
+  assert.equal(history[0].reversalEntryId, reversal?.id);
+  assert.equal(history[0].cancelledAt, "2026-11-12T03:04:05.000Z");
 });
