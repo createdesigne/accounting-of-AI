@@ -2,6 +2,8 @@ import {
   createTimeAccountingLedger,
   migrateTimeAccountingLedger,
   recordAiUsage,
+  correctAiUsage,
+  effectiveTimeMeasurementSeconds,
   reregisterAiUsage,
   reverseAiUsage,
   isTimeMeasurementActive,
@@ -29,9 +31,13 @@ export type ImportedTimeRecord = Readonly<{
 }>;
 
 export type TimeRecordAccountingAction = Readonly<{
-  kind: "cancellation" | "reregistration";
+  kind: "cancellation" | "reregistration" | "correction";
   entryId: string;
   actedAt: string;
+  beforeSeconds?: number;
+  afterSeconds?: number;
+  deltaSeconds?: number;
+  reason?: string;
 }>;
 
 export type TimeAccountingStore = Readonly<{
@@ -65,6 +71,15 @@ export type TimeReregistrationResult = Readonly<{
   store: TimeAccountingStore;
 }>;
 
+export type TimeCorrectionResult = Readonly<{
+  recordId: string;
+  correctionEntryId: string | null;
+  corrected: boolean;
+  unchanged: boolean;
+  effectiveSeconds: number;
+  store: TimeAccountingStore;
+}>;
+
 type StorageLike = Pick<Storage, "getItem" | "setItem">;
 type LockManagerLike = {
   request<T>(
@@ -89,6 +104,7 @@ export class TimeAccountingImportError extends Error {
     | "STORE_INVALID"
     | "SAVE_FAILED"
     | "UNKNOWN_RECORD"
+    | "INACTIVE_RECORD"
     | "CLOSED_PERIOD";
 
   constructor(
@@ -146,6 +162,31 @@ export async function reregisterImportedTimeRecord(
   }
   return locks.request(TIME_ACCOUNTING_IMPORT_LOCK, { mode: "exclusive" }, async () => (
     reregisterUnderLock(recordId, storage, storageKey, now)
+  ));
+}
+
+export async function correctImportedTimeRecord(
+  recordId: string,
+  correctedSeconds: number,
+  reason = "",
+  options: TimeAccountingImportOptions = {},
+): Promise<TimeCorrectionResult> {
+  if (typeof recordId !== "string" || recordId.trim().length === 0
+    || !Number.isSafeInteger(correctedSeconds) || correctedSeconds < 0
+    || typeof reason !== "string" || reason.length > 500) {
+    throw new TimeAccountingImportError("INVALID_RECORD", "訂正内容が正しくありません。");
+  }
+  const storage = options.storage ?? window.localStorage;
+  const locks = options.locks === null
+    ? undefined
+    : options.locks ?? globalThis.navigator?.locks as unknown as LockManagerLike | undefined;
+  const storageKey = options.storageKey ?? TIME_ACCOUNTING_STORAGE_BASE_KEY;
+  const now = options.now ?? Date.now;
+  if (!locks?.request) {
+    throw new TimeAccountingImportError("LOCK_UNAVAILABLE", "安全な排他制御を利用できないため、訂正を開始できません。");
+  }
+  return locks.request(TIME_ACCOUNTING_IMPORT_LOCK, { mode: "exclusive" }, async () => (
+    correctUnderLock(recordId, correctedSeconds, reason, storage, storageKey, now)
   ));
 }
 
@@ -251,10 +292,10 @@ async function importUnderLock(
         sourceEventId,
         entryId: existingMeasurement.usageEntryId,
         importedAt,
+        ...(actions.length === 0 ? {} : { actions }),
         ...(firstCancellation === undefined ? {} : {
           reversalEntryId: firstCancellation.entryId,
           cancelledAt: firstCancellation.actedAt,
-          actions,
         }),
       });
       importedRecords.push(metadata);
@@ -316,11 +357,22 @@ function actionsForMeasurement(
 ): readonly TimeRecordAccountingAction[] {
   const correctionEntryIds = measurement.correctionEntryIds
     ?? (measurement.reversalEntryId === undefined ? [] : [measurement.reversalEntryId]);
-  return Object.freeze(correctionEntryIds.map((entryId, index) => {
+  return Object.freeze(correctionEntryIds.map((entryId) => {
     const entry = ledger.entries.find((item) => item.id === entryId);
     if (!entry) throw new TimeAccountingImportError("STORE_INVALID", "時間仕訳の操作履歴が壊れています。");
+    if (entry.kind === "usage-correction") {
+      return Object.freeze({
+        kind: "correction" as const,
+        entryId,
+        actedAt: `${entry.postedOn}T00:00:00.000Z`,
+        beforeSeconds: entry.effectiveSecondsBefore,
+        afterSeconds: entry.effectiveSecondsAfter,
+        deltaSeconds: (entry.effectiveSecondsAfter ?? 0) - (entry.effectiveSecondsBefore ?? 0),
+        ...(entry.correctionReason === undefined ? {} : { reason: entry.correctionReason }),
+      });
+    }
     return Object.freeze({
-      kind: index % 2 === 0 ? "cancellation" as const : "reregistration" as const,
+      kind: entry.kind === "usage-reversal" ? "cancellation" as const : "reregistration" as const,
       entryId,
       actedAt: `${entry.postedOn}T00:00:00.000Z`,
     });
@@ -520,6 +572,104 @@ async function reregisterUnderLock(
   });
 }
 
+async function correctUnderLock(
+  recordId: string,
+  correctedSeconds: number,
+  reason: string,
+  storage: StorageLike,
+  storageKey: string,
+  now: () => number,
+): Promise<TimeCorrectionResult> {
+  const current = loadTimeAccountingStore(storage, storageKey);
+  const importedIndex = current.importedRecords.findIndex((record) => record.recordId === recordId);
+  if (importedIndex < 0) {
+    throw new TimeAccountingImportError("UNKNOWN_RECORD", "訂正する利用時間の記録が見つかりません。");
+  }
+  const imported = current.importedRecords[importedIndex];
+  const measurement = current.ledger.measurements.find((item) => item.sourceEventId === imported.sourceEventId);
+  if (!measurement || measurement.usageEntryId !== imported.entryId) {
+    throw new TimeAccountingImportError("STORE_INVALID", "訂正する時間仕訳の関連情報が壊れています。");
+  }
+  if (!isTimeMeasurementActive(measurement)) {
+    throw new TimeAccountingImportError("INACTIVE_RECORD", "取消済みの利用時間は訂正できません。先に再登録してください。");
+  }
+  const beforeSeconds = effectiveTimeMeasurementSeconds(measurement);
+  if (beforeSeconds === correctedSeconds) {
+    return Object.freeze({
+      recordId,
+      correctionEntryId: null,
+      corrected: false,
+      unchanged: true,
+      effectiveSeconds: beforeSeconds,
+      store: current,
+    });
+  }
+
+  const actedAtValue = now();
+  const actedDate = new Date(actedAtValue);
+  if (!Number.isFinite(actedDate.getTime())) {
+    throw new TimeAccountingImportError("INVALID_RECORD", "訂正日時が正しくありません。");
+  }
+  const actedAt = actedDate.toISOString();
+  const postedOn = localDate(actedDate);
+  const existingActions = imported.actions ?? [];
+  const correctionCount = existingActions.filter((action) => action.kind === "correction").length;
+  const correctionEntryId = correctionEntryIdForTimeRecord(recordId, correctionCount + 1);
+  let ledger: TimeAccountingLedger;
+  try {
+    ledger = correctAiUsage(current.ledger, {
+      entryId: correctionEntryId,
+      sourceEventId: imported.sourceEventId,
+      postedOn,
+      correctedInputSeconds: correctedSeconds,
+      ...(reason.trim() ? { reason: reason.trim() } : {}),
+    });
+  } catch (error) {
+    if (error instanceof TimeAccountingError && error.code === "REVERSAL_IN_CLOSED_PERIOD") {
+      throw new TimeAccountingImportError("CLOSED_PERIOD", "締め済みの利用記録は、締め日より後の未締め期間で訂正してください。");
+    }
+    throw error;
+  }
+  const action = Object.freeze({
+    kind: "correction" as const,
+    entryId: correctionEntryId,
+    actedAt,
+    beforeSeconds,
+    afterSeconds: correctedSeconds,
+    deltaSeconds: correctedSeconds - beforeSeconds,
+    ...(reason.trim() ? { reason: reason.trim() } : {}),
+  });
+  const importedRecords = [...current.importedRecords];
+  importedRecords[importedIndex] = Object.freeze({
+    ...imported,
+    actions: Object.freeze([...existingActions, action]),
+  });
+  const next = createStore(ledger, importedRecords);
+  try {
+    storage.setItem(storageKey, JSON.stringify(next));
+  } catch {
+    throw new TimeAccountingImportError("SAVE_FAILED", "訂正仕訳を保存できませんでした。");
+  }
+  const verified = loadTimeAccountingStore(storage, storageKey);
+  const saved = verified.importedRecords.find((record) => record.recordId === recordId);
+  const savedMeasurement = verified.ledger.measurements.find((item) => item.sourceEventId === imported.sourceEventId);
+  const savedAction = saved?.actions?.[saved.actions.length - 1];
+  const savedCorrectionId = savedMeasurement?.correctionEntryIds?.[savedMeasurement.correctionEntryIds.length - 1];
+  if (savedAction?.kind !== "correction" || savedAction.entryId !== correctionEntryId
+    || savedAction.actedAt !== actedAt || savedCorrectionId !== correctionEntryId || !savedMeasurement
+    || effectiveTimeMeasurementSeconds(savedMeasurement) !== correctedSeconds) {
+    throw new TimeAccountingImportError("SAVE_FAILED", "訂正仕訳の保存を確認できませんでした。");
+  }
+  return Object.freeze({
+    recordId,
+    correctionEntryId,
+    corrected: true,
+    unchanged: false,
+    effectiveSeconds: correctedSeconds,
+    store: verified,
+  });
+}
+
 function prepareRecords(input: readonly TimeRecordPreview[]) {
   if (!Array.isArray(input)) {
     throw new TimeAccountingImportError("INVALID_RECORD", "利用時間の記録形式が正しくありません。");
@@ -567,9 +717,19 @@ function parseImportedRecord(value: unknown): ImportedTimeRecord {
     : Array.isArray(value.actions)
       ? value.actions.map(parseAccountingAction)
       : (() => { throw new Error("invalid accounting actions"); })();
-  if (actions.some((action, index) => action.kind !== (index % 2 === 0 ? "cancellation" : "reregistration"))
-    || new Set(actions.map((action) => action.entryId)).size !== actions.length
-    || (reversalEntryId !== undefined && actions[0]?.entryId !== reversalEntryId)) {
+  let active = true;
+  for (const action of actions) {
+    if ((action.kind === "cancellation" && !active)
+      || (action.kind === "reregistration" && active)
+      || (action.kind === "correction" && !active)) {
+      throw new Error("accounting action sequence is inconsistent");
+    }
+    if (action.kind === "cancellation") active = false;
+    if (action.kind === "reregistration") active = true;
+  }
+  if (new Set(actions.map((action) => action.entryId)).size !== actions.length
+    || (reversalEntryId !== undefined
+      && actions.find((action) => action.kind === "cancellation")?.entryId !== reversalEntryId)) {
     throw new Error("accounting action history is inconsistent");
   }
   return Object.freeze({
@@ -584,10 +744,28 @@ function parseImportedRecord(value: unknown): ImportedTimeRecord {
 }
 
 function parseAccountingAction(value: unknown): TimeRecordAccountingAction {
-  if (!isObject(value) || (value.kind !== "cancellation" && value.kind !== "reregistration")
+  if (!isObject(value) || (value.kind !== "cancellation" && value.kind !== "reregistration" && value.kind !== "correction")
     || typeof value.entryId !== "string" || !value.entryId
     || typeof value.actedAt !== "string" || !Number.isFinite(Date.parse(value.actedAt))) {
     throw new Error("invalid accounting action");
+  }
+  if (value.kind === "correction") {
+    if (!Number.isSafeInteger(value.beforeSeconds) || Number(value.beforeSeconds) < 0
+      || !Number.isSafeInteger(value.afterSeconds) || Number(value.afterSeconds) < 0
+      || !Number.isSafeInteger(value.deltaSeconds) || Number(value.deltaSeconds) === 0
+      || Number(value.deltaSeconds) !== Number(value.afterSeconds) - Number(value.beforeSeconds)
+      || (value.reason !== undefined && (typeof value.reason !== "string" || value.reason.length > 500))) {
+      throw new Error("invalid correction action");
+    }
+    return Object.freeze({
+      kind: "correction",
+      entryId: value.entryId,
+      actedAt: value.actedAt,
+      beforeSeconds: Number(value.beforeSeconds),
+      afterSeconds: Number(value.afterSeconds),
+      deltaSeconds: Number(value.deltaSeconds),
+      ...(value.reason === undefined ? {} : { reason: value.reason }),
+    });
   }
   return Object.freeze({ kind: value.kind, entryId: value.entryId, actedAt: value.actedAt });
 }
@@ -621,6 +799,20 @@ function validateImportedRecordLinks(
       || actions.some((action, index) => action.entryId !== correctionEntryIds[index])) {
       throw new Error("imported record action links are invalid");
     }
+    for (const action of actions) {
+      const entry = ledger.entries.find((item) => item.id === action.entryId);
+      const expectedKind = action.kind === "cancellation"
+        ? "usage-reversal"
+        : action.kind === "reregistration" ? "usage-reregistration" : "usage-correction";
+      if (!entry || entry.kind !== expectedKind) throw new Error("imported record action kind is invalid");
+      if (action.kind === "correction"
+        && (action.beforeSeconds !== entry.effectiveSecondsBefore
+          || action.afterSeconds !== entry.effectiveSecondsAfter
+          || action.deltaSeconds !== Number(entry.effectiveSecondsAfter) - Number(entry.effectiveSecondsBefore)
+          || (action.reason ?? undefined) !== (entry.correctionReason ?? undefined))) {
+        throw new Error("imported record correction metadata is invalid");
+      }
+    }
   }
 }
 
@@ -634,6 +826,12 @@ export function reregistrationEntryIdForTimeRecord(recordId: string, occurrence 
   return occurrence === 1
     ? `ai-usage-reregistration:${recordId}`
     : `ai-usage-reregistration:${recordId}:${occurrence}`;
+}
+
+export function correctionEntryIdForTimeRecord(recordId: string, occurrence = 1) {
+  return occurrence === 1
+    ? `ai-usage-correction:${recordId}`
+    : `ai-usage-correction:${recordId}:${occurrence}`;
 }
 
 function localDate(value: Date) {

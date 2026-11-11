@@ -1773,6 +1773,30 @@ button {
   cursor: pointer;
 }
 
+.time-history-operation-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.time-history-operation-buttons .time-cancellation-button,
+.time-history-operation-buttons .time-correction-button {
+  width: 100%;
+  margin: 0;
+}
+
+.time-correction-button {
+  min-height: 42px;
+  border: 1px solid rgba(37, 99, 235, 0.24);
+  border-radius: 13px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .time-cancellation-modal {
   max-width: 430px;
 }
@@ -1808,6 +1832,36 @@ button {
   line-height: 1.65;
 }
 
+.time-correction-fields {
+  display: grid;
+  gap: 12px;
+}
+
+.time-correction-fields label {
+  display: grid;
+  gap: 6px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.time-correction-fields input,
+.time-correction-fields textarea {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 11px 12px;
+  color: #0f172a;
+  background: #ffffff;
+  font: inherit;
+  box-sizing: border-box;
+}
+
+.time-correction-fields textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 .time-cancellation-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1834,10 +1888,22 @@ button {
   cursor: pointer;
 }
 
+.time-correction-confirm {
+  min-height: 46px;
+  border: 0;
+  border-radius: 14px;
+  color: #ffffff;
+  background: #2563eb;
+  font-weight: 900;
+  cursor: pointer;
+}
+
 .time-cancellation-confirm:disabled,
 .time-cancellation-button:disabled,
 .time-reregistration-confirm:disabled,
-.time-reregistration-button:disabled {
+.time-reregistration-button:disabled,
+.time-correction-confirm:disabled,
+.time-correction-button:disabled {
   cursor: wait;
   opacity: 0.6;
 }

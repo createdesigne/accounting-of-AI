@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createTimeAccountingLedger, recordAiUsage } from "../src/timeAccounting.ts";
-import { cancelImportedTimeRecord, importTimeRecords, loadTimeAccountingStore, reregisterImportedTimeRecord } from "../src/timeAccountingStore.ts";
+import { cancelImportedTimeRecord, correctImportedTimeRecord, importTimeRecords, loadTimeAccountingStore, reregisterImportedTimeRecord } from "../src/timeAccountingStore.ts";
 import { buildTimeAccountingView, buildTimeImportHistory } from "../src/timeAccountingView.ts";
 import type { TimeRecordPreview } from "../src/timeRecordTransfer.ts";
 
@@ -40,6 +40,7 @@ test("保存済み61秒を今月の合計と時間仕訳に表示する", () => 
     postedOn: "2026-11-11",
     serviceName: "ChatGPT",
     durationSeconds: 61,
+    effectiveSeconds: 61,
     entryKind: "usage",
     status: "有効",
     isActive: true,
@@ -121,6 +122,7 @@ test("取り込み履歴を再読み込み後も正確な日時・秒数・仕�
     usedOn: "2026-11-11",
     serviceName: "ChatGPT",
     durationSeconds: 61,
+    effectiveSeconds: 61,
     importedAt: "2026-11-11T12:34:56.000Z",
     status: "取り込み済み",
     debitAccount: "AI仮受品",
@@ -194,4 +196,38 @@ test("取消後も実測秒数を保持し、元仕訳・取消仕訳と取消�
   assert.deepEqual(restoredHistory[0].actions.map((action) => action.kind), [
     "cancellation", "reregistration",
   ]);
+});
+
+test("訂正履歴は再読み込み後も差分・理由・有効秒数を復元する", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record: TimeRecordPreview = {
+    recordId: "view-correction:day:2026-11-11", sessionId: "view-correction", provider: "ChatGPT",
+    localDate: "2026-11-11", timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-11T10:00:00+09:00"), endedAt: Date.parse("2026-11-11T10:01:01+09:00"),
+    durationSeconds: 61,
+  };
+  await importTimeRecords([record], { storage, locks, now: () => Date.parse("2026-11-11T02:00:00Z") });
+  await correctImportedTimeRecord(record.recordId, 45, "休憩を除外", {
+    storage, locks, now: () => Date.parse("2026-11-12T03:04:05Z"),
+  });
+  const restored = loadTimeAccountingStore(storage);
+  const view = buildTimeAccountingView(restored.ledger, new Date(2026, 10, 15));
+  const usage = view.rows.find((row) => row.entryKind === "usage");
+  const correction = view.rows.find((row) => row.entryKind === "correction");
+  assert.equal(usage?.durationSeconds, 61);
+  assert.equal(usage?.effectiveSeconds, 45);
+  assert.equal(usage?.status, "訂正済み");
+  assert.equal(correction?.durationSeconds, 16);
+  assert.equal(correction?.status, "減額訂正");
+  assert.equal(correction?.debitAccount, "時間拠出");
+  const history = buildTimeImportHistory(restored)[0];
+  assert.equal(history.durationSeconds, 61);
+  assert.equal(history.effectiveSeconds, 45);
+  assert.deepEqual(history.actions[0], {
+    kind: "correction", entryId: `ai-usage-correction:${record.recordId}`,
+    relatedEntryId: `ai-usage:${record.recordId}`, actedAt: "2026-11-12T03:04:05.000Z",
+    postedOn: "2026-11-12", debitAccount: "時間拠出", creditAccount: "AI仮受品",
+    beforeSeconds: 61, afterSeconds: 45, deltaSeconds: -16, reason: "休憩を除外",
+  });
 });

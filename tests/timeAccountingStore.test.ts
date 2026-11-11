@@ -5,6 +5,8 @@ import {
   TIME_ACCOUNTING_STORAGE_BASE_KEY,
   TimeAccountingImportError,
   cancelImportedTimeRecord,
+  correctImportedTimeRecord,
+  correctionEntryIdForTimeRecord,
   importTimeRecords,
   loadTimeAccountingStore,
   reregisterImportedTimeRecord,
@@ -420,4 +422,119 @@ test('rejects persisted import metadata that is not linked to its journal', asyn
     (error) => error instanceof TimeAccountingImportError && error.code === 'STORE_INVALID',
   );
   assert.equal(result.store.ledger.entries.length, 1);
+});
+
+test('corrects 61 seconds down to 45 and up to 90 while preserving the raw measurement', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('correct-sequential:day:2026-11-10', 61);
+  await importTimeRecords([record], options(storage, locks));
+  const reduced = await correctImportedTimeRecord(record.recordId, 45, '休憩を除外', options(storage, locks));
+  assert.equal(reduced.corrected, true);
+  assert.equal(reduced.store.ledger.measurements[0].actualInputSeconds, 61);
+  assert.equal(reduced.store.ledger.measurements[0].effectiveInputSeconds, 45);
+  assert.equal(reduced.store.ledger.entries[1].lines[0].account, TIME_ACCOUNTS.timeContribution);
+  assert.equal(reduced.store.ledger.entries[1].lines[0].seconds, 16);
+  const increased = await correctImportedTimeRecord(record.recordId, 90, '', options(storage, locks));
+  assert.equal(increased.store.ledger.measurements[0].effectiveInputSeconds, 90);
+  assert.equal(increased.store.ledger.entries[2].lines[0].account, TIME_ACCOUNTS.aiClearing);
+  assert.equal(increased.store.ledger.entries[2].lines[0].seconds, 45);
+  assert.ok(increased.store.ledger.entries.every(isBalancedJournalEntry));
+  assert.deepEqual(increased.store.importedRecords[0].actions?.map((action) => action.kind), ['correction', 'correction']);
+  assert.equal(loadTimeAccountingStore(storage).ledger.measurements[0].effectiveInputSeconds, 90);
+});
+
+test('same-time, double-click and concurrent correction never create duplicate journals', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('correct-concurrent:day:2026-11-10', 61);
+  await importTimeRecords([record], options(storage, locks));
+  const unchanged = await correctImportedTimeRecord(record.recordId, 61, '', options(storage, locks));
+  assert.equal(unchanged.unchanged, true);
+  const [first, second] = await Promise.all([
+    correctImportedTimeRecord(record.recordId, 45, '', options(storage, locks)),
+    correctImportedTimeRecord(record.recordId, 45, '', options(storage, locks)),
+  ]);
+  assert.equal([first, second].filter((result) => result.corrected).length, 1);
+  assert.equal([first, second].filter((result) => result.unchanged).length, 1);
+  const restored = loadTimeAccountingStore(storage);
+  assert.equal(restored.ledger.entries.filter((entry) => entry.kind === 'usage-correction').length, 1);
+  assert.equal(restored.ledger.entries[1].id, correctionEntryIdForTimeRecord(record.recordId));
+});
+
+test('failed correction save leaves no journal and retry succeeds once', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('correct-retry:day:2026-11-10', 61);
+  await importTimeRecords([record], options(storage, locks));
+  storage.failNextSet = true;
+  await assert.rejects(
+    () => correctImportedTimeRecord(record.recordId, 45, '再試行', options(storage, locks)),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'SAVE_FAILED',
+  );
+  assert.equal(loadTimeAccountingStore(storage).ledger.entries.length, 1);
+  const retried = await correctImportedTimeRecord(record.recordId, 45, '再試行', options(storage, locks));
+  assert.equal(retried.corrected, true);
+  assert.equal(retried.store.ledger.entries.length, 2);
+});
+
+test('cancelled records cannot be corrected and re-registration restores the corrected amount', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('correct-cancel:day:2026-11-10', 61);
+  await importTimeRecords([record], options(storage, locks));
+  await correctImportedTimeRecord(record.recordId, 45, '', options(storage, locks));
+  const cancelled = await cancelImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(cancelled.store.ledger.entries.at(-1)?.lines[0].seconds, 45);
+  await assert.rejects(
+    () => correctImportedTimeRecord(record.recordId, 90, '', options(storage, locks)),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'INACTIVE_RECORD',
+  );
+  const restored = await reregisterImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(restored.store.ledger.entries.at(-1)?.lines[0].seconds, 45);
+  const correctedAgain = await correctImportedTimeRecord(record.recordId, 90, '', options(storage, locks));
+  assert.equal(correctedAgain.effectiveSeconds, 90);
+});
+
+test('partial correction protects a closed date and posts only in a later open date', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('closed-correction:day:2026-09-30', 61, '2026-09-30');
+  const imported = await importTimeRecords([record], options(storage, locks));
+  const adjustedLedger = recordMonthEndAdjustment(imported.store.ledger, {
+    entryId: 'closed-correction-adjustment',
+    sourceEventId: imported.store.importedRecords[0].sourceEventId,
+    postedOn: '2026-09-30',
+  });
+  storage.setItem(TIME_ACCOUNTING_STORAGE_BASE_KEY, JSON.stringify({ ...imported.store, ledger: adjustedLedger }));
+  await assert.rejects(
+    () => correctImportedTimeRecord(record.recordId, 45, '', {
+      storage, locks, now: () => Date.parse('2026-09-30T12:00:00Z'),
+    }),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'CLOSED_PERIOD',
+  );
+  assert.equal(loadTimeAccountingStore(storage).ledger.entries.length, 2);
+  const corrected = await correctImportedTimeRecord(record.recordId, 45, '', {
+    storage, locks, now: () => Date.parse('2026-10-01T12:00:00Z'),
+  });
+  assert.equal(corrected.store.ledger.entries[2].postedOn, '2026-10-01');
+  assert.deepEqual(corrected.store.ledger.entries.slice(0, 2), adjustedLedger.entries);
+});
+
+test('allows zero effective seconds but rejects negative corrections', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('correct-zero:day:2026-11-10', 61);
+  await importTimeRecords([record], options(storage, locks));
+  const corrected = await correctImportedTimeRecord(record.recordId, 0, '', options(storage, locks));
+  assert.equal(corrected.effectiveSeconds, 0);
+  assert.equal(loadTimeAccountingStore(storage).ledger.measurements[0].effectiveInputSeconds, 0);
+  const cancelled = await cancelImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(cancelled.store.ledger.entries.at(-1)?.lines[0].seconds, 0);
+  const restored = await reregisterImportedTimeRecord(record.recordId, options(storage, locks));
+  assert.equal(restored.store.ledger.entries.at(-1)?.lines[0].seconds, 0);
+  await assert.rejects(
+    () => correctImportedTimeRecord(record.recordId, -1, '', options(storage, locks)),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'INVALID_RECORD',
+  );
 });

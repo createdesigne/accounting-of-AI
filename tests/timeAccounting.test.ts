@@ -6,6 +6,8 @@ import {
   accountBalanceSeconds,
   calculateTimeProfitAndLoss,
   createTimeAccountingLedger,
+  correctAiUsage,
+  effectiveTimeMeasurementSeconds,
   isBalancedJournalEntry,
   journalTotals,
   migrateTimeAccountingLedger,
@@ -55,6 +57,45 @@ test('preserves 1, 59, 60 and 61 seconds exactly and keeps every entry balanced'
     { debitSeconds: 61, creditSeconds: 61 },
   ]);
   assert.ok(ledger.entries.every(isBalancedJournalEntry));
+});
+
+test('appends balanced difference journals for 61→45 and then 45→90 seconds', () => {
+  const recorded = recordAiUsage(createTimeAccountingLedger(), {
+    ...usage, actualInputSeconds: 61,
+  });
+  const reduced = correctAiUsage(recorded, {
+    entryId: 'correction-down', sourceEventId: usage.sourceEventId,
+    postedOn: '2026-10-21', correctedInputSeconds: 45, reason: '休憩時間を除外',
+  });
+  assert.equal(reduced.measurements[0].actualInputSeconds, 61);
+  assert.equal(effectiveTimeMeasurementSeconds(reduced.measurements[0]), 45);
+  assert.deepEqual(reduced.entries[1], {
+    id: 'correction-down', kind: 'usage-correction', postedOn: '2026-10-21',
+    sourceEventId: usage.sourceEventId, correctsEntryId: usage.entryId,
+    effectiveSecondsBefore: 61, effectiveSecondsAfter: 45, correctionReason: '休憩時間を除外',
+    lines: [
+      { side: 'debit', account: '時間拠出', seconds: 16, measurement: 'actual-input' },
+      { side: 'credit', account: 'AI仮受品', seconds: 16, measurement: 'actual-input' },
+    ],
+  });
+  const increased = correctAiUsage(reduced, {
+    entryId: 'correction-up', sourceEventId: usage.sourceEventId,
+    postedOn: '2026-10-22', correctedInputSeconds: 90,
+  });
+  assert.equal(effectiveTimeMeasurementSeconds(increased.measurements[0]), 90);
+  assert.equal(increased.entries[2].correctsEntryId, 'correction-down');
+  assert.deepEqual(increased.entries[2].lines.map((line) => [line.account, line.seconds]), [
+    ['AI仮受品', 45], ['時間拠出', 45],
+  ]);
+  assert.ok(increased.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(increased, TIME_ACCOUNTS.aiClearing), 90);
+  assert.throws(
+    () => correctAiUsage(increased, {
+      entryId: 'unchanged', sourceEventId: usage.sourceEventId,
+      postedOn: '2026-10-23', correctedInputSeconds: 90,
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'NO_CORRECTION_CHANGE',
+  );
 });
 
 test('moves the same seconds to thought exploration expense at month end', () => {

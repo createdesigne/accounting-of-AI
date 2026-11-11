@@ -1,4 +1,4 @@
-import { TIME_ACCOUNTS, type TimeAccount, type TimeAccountingLedger } from "./timeAccounting.ts";
+import { effectiveTimeMeasurementSeconds, isTimeMeasurementActive, TIME_ACCOUNTS, type TimeAccount, type TimeAccountingLedger } from "./timeAccounting.ts";
 import type { TimeAccountingStore } from "./timeAccountingStore.ts";
 
 export type TimeJournalRow = Readonly<{
@@ -8,8 +8,9 @@ export type TimeJournalRow = Readonly<{
   postedOn: string;
   serviceName: string;
   durationSeconds: number;
-  entryKind: "usage" | "reversal" | "reregistration";
-  status: "有効" | "取消済み" | "再登録済み" | "取消仕訳" | "再登録仕訳";
+  effectiveSeconds?: number;
+  entryKind: "usage" | "reversal" | "reregistration" | "correction";
+  status: "有効" | "取消済み" | "再登録済み" | "訂正済み" | "取消仕訳" | "再登録仕訳" | "増額訂正" | "減額訂正";
   isActive: boolean;
   relatedEntryId?: string;
   debitAccount: TimeAccount;
@@ -30,6 +31,7 @@ export type TimeImportHistoryRow = Readonly<{
   usedOn: string;
   serviceName: string;
   durationSeconds: number;
+  effectiveSeconds: number;
   importedAt: string;
   status: "取り込み済み" | "取消済み" | "再登録済み";
   debitAccount: typeof TIME_ACCOUNTS.aiClearing;
@@ -41,13 +43,17 @@ export type TimeImportHistoryRow = Readonly<{
 }>;
 
 export type TimeImportHistoryAction = Readonly<{
-  kind: "cancellation" | "reregistration";
+  kind: "cancellation" | "reregistration" | "correction";
   entryId: string;
   relatedEntryId: string;
   actedAt: string;
   postedOn: string;
   debitAccount: TimeAccount;
   creditAccount: TimeAccount;
+  beforeSeconds?: number;
+  afterSeconds?: number;
+  deltaSeconds?: number;
+  reason?: string;
 }>;
 
 /**
@@ -76,7 +82,11 @@ export function buildTimeAccountingView(
     const serviceName = measurement.sourceEventId.startsWith("chrome-time:") ? "ChatGPT" : "AI";
     const correctionEntryIds = measurement.correctionEntryIds
       ?? (measurement.reversalEntryId === undefined ? [] : [measurement.reversalEntryId]);
-    const active = correctionEntryIds.length % 2 === 0;
+    const active = isTimeMeasurementActive(measurement);
+    const effectiveSeconds = effectiveTimeMeasurementSeconds(measurement);
+    const latestCorrection = [...correctionEntryIds].reverse()
+      .map((id) => ledger.entries.find((item) => item.id === id))
+      .find((item) => item?.kind === "usage-correction");
     const usageRow: TimeJournalRow = Object.freeze({
       id: entry.id,
       sourceEventId: measurement.sourceEventId,
@@ -84,8 +94,9 @@ export function buildTimeAccountingView(
       postedOn: entry.postedOn,
       serviceName,
       durationSeconds: measurement.actualInputSeconds,
+      effectiveSeconds,
       entryKind: "usage",
-      status: correctionEntryIds.length === 0 ? "有効" : active ? "再登録済み" : "取消済み",
+      status: !active ? "取消済み" : latestCorrection ? "訂正済み" : correctionEntryIds.length === 0 ? "有効" : "再登録済み",
       isActive: active,
       ...(correctionEntryIds.length === 0 ? {} : { relatedEntryId: correctionEntryIds[correctionEntryIds.length - 1] }),
       debitAccount: debit.account,
@@ -93,22 +104,25 @@ export function buildTimeAccountingView(
     });
     const correctionRows = correctionEntryIds.flatMap((correctionId): TimeJournalRow[] => {
       const correction = ledger.entries.find((item) => item.id === correctionId);
-      if (!correction || (correction.kind !== "usage-reversal" && correction.kind !== "usage-reregistration")) return [];
+      if (!correction || !["usage-reversal", "usage-reregistration", "usage-correction"].includes(correction.kind)) return [];
       const correctionDebit = correction.lines.find((line) => line.side === "debit");
       const correctionCredit = correction.lines.find((line) => line.side === "credit");
       if (!correctionDebit || !correctionCredit) return [];
       const isReversal = correction.kind === "usage-reversal";
+      const isCorrection = correction.kind === "usage-correction";
+      const delta = (correction.effectiveSecondsAfter ?? 0) - (correction.effectiveSecondsBefore ?? 0);
       return [Object.freeze({
         id: correction.id,
         sourceEventId: measurement.sourceEventId,
         usedOn: measurement.occurredOn,
         postedOn: correction.postedOn,
         serviceName,
-        durationSeconds: measurement.actualInputSeconds,
-        entryKind: isReversal ? "reversal" as const : "reregistration" as const,
-        status: isReversal ? "取消仕訳" as const : "再登録仕訳" as const,
+        durationSeconds: isCorrection ? Math.abs(delta) : correctionDebit.seconds,
+        ...(isCorrection ? { effectiveSeconds: correction.effectiveSecondsAfter } : {}),
+        entryKind: isCorrection ? "correction" as const : isReversal ? "reversal" as const : "reregistration" as const,
+        status: isCorrection ? (delta > 0 ? "増額訂正" as const : "減額訂正" as const) : isReversal ? "取消仕訳" as const : "再登録仕訳" as const,
         isActive: false,
-        relatedEntryId: isReversal ? correction.reversesEntryId : correction.restoresEntryId,
+        relatedEntryId: isCorrection ? correction.correctsEntryId : isReversal ? correction.reversesEntryId : correction.restoresEntryId,
         debitAccount: correctionDebit.account,
         creditAccount: correctionCredit.account,
       })];
@@ -151,12 +165,12 @@ export function buildTimeImportHistory(
     seen.add(imported.recordId);
     const actions = (imported.actions ?? []).flatMap((action): TimeImportHistoryAction[] => {
       const actionEntry = entries.get(action.entryId);
-      if (!actionEntry || (actionEntry.kind !== "usage-reversal" && actionEntry.kind !== "usage-reregistration")) return [];
+      if (!actionEntry || !["usage-reversal", "usage-reregistration", "usage-correction"].includes(actionEntry.kind)) return [];
       const actionDebit = actionEntry.lines.find((line) => line.side === "debit");
       const actionCredit = actionEntry.lines.find((line) => line.side === "credit");
       const relatedEntryId = actionEntry.kind === "usage-reversal"
         ? actionEntry.reversesEntryId
-        : actionEntry.restoresEntryId;
+        : actionEntry.kind === "usage-reregistration" ? actionEntry.restoresEntryId : actionEntry.correctsEntryId;
       if (!actionDebit || !actionCredit || !relatedEntryId) return [];
       return [Object.freeze({
         kind: action.kind,
@@ -166,9 +180,15 @@ export function buildTimeImportHistory(
         postedOn: actionEntry.postedOn,
         debitAccount: actionDebit.account,
         creditAccount: actionCredit.account,
+        ...(action.kind !== "correction" ? {} : {
+          beforeSeconds: action.beforeSeconds,
+          afterSeconds: action.afterSeconds,
+          deltaSeconds: action.deltaSeconds,
+          ...(action.reason === undefined ? {} : { reason: action.reason }),
+        }),
       })];
     });
-    const active = actions.length % 2 === 0;
+    const active = isTimeMeasurementActive(measurement);
     const latestCancellation = [...actions].reverse().find((action) => action.kind === "cancellation");
     rows.push(Object.freeze({
       recordId: imported.recordId,
@@ -177,8 +197,9 @@ export function buildTimeImportHistory(
       usedOn: measurement.occurredOn,
       serviceName: serviceNameFromFingerprint(imported.fingerprint),
       durationSeconds: measurement.actualInputSeconds,
+      effectiveSeconds: effectiveTimeMeasurementSeconds(measurement),
       importedAt: imported.importedAt,
-      status: actions.length === 0 ? "取り込み済み" : active ? "再登録済み" : "取消済み",
+      status: !active ? "取消済み" : actions.some((action) => action.kind === "reregistration") ? "再登録済み" : "取り込み済み",
       debitAccount: debit.account,
       creditAccount: credit.account,
       actions: Object.freeze(actions),
