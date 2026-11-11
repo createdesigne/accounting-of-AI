@@ -18,7 +18,10 @@ import {
 import {
   TIME_ACCOUNTING_STORAGE_BASE_KEY,
   importTimeRecords,
+  loadTimeAccountingStore,
+  type TimeAccountingStore,
 } from "./timeAccountingStore";
+import { buildTimeAccountingView, type TimeJournalRow } from "./timeAccountingView";
 import {
   ArrowLeft,
   ArrowRight,
@@ -548,12 +551,30 @@ function App() {
   const timeRecordPreviewRef = useRef<TimeRecordPreview[]>([]);
   const [timeImportBusy, setTimeImportBusy] = useState(false);
   const [timeImportMessage, setTimeImportMessage] = useState("");
+  const [timeAccountingStore, setTimeAccountingStore] = useState<TimeAccountingStore | null>(() => {
+    try {
+      return loadTimeAccountingStore(localStorage, TIME_ACCOUNTING_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
   const [thinkingLedger, setThinkingLedger] = useState<IssuedThinkingReceipt[]>([]);
   const [ledgerStatus, setLedgerStatus] = useState<"loading" | "ready" | "error">("loading");
   const timeRecordTotalSeconds = useMemo(
     () => timeRecordPreview.reduce((sum, record) => sum + record.durationSeconds, 0),
     [timeRecordPreview],
   );
+  const timeAccountingView = useMemo(
+    () => buildTimeAccountingView(timeAccountingStore?.ledger ?? null),
+    [timeAccountingStore],
+  );
+  const refreshTimeAccounting = useCallback(() => {
+    try {
+      setTimeAccountingStore(loadTimeAccountingStore(localStorage, TIME_ACCOUNTING_STORAGE_KEY));
+    } catch {
+      // 壊れた保存値を上書きせず、前回正常に読めた画面表示を維持します。
+    }
+  }, []);
   const refreshLedger = useCallback(() => {
     try {
       setThinkingLedger(loadThinkingLedger());
@@ -580,6 +601,24 @@ function App() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [refreshLedger]);
+
+  useEffect(() => {
+    refreshTimeAccounting();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === TIME_ACCOUNTING_STORAGE_KEY || event.key === null) refreshTimeAccounting();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshTimeAccounting();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", refreshTimeAccounting);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", refreshTimeAccounting);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshTimeAccounting]);
 
   useEffect(() => {
     const receiveTimeRecords = (event: MessageEvent) => {
@@ -633,6 +672,9 @@ function App() {
       const result = await importTimeRecords(timeRecordPreview, {
         storageKey: TIME_ACCOUNTING_STORAGE_KEY,
       });
+      // importTimeRecords が保存後の再読込まで検証した store を返すため、
+      // 拡張機能への完了通知に失敗しても帳簿表示は安全に更新できます。
+      setTimeAccountingStore(result.store);
       try {
         await acknowledgeImportedTimeRecords([...result.records]);
       } catch {
@@ -1183,6 +1225,8 @@ function App() {
             <HomeScreen
               stats={stats}
               receipts={receiptData}
+              measuredTimeSeconds={timeAccountingView.currentMonthSeconds}
+              measuredTimeRecordCount={timeAccountingView.currentMonthRecordCount}
               onShowAnalysis={showAnalysis}
               onShowReceipts={showReceipts}
               onStartReader={openReader}
@@ -1259,7 +1303,11 @@ function App() {
             </div>
           )}
           {!isSettlementOpen && activeTab === "journal" && (
-            <JournalScreen receipts={receiptData} highlightedReceiptId={highlightedReceiptId} />
+            <JournalScreen
+              receipts={receiptData}
+              highlightedReceiptId={highlightedReceiptId}
+              timeRows={timeAccountingView.rows}
+            />
           )}
           {!isSettlementOpen && activeTab === "receipts" && (
             ledgerStatus !== "ready" ? <LedgerLoadState status={ledgerStatus} onRetry={refreshLedger} /> : <ReceiptsScreen
@@ -1830,6 +1878,8 @@ function PreviousSettlementModal({ onClose }: { onClose: () => void }) {
 function HomeScreen({
   stats,
   receipts,
+  measuredTimeSeconds,
+  measuredTimeRecordCount,
   onShowAnalysis,
   onShowReceipts,
   onStartReader,
@@ -1837,6 +1887,8 @@ function HomeScreen({
 }: {
   stats: ReturnType<typeof buildStats>;
   receipts: ThoughtReceipt[];
+  measuredTimeSeconds: number;
+  measuredTimeRecordCount: number;
   onShowAnalysis: (focus?: AnalysisFocus) => void;
   onShowReceipts: (filter?: ReceiptFilter | null) => void;
   onStartReader: () => void;
@@ -1861,10 +1913,19 @@ function HomeScreen({
         >
           <Clock3 size={18} />
           <span>{formatHours(stats.totalMinutes)}</span>
-          <small>AIスクリーンタイム</small>
+          <small>AIスクリーンタイム（レシート記録）</small>
           <em className="tap-hint hero-hint">見る</em>
         </button>
       </div>
+
+      <section className="card measured-time-card" aria-label="今月のAI実測利用時間">
+        <span className="measured-time-icon"><Clock3 size={20} /></span>
+        <div>
+          <small>今月のAI実測利用時間</small>
+          <strong>{formatTimeRecordDuration(measuredTimeSeconds)}</strong>
+          <p>拡張機能で計測し、会計に取り込んだ{measuredTimeRecordCount}件の合計</p>
+        </div>
+      </section>
 
       <button
         className="home-reader-card pressable-surface"
@@ -2413,21 +2474,47 @@ function SavedLedgerList({
 function JournalScreen({
   receipts,
   highlightedReceiptId,
+  timeRows,
 }: {
   receipts: ThoughtReceipt[];
   highlightedReceiptId: string | null;
+  timeRows: readonly TimeJournalRow[];
 }) {
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
+  const [journalKind, setJournalKind] = useState<"thought" | "time">("thought");
   const journalStats = useMemo(() => buildJournalStats(receipts), [receipts]);
   const journalReceipts = useMemo(() => getJournalReceipts(receipts), [receipts]);
 
   return (
     <section className="stack journal-screen">
       <div className="journal-header">
-        <p className="eyebrow">思考仕訳帳</p>
-        <h2>6月の思考仕訳</h2>
-        <p>AIとの会話を、思考の取引として記帳します。</p>
+        <p className="eyebrow">{journalKind === "thought" ? "思考仕訳帳" : "時間仕訳帳"}</p>
+        <h2>{journalKind === "thought" ? "6月の思考仕訳" : "AI実測利用時間の仕訳"}</h2>
+        <p>{journalKind === "thought"
+          ? "AIとの会話を、思考の取引として記帳します。"
+          : "拡張機能から手動で取り込んだ利用時間を、専用の帳簿から表示します。"}</p>
       </div>
+
+      <div className="journal-kind-switch" role="group" aria-label="仕訳帳の種類">
+        <button
+          type="button"
+          className={journalKind === "thought" ? "active" : ""}
+          aria-pressed={journalKind === "thought"}
+          onClick={() => setJournalKind("thought")}
+        >
+          思考仕訳
+        </button>
+        <button
+          type="button"
+          className={journalKind === "time" ? "active" : ""}
+          aria-pressed={journalKind === "time"}
+          onClick={() => setJournalKind("time")}
+        >
+          時間仕訳
+        </button>
+      </div>
+
+      {journalKind === "thought" ? <>
 
       <section className="journal-summary-card">
         <span>今月の思考量合計</span>
@@ -2481,8 +2568,49 @@ function JournalScreen({
         receipt={selectedReceipt}
         onClose={() => setSelectedReceipt(null)}
       />
+      </> : <TimeJournalEntries rows={timeRows} />}
     </section>
   );
+}
+
+function TimeJournalEntries({ rows }: { rows: readonly TimeJournalRow[] }) {
+  const totalSeconds = rows.reduce((sum, row) => sum + row.durationSeconds, 0);
+  return <>
+    <section className="journal-summary-card time-journal-summary">
+      <span>保存済みの実測利用時間</span>
+      <strong>{formatTimeRecordDuration(totalSeconds)}</strong>
+      <p>時間仕訳 {rows.length}件</p>
+      <small>思考仕訳とは別の時間会計専用ストアを表示しています。</small>
+    </section>
+
+    <section className="section-block">
+      <SectionTitle icon={<Clock3 size={18} />} title="時間仕訳" />
+      {rows.length === 0 ? (
+        <div className="card time-journal-empty">
+          <p>保存済みの時間仕訳はまだありません。</p>
+          <small>Chrome拡張機能から受信し、「会計に取り込む」を押すと表示されます。</small>
+        </div>
+      ) : (
+        <div className="time-journal-list">
+          {rows.map((row) => (
+            <article className="time-journal-entry" key={row.id}>
+              <div className="time-journal-entry-heading">
+                <div>
+                  <span>{formatFullDate(row.usedOn)}</span>
+                  <strong>{row.serviceName}</strong>
+                </div>
+                <b>{formatTimeRecordDuration(row.durationSeconds)}</b>
+              </div>
+              <dl>
+                <div><dt>借方</dt><dd>{row.debitAccount}</dd></div>
+                <div><dt>貸方</dt><dd>{row.creditAccount}</dd></div>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  </>;
 }
 
 function JournalDonutChart({

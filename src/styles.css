@@ -338,6 +338,54 @@ button {
   gap: 12px;
 }
 
+.measured-time-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 13px;
+  padding: 16px;
+  background: linear-gradient(135deg, #f0f9ff, #ffffff);
+  border-color: rgba(14, 165, 233, 0.2);
+}
+
+.measured-time-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 15px;
+  color: #0369a1;
+  background: #e0f2fe;
+}
+
+.measured-time-card small,
+.measured-time-card strong,
+.measured-time-card p {
+  display: block;
+  margin: 0;
+}
+
+.measured-time-card small {
+  color: #0369a1;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.measured-time-card strong {
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 23px;
+  line-height: 1.25;
+}
+
+.measured-time-card p {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
 .metric-card,
 .card,
 .mini-receipt,
@@ -1261,6 +1309,33 @@ button {
   line-height: 1.7;
 }
 
+.journal-kind-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 16px;
+  background: #e2e8f0;
+}
+
+.journal-kind-switch button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 12px;
+  color: #64748b;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.journal-kind-switch button.active {
+  color: #1d4ed8;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+}
+
 .journal-intro-card p,
 .journal-explain-card p,
 .journal-muted {
@@ -1298,6 +1373,97 @@ button {
   font-size: 52px;
   line-height: 1;
   letter-spacing: 0;
+}
+
+.time-journal-summary strong {
+  font-size: 34px;
+}
+
+.time-journal-list {
+  display: grid;
+  gap: 10px;
+}
+
+.time-journal-entry {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border: 1px solid rgba(14, 165, 233, 0.18);
+  border-radius: 20px;
+  background: linear-gradient(180deg, #ffffff, #f8fafc);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.time-journal-entry-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.time-journal-entry-heading span,
+.time-journal-entry-heading strong {
+  display: block;
+}
+
+.time-journal-entry-heading span {
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.time-journal-entry-heading strong {
+  margin-top: 3px;
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.time-journal-entry-heading b {
+  color: #0369a1;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.time-journal-entry dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 0;
+}
+
+.time-journal-entry dl div {
+  padding: 9px 10px;
+  border-radius: 12px;
+  background: #f0f9ff;
+}
+
+.time-journal-entry dt {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.time-journal-entry dd {
+  margin: 3px 0 0;
+  color: #1e293b;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.time-journal-empty p,
+.time-journal-empty small {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.65;
+}
+
+.time-journal-empty p {
+  font-weight: 900;
+}
+
+.time-journal-empty small {
+  display: block;
+  margin-top: 5px;
 }
 
 .journal-summary-card p {

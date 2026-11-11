@@ -164,6 +164,10 @@ test('normalization upgrades and restores an open session without adding elapsed
 });
 
 test('legacy records and pending activity keep their ids and seconds as separate migrated sessions', () => {
+  const localDateAtEpoch = (() => {
+    const value = new Date(1_000);
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  })();
   const migrated = tracker.normalizeState({
     version: 2,
     enabled: true,
@@ -181,8 +185,8 @@ test('legacy records and pending activity keep their ids and seconds as separate
   assert.equal(migrated.current, null);
   assert.deepEqual(Array.from(migrated.records, (record: any) => record.id), ['legacy-record', 'legacy-current']);
   assert.deepEqual(Array.from(migrated.records, (record: any) => record.sessionId), ['legacy-record', 'legacy-current']);
-  assert.equal(migrated.records[0].dailyRecords[0].recordId, 'legacy-record:day:1970-01-01');
-  assert.equal(migrated.records[1].dailyRecords[0].recordId, 'legacy-current:day:1970-01-01');
+  assert.equal(migrated.records[0].dailyRecords[0].recordId, `legacy-record:day:${localDateAtEpoch}`);
+  assert.equal(migrated.records[1].dailyRecords[0].recordId, `legacy-current:day:${localDateAtEpoch}`);
   assert.equal(tracker.summary(migrated).totalSeconds, 12);
 
   activity(migrated, 20_000, 'new-session');
