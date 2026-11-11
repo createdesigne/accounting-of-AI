@@ -22,7 +22,12 @@ import {
   loadTimeAccountingStore,
   type TimeAccountingStore,
 } from "./timeAccountingStore";
-import { buildTimeAccountingView, type TimeJournalRow } from "./timeAccountingView";
+import {
+  buildTimeAccountingView,
+  buildTimeImportHistory,
+  type TimeImportHistoryRow,
+  type TimeJournalRow,
+} from "./timeAccountingView";
 import {
   TIME_AUTO_IMPORT_SETTINGS_BASE_KEY,
   loadAutomaticTimeImportEnabled,
@@ -580,6 +585,10 @@ function App() {
   );
   const timeAccountingView = useMemo(
     () => buildTimeAccountingView(timeAccountingStore?.ledger ?? null),
+    [timeAccountingStore],
+  );
+  const timeImportHistory = useMemo(
+    () => buildTimeImportHistory(timeAccountingStore),
     [timeAccountingStore],
   );
   const refreshTimeAccounting = useCallback(() => {
@@ -1390,6 +1399,7 @@ function App() {
               receipts={receiptData}
               highlightedReceiptId={highlightedReceiptId}
               timeRows={timeAccountingView.rows}
+              timeImportHistory={timeImportHistory}
             />
           )}
           {!isSettlementOpen && activeTab === "receipts" && (
@@ -2589,10 +2599,12 @@ function JournalScreen({
   receipts,
   highlightedReceiptId,
   timeRows,
+  timeImportHistory,
 }: {
   receipts: ThoughtReceipt[];
   highlightedReceiptId: string | null;
   timeRows: readonly TimeJournalRow[];
+  timeImportHistory: readonly TimeImportHistoryRow[];
 }) {
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
   const [journalKind, setJournalKind] = useState<"thought" | "time">("thought");
@@ -2606,7 +2618,7 @@ function JournalScreen({
         <h2>{journalKind === "thought" ? "6月の思考仕訳" : "AI実測利用時間の仕訳"}</h2>
         <p>{journalKind === "thought"
           ? "AIとの会話を、思考の取引として記帳します。"
-          : "拡張機能から手動で取り込んだ利用時間を、専用の帳簿から表示します。"}</p>
+          : "拡張機能から手動または自動で取り込んだ利用時間を、専用の帳簿から表示します。"}</p>
       </div>
 
       <div className="journal-kind-switch" role="group" aria-label="仕訳帳の種類">
@@ -2682,12 +2694,18 @@ function JournalScreen({
         receipt={selectedReceipt}
         onClose={() => setSelectedReceipt(null)}
       />
-      </> : <TimeJournalEntries rows={timeRows} />}
+      </> : <TimeJournalEntries rows={timeRows} historyRows={timeImportHistory} />}
     </section>
   );
 }
 
-function TimeJournalEntries({ rows }: { rows: readonly TimeJournalRow[] }) {
+function TimeJournalEntries({
+  rows,
+  historyRows,
+}: {
+  rows: readonly TimeJournalRow[];
+  historyRows: readonly TimeImportHistoryRow[];
+}) {
   const totalSeconds = rows.reduce((sum, row) => sum + row.durationSeconds, 0);
   return <>
     <section className="journal-summary-card time-journal-summary">
@@ -2724,7 +2742,45 @@ function TimeJournalEntries({ rows }: { rows: readonly TimeJournalRow[] }) {
         </div>
       )}
     </section>
+
+    <TimeImportHistory rows={historyRows} />
   </>;
+}
+
+function TimeImportHistory({ rows }: { rows: readonly TimeImportHistoryRow[] }) {
+  return (
+    <details className="card time-import-history">
+      <summary>
+        <span>取り込み履歴を見る</span>
+        <small>{rows.length}件</small>
+        <ChevronRight size={18} aria-hidden="true" />
+      </summary>
+      <div className="time-import-history-list">
+        {rows.length === 0 ? (
+          <p className="time-import-history-empty">取り込み済みの利用時間はまだありません。</p>
+        ) : rows.map((row) => (
+          <details className="time-import-history-item" key={row.recordId}>
+            <summary>
+              <div>
+                <small>{formatFullDate(row.usedOn)}</small>
+                <strong>{row.serviceName}</strong>
+              </div>
+              <b>{formatTimeRecordDuration(row.durationSeconds)}</b>
+              <span>{row.status}</span>
+              <ChevronRight size={16} aria-hidden="true" />
+            </summary>
+            <dl>
+              <div><dt>借方</dt><dd>{row.debitAccount}</dd></div>
+              <div><dt>貸方</dt><dd>{row.creditAccount}</dd></div>
+              <div><dt>記録秒数</dt><dd>{row.durationSeconds}秒</dd></div>
+              <div><dt>取り込み日時</dt><dd>{formatImportDateTime(row.importedAt)}</dd></div>
+              <div className="history-record-id"><dt>記録ID</dt><dd>{row.recordId}</dd></div>
+            </dl>
+          </details>
+        ))}
+      </div>
+    </details>
+  );
 }
 
 function JournalDonutChart({
@@ -4564,6 +4620,19 @@ function formatDate(date: string) {
 function formatFullDate(date: string) {
   const [year, month, day] = date.split("-");
   return `${year}年${Number(month)}月${Number(day)}日`;
+}
+
+function formatImportDateTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
 function getJournalNumber(receiptId: string) {

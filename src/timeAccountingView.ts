@@ -1,4 +1,5 @@
 import { TIME_ACCOUNTS, type TimeAccountingLedger } from "./timeAccounting.ts";
+import type { TimeAccountingStore } from "./timeAccountingStore.ts";
 
 export type TimeJournalRow = Readonly<{
   id: string;
@@ -15,6 +16,19 @@ export type TimeAccountingView = Readonly<{
   currentMonthSeconds: number;
   currentMonthRecordCount: number;
   rows: readonly TimeJournalRow[];
+}>;
+
+export type TimeImportHistoryRow = Readonly<{
+  recordId: string;
+  entryId: string;
+  sourceEventId: string;
+  usedOn: string;
+  serviceName: string;
+  durationSeconds: number;
+  importedAt: string;
+  status: "取り込み済み";
+  debitAccount: typeof TIME_ACCOUNTS.aiClearing;
+  creditAccount: typeof TIME_ACCOUNTS.timeContribution;
 }>;
 
 /**
@@ -59,6 +73,58 @@ export function buildTimeAccountingView(
     currentRows.length,
     rows,
   );
+}
+
+/** Builds one read-only history row per imported record id. */
+export function buildTimeImportHistory(
+  store: TimeAccountingStore | null,
+): readonly TimeImportHistoryRow[] {
+  if (!store) return Object.freeze([]);
+  const measurements = new Map(store.ledger.measurements.map((item) => [item.sourceEventId, item]));
+  const entries = new Map(store.ledger.entries.map((entry) => [entry.id, entry]));
+  const seen = new Set<string>();
+  const rows: TimeImportHistoryRow[] = [];
+
+  for (const imported of store.importedRecords) {
+    if (seen.has(imported.recordId)) continue;
+    const measurement = measurements.get(imported.sourceEventId);
+    const entry = entries.get(imported.entryId);
+    if (!measurement || !entry || entry.kind !== "ai-usage") continue;
+    const debit = entry.lines.find((line) => line.side === "debit");
+    const credit = entry.lines.find((line) => line.side === "credit");
+    if (debit?.account !== TIME_ACCOUNTS.aiClearing
+      || credit?.account !== TIME_ACCOUNTS.timeContribution) continue;
+    seen.add(imported.recordId);
+    rows.push(Object.freeze({
+      recordId: imported.recordId,
+      entryId: imported.entryId,
+      sourceEventId: imported.sourceEventId,
+      usedOn: measurement.occurredOn,
+      serviceName: serviceNameFromFingerprint(imported.fingerprint),
+      durationSeconds: measurement.actualInputSeconds,
+      importedAt: imported.importedAt,
+      status: "取り込み済み",
+      debitAccount: debit.account,
+      creditAccount: credit.account,
+    }));
+  }
+
+  rows.sort((left, right) => (
+    right.importedAt.localeCompare(left.importedAt) || left.recordId.localeCompare(right.recordId)
+  ));
+  return Object.freeze(rows);
+}
+
+function serviceNameFromFingerprint(fingerprint: string) {
+  try {
+    const values: unknown = JSON.parse(fingerprint);
+    if (Array.isArray(values) && typeof values[2] === "string" && values[2].length > 0) {
+      return values[2];
+    }
+  } catch {
+    // Older metadata may not contain the current fingerprint representation.
+  }
+  return "AI";
 }
 
 function localMonthKey(value: Date) {
