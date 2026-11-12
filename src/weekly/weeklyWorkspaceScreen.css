@@ -1,0 +1,33 @@
+.weekly-workspace {
+  display: grid;
+  gap: 14px;
+}
+
+.weekly-workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding: 5px;
+  border: 1px solid #dbeafe;
+  border-radius: 15px;
+  background: rgba(239, 246, 255, 0.9);
+}
+
+.weekly-workspace-tabs button {
+  min-width: 0;
+  padding: 10px 7px;
+  border: 0;
+  border-radius: 11px;
+  color: #64748b;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.weekly-workspace-tabs button[aria-pressed="true"] {
+  color: #fff;
+  background: #2563eb;
+  box-shadow: 0 6px 15px rgba(37, 99, 235, 0.18);
+}

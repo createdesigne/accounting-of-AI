@@ -7,8 +7,8 @@ const screen = readFileSync(new URL("../src/weekly/WeeklyManualScreen.tsx", impo
 const styles = readFileSync(new URL("../src/weekly/weeklyManualScreen.css", import.meta.url), "utf8");
 
 test("the existing app adds only a separated weekly record screen entry point", () => {
-  assert.match(app, /import \{ WeeklyManualScreen \} from "\.\/weekly\/WeeklyManualScreen"/);
-  assert.match(app, /activeTab === "weekly" && <WeeklyManualScreen \/>/);
+  assert.match(app, /import \{ WeeklyWorkspaceScreen \} from "\.\/weekly\/WeeklyWorkspaceScreen"/);
+  assert.match(app, /activeTab === "weekly" && <WeeklyWorkspaceScreen \/>/);
   assert.match(app, /weekly: "記録"/);
 });
 

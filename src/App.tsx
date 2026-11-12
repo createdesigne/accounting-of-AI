@@ -32,7 +32,7 @@ import {
   updateThinkingLedgerRecord,
 } from "./thinkingLedgerStore";
 import { saveThoughtJournalRecord } from "./thoughtJournalStore";
-import { WeeklyManualScreen } from "./weekly/WeeklyManualScreen";
+import { WeeklyWorkspaceScreen } from "./weekly/WeeklyWorkspaceScreen";
 import {
   buildTimeAccountingView,
   buildTimeImportHistory,
@@ -1444,7 +1444,7 @@ function App() {
               )}
             </div>
           )}
-          {!isSettlementOpen && activeTab === "weekly" && <WeeklyManualScreen />}
+          {!isSettlementOpen && activeTab === "weekly" && <WeeklyWorkspaceScreen />}
           {!isSettlementOpen && activeTab === "journal" && (
             <JournalScreen
               receipts={currentReceiptData}
