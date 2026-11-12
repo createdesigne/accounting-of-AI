@@ -12,3 +12,5 @@ AGENTS.md
 *.local
 __pycache__/
 *.py[cod]
+
+.vercel/

@@ -8,14 +8,14 @@ const ERROR_STATUS = {
   CONTENT_BLOCKED: 422, OUTPUT_TRUNCATED: 502, INVALID_OUTPUT: 502, PROVIDER_ERROR: 502, TIMEOUT: 504,
 };
 
-export function createAiServer({ provider = null, providerFactory = null, staticHandler = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
+export function createAiHandler({ provider = null, providerFactory = null, staticHandler = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000 || !Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 10) throw new AiError('INVALID_CONFIG');
   if (provider !== null && typeof provider?.rewrite !== 'function') throw new AiError('INVALID_CONFIG');
   if (!Array.isArray(allowedOrigins) || allowedOrigins.some(origin => {
     try { const u = new URL(origin); return u.origin !== origin || !['http:', 'https:'].includes(u.protocol); } catch { return true; }
   })) throw new AiError('INVALID_CONFIG');
   let active = 0;
-  const server = createServer(async (req, res) => {
+  return async (req, res) => {
     const reply = (code, data) => {
       if (res.destroyed || res.writableEnded) return;
       res.writeHead(code ? ERROR_STATUS[code] : 200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -43,6 +43,17 @@ export function createAiServer({ provider = null, providerFactory = null, static
     if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') return reply('INVALID_INPUT');
     let input;
     try {
+      const declaredLength = Number(req.headers['content-length']);
+      if (Number.isFinite(declaredLength) && declaredLength > 32 * 1024) return reply('TOO_LARGE');
+      // Vercel exposes a lazily parsed body after consuming the original stream.
+      // Plain Node requests continue through the bounded raw-stream path.
+      if ('body' in req) {
+        const body = req.body;
+        const serialized = typeof body === 'string' ? body : JSON.stringify(body);
+        if (typeof serialized !== 'string') return reply('INVALID_INPUT');
+        if (Buffer.byteLength(serialized, 'utf8') > 32 * 1024) return reply('TOO_LARGE');
+        input = parseInput(typeof body === 'string' ? JSON.parse(body) : body);
+      } else {
       const chunks = []; let bytes = 0;
       for await (const chunk of req) {
         bytes += chunk.length;
@@ -50,6 +61,7 @@ export function createAiServer({ provider = null, providerFactory = null, static
         chunks.push(chunk);
       }
       input = parseInput(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      }
     } catch { return reply('INVALID_INPUT'); }
     if (!input) return reply('INVALID_INPUT');
     let requestProvider = provider;
@@ -68,6 +80,7 @@ export function createAiServer({ provider = null, providerFactory = null, static
     const controller = new AbortController();
     const disconnect = () => { if (!res.writableEnded) controller.abort(); };
     res.on('close', disconnect);
+    req.on('error', disconnect);
     let timer;
     try {
       const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new AiError('TIMEOUT')); }, timeoutMs); });
@@ -78,8 +91,12 @@ export function createAiServer({ provider = null, providerFactory = null, static
       // Only our finite error codes may cross the boundary, never raw provider errors.
       reply(controller.signal.aborted ? 'TIMEOUT'
         : error instanceof AiError && Object.hasOwn(ERROR_STATUS, error.code) ? error.code : 'PROVIDER_ERROR');
-    } finally { clearTimeout(timer); res.off('close', disconnect); active--; }
-  });
+    } finally { clearTimeout(timer); res.off('close', disconnect); req.off('error', disconnect); active--; }
+  };
+}
+
+export function createAiServer(options = {}) {
+  const server = createServer(createAiHandler(options));
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   return server;

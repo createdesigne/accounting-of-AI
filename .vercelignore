@@ -1,0 +1,11 @@
+.git
+.vercel
+.env
+.env.*
+server/.env
+server/.env.*
+screenshots
+tests
+node_modules
+server/node_modules
+dist
