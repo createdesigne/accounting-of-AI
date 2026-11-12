@@ -2,7 +2,11 @@
 
 AIとの会話を思考レシートにし、自分とAIの関係を帳簿・決算として振り返るReactアプリです。
 
-既存公開版: https://createdesigne.github.io/accounting-of-AI/
+本番: https://accounting-of-ai.vercel.app/accounting-of-AI/
+
+旧公開版（以前の帳簿）: https://createdesigne.github.io/accounting-of-AI/
+
+公開先が変わるとブラウザ内の帳簿は別になります。以前の帳簿は旧公開版に残ります。
 
 ## 全体の構造
 
@@ -16,7 +20,7 @@ ChatGPT / Claude / Gemini の会話ページ
 文章を整えるときだけ:
   利用者がAI設定に自分のキーを入力
   → 選んだ文章と編集依頼を送信
-  → Node.js中継サーバー → Google Gemini
+  → VercelのNode.js Function（中継API） → Google Gemini
   → 生成候補を確認 → 利用者が反映
 ```
 
@@ -24,7 +28,7 @@ ChatGPT / Claude / Gemini の会話ページ
 
 会話からの最初の候補作成・集計は既存のブラウザ側ロジックです。Geminiは指定した文章を整える機能で、会話全体・帳簿全体を自動評価する機能ではありません。Chrome拡張はキーを扱いません。
 
-このブランチではAPIキーを環境変数へ入れる必要はありません。画面上部の歯車「AI設定」で入力します。設定だけではGoogleへ送信せず、文章編集の送信ボタンを押したときだけ接続します。
+APIキーを環境変数へ入れる必要はありません。画面上部の歯車「AI設定」で入力します。設定だけではGoogleへ送信せず、文章編集の送信ボタンを押したときだけ接続します。
 
 ## 動かす
 

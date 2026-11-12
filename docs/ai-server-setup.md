@@ -23,7 +23,7 @@ API利用料・上限は利用者のキーに紐づくGoogleのプロジェク�
 - アプリはキー・リクエスト本文・上流エラー全文をログへ出さない。公開先でもAuthorizationヘッダーや本文を記録する監視設定は使わない。運営サーバーは通信中のキーを扱うため、利用者は信頼できる設置先で使う。
 - 公開通信はHTTPS。Google側のデータ取り扱いは利用契約に従う。Interactions APIには `store:false` を指定する。
 
-生成は原文6000文字、編集依頼500文字、応答8000文字、リクエスト32KiB、出力2048トークン。サーバー待機15秒、同時2件、自動再試行なし。キー・モデル・文章・項目の変更や中止時は古い生成結果を反映しない。
+生成は原文6000文字、編集依頼500文字、応答8000文字、リクエスト32KiB、出力2048トークン。サーバー待機15秒、同時2件／サーバープロセス（VercelではFunctionインスタンスごと）、自動再試行なし。キー・モデル・文章・項目の変更や中止時は古い生成結果を反映しない。
 
 ## ローカル起動
 
@@ -39,30 +39,55 @@ pnpm start
 
 `pnpm ai:setup` は画面での設定方法を案内する。Windowsではビルド後に `start-gemini-local.ps1` からも起動できる。以前の `server/.env` からキーを読み込む処理は通常の起動経路では使わない。旧設定用の内部ヘルパーとテストは残しているが、新方式で実行する必要はない。
 
-## デプロイ先の比較
+## Vercel本番
 
-| 設置先 | この構成への適合 | 判断 |
-| --- | --- | --- |
-| Render Web Service | Nodeサーバーが画面とAPIを同時配信。永続ディスク・DBは不要 | 小規模な試用の第一候補。リポジトリに `render.yaml` を用意 |
-| Railway | Nodeサーバーを起動し、PORTと公開URLを設定できる | 同じコードを使える代替候補。既存契約がある場合に向く |
-| GitHub Pages | HTML・CSS・JSの静的配信のみ | 現在の画面公開は継続できるが、中継APIを別途置く必要がある |
+- 本番URL: https://accounting-of-ai.vercel.app/accounting-of-AI/
+- Vercelチーム: `rintaro-chujos-projects`（中條のPro）
+- プロジェクト: `accounting-of-ai`
+- 管理画面: https://vercel.com/rintaro-chujos-projects/accounting-of-ai
 
-Render無料Web Serviceは15分アクセスがないと停止し、再開に約1分かかる。無料枠は試用向けで、継続する実験・常時利用では有料枠を検討する。750インスタンス時間/月などの制限があり、通信量・ビルド時間の枠も別にある。ホスティング代とGemini API代は別。料金・条件は契約時に公式ページで確認する。
+画面は静的ファイル、`/api/ai/health` と `/api/ai/rewrite` はNode.js Functionsとして配信する。`pnpm build:vercel` がViteの出力を `dist/accounting-of-AI/` へ配置するため、既存のアプリ内URLを維持する。Functionの上限は30秒、Googleへの待機は15秒。同時2件の制限はインスタンスごとで、全体の回数・費用制限ではない。
 
-## Renderへ配置する手順
+Geminiキーの環境変数は登録しない。Vercelの自動環境変数から同一オリジンを許可する。独自ドメインを追加する場合のみ `PUBLIC_ORIGIN=https://実際のホスト名` を指定する。Authorizationヘッダーや本文をログに記録しない。
 
-1. 対象ブランチをGitHubへpushし、Renderでリポジトリを接続する。変更を含むブランチを明示的に選ぶ。
-2. Blueprintでリポジトリ直下の `render.yaml` を使う。またはWeb Serviceを手動作成する。
-3. ビルドは `pnpm install --frozen-lockfile && pnpm build`、起動は `pnpm start`、Nodeは22系、`NODE_ENV=production`、ヘルスチェックは `/api/ai/health`。
-4. `GEMINI_API_KEY` はRenderに登録しない。標準のonrender.com URLは `RENDER_EXTERNAL_URL` から使う。独自ドメインでは `PUBLIC_ORIGIN=https://実際のホスト名` を設定する。末尾スラッシュ・パスは付けない。
-5. `https://実際のホスト名/accounting-of-AI/` を開く。ルート `/` からも転送される。生成したJS/CSSとAPIが同じ公開先から返ることを確認する。
-6. 公開先を確定したら `chrome-extension/popup.js` の送信先 `WEB_APP_URLS` を更新し、`python3 scripts/package-extension.py` で配布ZIPを更新する。現在の拡張は既存のPages・preview・localhostを参照するため、新しい公開先への切替はこの操作が必要。
+### 更新する
 
-Blueprintは無料プラン・自動デプロイ無効の初期設定。新規契約やサービス作成・公開はこの変更では実行しない。Render固有のURL以外では `PUBLIC_ORIGIN` とプラットフォームの `PORT` を指定すれば同じNodeサーバーを使える。公開時は0.0.0.0、開発時は127.0.0.1にバインドする。
+認証済みVercel CLIを使い、リポジトリ直下で実行する。
 
-ブラウザの帳簿はURLのオリジン単位で保存される。Pagesから新しいRender URLへ移しても、以前の帳簿は自動転送されない。旧サイトを消さず、必要なデータの移行方式を決めてから本番の入口を切り替える。端末間同期・ユーザーログイン・サーバー側の帳簿保存は未実装。
+```sh
+pnpm install --frozen-lockfile
+pnpm build:vercel
+vercel deploy --prod --project accounting-of-ai --scope rintaro-chujos-projects --yes
+```
 
-全員が自分のキーを持ち込む小規模な試用を対象とする。CORSは認証ではなく、公開APIの第三者からの直接アクセスを防ぐものではない。不特定多数に提供する場合はアプリ利用者の認証・アクセス頻度制限を別途設計する。現状は同時実行数・サイズ・時間を制限しているが、利用者別の回数制限はない。
+公開後は本番画面、設定画面、`/api/ai/health`、拡張ZIPを確認する。実キーでの生成確認は利用者が自分のキーを設定して行う。
+
+### GitHub自動デプロイ
+
+現状はCLI経由で公開している。リポジトリ接続はVercelから `Vercel App is not installed` が返り、未接続。リポジトリ側でVercel GitHub Appに `createdesigne/accounting-of-AI` へのアクセスを許可してから接続する。
+
+```sh
+vercel git connect https://github.com/createdesigne/accounting-of-AI.git --project accounting-of-ai --scope rintaro-chujos-projects --yes
+```
+
+接続後にProduction Branchとビルド対象を確認する。Proプランでのコミット作者の権限判定はVercelチームへの所属・GitHubアカウント連携にも依存する。接続が完了するまでは中條のpushでも自動デプロイは動かない。共有リポジトリに個人のVercelトークンを登録して迂回しない。
+
+### 旧サイトと帳簿
+
+ブラウザの帳簿はURLのオリジン単位で保存される。GitHub PagesからVercelへ移しても以前の帳簿は自動転送されない。旧サイト https://createdesigne.github.io/accounting-of-AI/ を残し、Chrome拡張v0.3.2では「旧サイト（以前の帳簿）」も選択できる。新しい既定の送信先はVercel本番。旧サイトにはVercel APIを接続していない。端末間同期・ユーザーログイン・サーバー側の帳簿保存は未実装。
+
+## 他のデプロイ先
+
+| 設置先 | この構成への適合 |
+| --- | --- |
+| Vercel Pro | 採用。画面の静的配信とNode.js Functionsを同じURLで提供 |
+| Render Web Service | `render.yaml` でNodeサーバーから画面とAPIを同時配信。永続ディスク・DBは不要 |
+| Railway | `pnpm build` 後に `pnpm start`。PORTとPUBLIC_ORIGINを設定 |
+| GitHub Pages | 静的配信のみ。Gemini中継APIを別途置く必要がある |
+
+RenderのBlueprintは無料プラン・自動デプロイ無効の初期設定。標準URLは `RENDER_EXTERNAL_URL` から使う。その他のNode環境では `PUBLIC_ORIGIN` と `PORT` を指定する。ホスティング代と利用者のGemini API代は別。
+
+全員が自分のキーを持ち込む小規模な試用を対象とする。CORSは認証ではなく、公開APIの第三者からの直接アクセスを防ぐものではない。現状はサイズ・時間・インスタンス内同時実行数を制限しているが、利用者別の回数制限はない。
 
 ## 検証
 
@@ -77,6 +102,9 @@ pnpm build
 ブラウザテストはViteを起動した状態で `tests/browser/geminiWriting.cjs` を実行する。Playwrightの場所は `PLAYWRIGHT_MODULE`、Chromiumの実行ファイルは `CHROMIUM_PATH` で指定できる。テストが8787番に模擬Google通信のサーバーを起動するため、通常のAIサーバーは停止しておく。架空のキーと応答だけを使い、実Geminiへの課金呼び出しはしない。
 
 ## 公式資料
+
+- Vercel Node.js Functions: https://vercel.com/docs/functions/runtimes/node-js
+- Vercel Git連携と作者権限: https://vercel.com/docs/deployments/troubleshoot-project-collaboration
 
 - Render Node: https://render.com/docs/deploy-node-express-app
 - Render Blueprint: https://render.com/docs/blueprint-spec
