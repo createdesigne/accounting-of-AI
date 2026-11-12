@@ -1,196 +1,88 @@
-# Gemini接続の準備・Windowsでの設定
+# AI設定・起動・デプロイ
 
-## APIキーだけお持ちの場合
+## 利用者が画面から設定する
 
-Google AI Studio（Gemini Developer API）用のキーに対応した接続処理を用意しています。Gemini本体はGoogle側で動きますが、ブラウザーにキーを公開しないため、このアプリとGeminiの間に小さな中継サーバーが必要です。
+1. アプリ上部の歯車「AI設定」を開く。
+2. Google AI StudioのGemini APIキーを入力する。モデルは配布元・Googleのプロジェクトで利用可能なIDを指定する。
+3. 「この画面で使う」を押して閉じる。この時点ではAPI通信しない。
+4. レシート候補で、整える項目・文章の整え方を確認し「Geminiに送信して文章を整える」を押す。
+5. 生成候補を確認し、必要なら反映する。レシートの発行・帳簿への保存は別の操作。
 
-最初は自分のWindowsパソコン内で中継サーバーを動かせるため、新しいサーバー契約は不要です。提供されたキーのこのアプリでの使用許可は、利用者から確認済みです。許可を取り直す必要はありません。APIの利用料・利用上限・送信できるデータ・使用できるモデルは学校の契約に従うため、モデルIDと利用上限が不明な場合は学校の担当者またはAI Studioで確認します。
+既定モデルは元のGemini開発ブランチと同じ `gemini-3.5-flash-lite`。モデル欄から変更でき、利用できないモデルを別のモデルに自動置換しない。入力済みの表示は接続成功を意味しない。キーの有効性・モデルの利用権限・割当は送信時に確認される。
 
-キーはチャット、Git、Chrome拡張機能、Reactのコード、`VITE_*`の設定には入れません。実際のキーを送っていただく必要はありません。
+API利用料・上限は利用者のキーに紐づくGoogleのプロジェクトに適用される。ChatGPT等のWeb版の契約とは別。実キーをGit、チャット、VITE変数へ書かない。
 
-## 最初に：キーを保存する場所
+## キーと文章の扱い
 
-このアプリはReact / TypeScript / Viteです。Next.jsの `.env.local` ではなく、**プロジェクト直下の `server` フォルダー内の `.env`** を使います。現在のクラウド環境には、キーを空にしたこのファイルを作成済みです。実際の値は利用者が入力します。
+- キーはReactのメモリだけに保持する。localStorage・sessionStorage・Cookie・URL・レシート・QR・拡張・環境変数・サーバーのファイルには保存しない。
+- 再読み込みやタブを閉じた後は再入力が必要。「キーを削除する」で現在のメモリから除き、生成待ちも中止する。別タブとは共有しない。
+- キー設定・削除・画面表示・ヘルスチェックはGoogleへ送信しない。
+- 送信時だけ `Authorization: Bearer ...` ヘッダーで中継サーバーへ送り、GoogleへはSDKの `x-goog-api-key` ヘッダーで渡す。キーを隠して保存している仕組みではなく、利用者が入力した秘密を一時的に中継する仕組み。
+- 各リクエストで別のSDKクライアントを作る。利用者AのキーをBへ流用せず、キー未設定時に運営者の環境変数へフォールバックしない。
+- JSON本文は `{text, instruction?}`、応答は `{text}`。選択した文章だけを送り、元の会話全体・帳簿は送らない。
+- アプリはキー・リクエスト本文・上流エラー全文をログへ出さない。公開先でもAuthorizationヘッダーや本文を記録する監視設定は使わない。運営サーバーは通信中のキーを扱うため、利用者は信頼できる設置先で使う。
+- 公開通信はHTTPS。Google側のデータ取り扱いは利用契約に従う。Interactions APIには `store:false` を指定する。
 
-```dotenv
-GEMINI_API_KEY=ここに配布されたキーを貼り付ける
-GEMINI_MODEL=gemini-3.5-flash-lite
-AI_ENABLED=true
-```
+生成は原文6000文字、編集依頼500文字、応答8000文字、リクエスト32KiB、出力2048トークン。サーバー待機15秒、同時2件、自動再試行なし。キー・モデル・文章・項目の変更や中止時は古い生成結果を反映しない。
 
-`GEMINI_API_KEY=` の右側だけを実際のキーに置き換えて保存します。前後の説明文やコードの囲みは貼り付けません。保存したらサーバーを再起動してください。キーを設定するだけで、画面を開いた瞬間にGoogleへ送信することはありません。`AI_ENABLED=true` にし、画面で送信操作を行ったときだけ接続します。
-
-`server/.env` はGit管理対象外です。値を確認する目的でチャットへ貼ったり、ターミナルに表示したりしないでください。ルートの `.env.example` は公開してもよいサーバーURLの見本だけで、キーの保存先ではありません。
-
-## .envを対話式スクリプトで設定する（おすすめ）
-
-Node.js 22系以降があれば、設定スクリプト自体には追加のインストールは不要です。Windowsではプロジェクトのフォルダー（`package.json` がある場所）でPowerShellを開き、次を実行します。
-
-```powershell
-node scripts/setup-gemini-env.mjs
-```
-
-pnpmを使う場合は `pnpm ai:setup` でも同じです。APIキーをコマンドの後ろに書いたり、チャットに貼ったりしないでください。
-
-案内に従って次を入力します。
-
-1. 既存キーがある場合だけ更新するか聞かれます。空欄・Enterで既存キーを保ち、`y` の場合だけ更新します。
-2. モデルIDは空欄・Enterで既存の設定を保ち、新規なら `gemini-3.5-flash-lite` を使います。
-3. AI送信を有効にする場合は `y`、設定だけ保存する場合は `n`。空欄では既存の設定を保ち、新規では無効です。設定処理だけではGoogleへ接続せず、API利用料は発生しません。
-4. キーの入力を求められたら貼り付けてEnterを押します。**文字が画面に出なくても正常です。** 既存キーを保持する場合、この入力は不要です。
-
-作成・更新するのは次のファイルです。
-
-| ファイル | 保存するもの |
-| --- | --- |
-| `server/.env` | `GEMINI_API_KEY`、モデル、有効化設定、サーバー設定 |
-| `.env.local` | `VITE_AI_SERVER_URL=/api/ai` のみ。既存の接続先があれば保つ |
-| `.gitignore` | 上記のファイルと、書き込み時の一時ファイルの除外設定 |
-
-APIキーは端末内の `server/.env` に平文で保存されます。Gitや画面用ファイルへはコピーしません。既存のコメントや無関係な設定は保持し、キーを含むバックアップファイルは作りません。誤って画面側の `.env.local` にキーの変数を置いている場合や、すでに.envがGit管理されている場合は保存を中止します。
-
-保存後は次を別々のターミナルで起動、または再起動します。
-
-```powershell
-pnpm ai:server
-```
-
-```powershell
-pnpm dev:ai
-```
-
-クラウド環境の秘密設定・環境変数も設定済みの場合は、そちらが.envより優先されます。スクリプトはクラウド側の設定を変更しません。実際のGeminiへの送信はアプリ画面の送信ボタンを押したときに行います。
-
-## 今回準備したもの
-
-- `server/gemini.mjs`：Google公式SDK **`@google/genai` 2.32.0** の **Interactions API** を使用します。キーはヘッダーにだけ付け、URLには含めません。SDKは `server/package.json` にだけ追加し、画面の依存関係とは分離しています。
-- `server/app.mjs`：文章と依頼内容を受け取り、生成結果を文章として返すローカルHTTPサーバー。
-- `src/aiClient.ts` と `src/AiWritingPanel.tsx`：レシート候補の「相談テーマ」「AIが足したこと」「自分で決めたこと」を選んで文章を整えます。送信前の説明・読み込み表示・中止・エラー・生成候補の確認・破棄・反映があります。自動送信や自動保存はありません。
-- `start-gemini-local.ps1`：Windows用起動スクリプト。通常起動はAPI利用を無効にしたまま。必要な場合だけ非表示入力でキーを受け取り、終了後に起動前の設定を復元します。
-
-キーだけでなく `AI_ENABLED=true` が必要です。初期状態では無効です。新規のSDKインストール・ローカル検証は実施していますが、実APIの有料呼び出し、本番公開、新しいサーバー契約は行っていません。
-
-### 選択モデルと費用
-
-2026年11月5日にGoogle公式SDKと公式Cookbookを確認し、初期モデルは非previewの固定ID **`gemini-3.5-flash-lite`** を選びました。公式Cookbookが3.5系で低コストのモデルと説明しており、短い文章の編集用途に合わせた選定です。将来モデルが変わる `latest` エイリアスは使いません。学校のキーの割り当てで実際に利用可能かは接続後に確認します。利用できない場合は設定を変更し、自動で他のモデルに切り替えません。
-
-InteractionsのAPIバージョンはSDKの既定と公式例に合わせて `v1beta` を使用します。モデルIDの安定性とAPIのバージョンは別です。`store:false` でInteractionsの履歴保存を要求せず、過去のinteraction ID・検索・外部ツール・自動継続は使いません。Google側のデータ取り扱いは学校の契約条件も確認してください。
-
-最大出力は2048トークン、原文は6000文字まで、SDKの自動再試行は無効です。正確な課金額は学校の契約・Googleの料金表・使用モデルに従い、この実装だけで無料を保証するものではありません。
-
-## 1．APIキーなしで起動を確認する
-
-前提はNode.js 22系の最新版以降とpnpmです。今のクラウド環境にはSDKと必要な依存関係をインストール済みです。Windowsへコードをダウンロードして動かす場合は、プロジェクトのフォルダーで最初に `pnpm install --frozen-lockfile` を実行します。Node.jsがなければ、公式サイト `https://nodejs.org/` のLTS版を利用してください。
-
-プロジェクトのフォルダーでPowerShellを開き、次を実行します。
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-gemini-local.ps1
-```
-
-この指定は起動するPowerShellだけに適用され、システム全体の実行ポリシーは変更しません。
-
-ブラウザーで `http://127.0.0.1:8787/api/ai/health` を開きます。
-
-```json
-{"status":"disabled","configured":false}
-```
-
-これは「中継サーバーは起動したがGeminiは無効」を表す正常な状態です。起動や状態確認はGemini APIにアクセスしません。終了はCtrl+Cです。
-
-## 2．使用許可済みのキーを設定する
-
-初期モデルは `gemini-3.5-flash-lite` です。学校で別のモデルが指定されていれば `GEMINI_MODEL` で上書きできます。
-
-次のコマンドはGemini接続を有効にするためのものです。使用許可済みのキーを使い、送信内容・モデル・利用上限を確認して実行します。
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\start-gemini-local.ps1 -EnableGemini
-```
-
-1. 確認に「はい」と入力します。
-2. APIキーを非表示の入力欄へ入力します。キーをコマンド本文に書かないでください。モデルは上記の初期値を使用し、必要なら `-Model gemini-...` を指定します。
-
-スクリプトはキーをファイルに保存しません。起動中のサーバープロセスの環境変数にだけ渡します。停止後に再起動する際は再入力します。学校のキーを共有相手へ配布する必要もありません。
-
-状態確認が `{"status":"configured","configured":true}` になれば設定を読み込んでいます。ただし、この表示だけでキー・モデル・残高が有効と確認されたことにはなりません。実API確認には、次の送信操作が必要です。
-
-## 3．許可後に行う実APIの接続確認
-
-**この操作は選択した文章をGoogleに送信し、APIの利用料が発生する場合があります。** 許可された内容だけで行ってください。こちらではまだ実行していません。
-
-サーバーを起動したまま、別のPowerShellで次を実行します。
-
-```powershell
-$body = @{ text = "接続を確認するための文章です。"; instruction = "意味を変えず丁寧に整える" } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8787/api/ai/rewrite" -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($body))
-```
-
-文章の候補が返れば接続確認ができます。画面上ではレシート候補の文章を送信前・反映前に確認する形で接続します。集計式・思考残高の定義や帳簿データは変えません。
-
-## 4．アプリ画面で使う
-
-サーバー起動中に、もう1つのターミナルで次を実行します。
+## ローカル起動
 
 ```sh
-pnpm dev:ai
+pnpm install --frozen-lockfile
+pnpm build
+pnpm start
 ```
 
-下部「レシート」→「サンプル会話を読み込む」または拡張機能からの会話確認へ進みます。候補の下部に「Geminiで文章を整える」が表示されます。対象項目と編集の依頼を確認し、「Geminiに送信して文章を整える」を押すと、その項目の文章だけを送ります。生成した文章は確認・破棄でき、「この文章を候補に反映する」で初めて下書きに反映します。従来どおり発行・保存するまでは帳簿へ保存しません。
+`http://127.0.0.1:8787/accounting-of-AI/` に画面とAPIを同じサーバーから配信する。開発時は `pnpm ai:server` と `pnpm dev` を別ターミナルで起動し、`http://127.0.0.1:5173/accounting-of-AI/` を使う。Viteが `/api/ai` を8787番へ中継する。
 
-元の文章・項目・依頼を変更した場合や画面を離れた場合、古い応答を破棄します。AIによって役割・気持ち・思考残高・集計値を自動判定し直すことはありません。生成された文章の事実・意図は利用者が確認します。
+`/api/ai/health` は `{"status":"requires_key","configured":false,"credentialMode":"per_request"}` を返す。キーを保存していない正常な状態を表す。
 
-通常の `pnpm dev` と本番ビルドでは、`VITE_AI_SERVER_URL` を設定しなければAI欄は表示されません。この変数に入れるのはサーバーURLだけで、キーは絶対に入れません。本番への反映は別途確認してから行います。
+`pnpm ai:setup` は画面での設定方法を案内する。Windowsではビルド後に `start-gemini-local.ps1` からも起動できる。以前の `server/.env` からキーを読み込む処理は通常の起動経路では使わない。旧設定用の内部ヘルパーとテストは残しているが、新方式で実行する必要はない。
 
-## このクラウド環境での設定
+## デプロイ先の比較
 
-この環境内ではSDK・中継サーバー・アプリの開発起動と、模擬応答を使った一連の検証まで実施できます。新しいサーバー契約は不要です。今の環境が常設の本番公開先であると確認したものではありません。
+| 設置先 | この構成への適合 | 判断 |
+| --- | --- | --- |
+| Render Web Service | Nodeサーバーが画面とAPIを同時配信。永続ディスク・DBは不要 | 小規模な試用の第一候補。リポジトリに `render.yaml` を用意 |
+| Railway | Nodeサーバーを起動し、PORTと公開URLを設定できる | 同じコードを使える代替候補。既存契約がある場合に向く |
+| GitHub Pages | HTML・CSS・JSの静的配信のみ | 現在の画面公開は継続できるが、中継APIを別途置く必要がある |
 
-環境設定の下書きには秘密設定 `GEMINI_API_KEY`、変数 `GEMINI_MODEL`・`AI_ENABLED`、Gemini送信先の許可を準備しています。環境設定はファイルより優先されるため、環境変数側に `AI_ENABLED=false` が設定されている場合は、ファイルだけをtrueにしても有効になりません。クラウドの秘密設定を使う場合は、その設定画面で値を入力します。チャットへの入力は不要です。
+Render無料Web Serviceは15分アクセスがないと停止し、再開に約1分かかる。無料枠は試用向けで、継続する実験・常時利用では有料枠を検討する。750インスタンス時間/月などの制限があり、通信量・ビルド時間の枠も別にある。ホスティング代とGemini API代は別。料金・条件は契約時に公式ページで確認する。
 
-この環境で実通信する場合は、保存した設定の適用と、プラットフォーム指定のHTTPSプロキシ経由での接続が必要です。Node.js 24系で `NODE_USE_ENV_PROXY=1 pnpm ai:server` と起動し、既存のプロキシ・CA設定を維持します。ネットワーク制限を迂回して接続しません。
+## Renderへ配置する手順
 
-代表的なエラー：
+1. 対象ブランチをGitHubへpushし、Renderでリポジトリを接続する。変更を含むブランチを明示的に選ぶ。
+2. Blueprintでリポジトリ直下の `render.yaml` を使う。またはWeb Serviceを手動作成する。
+3. ビルドは `pnpm install --frozen-lockfile && pnpm build`、起動は `pnpm start`、Nodeは22系、`NODE_ENV=production`、ヘルスチェックは `/api/ai/health`。
+4. `GEMINI_API_KEY` はRenderに登録しない。標準のonrender.com URLは `RENDER_EXTERNAL_URL` から使う。独自ドメインでは `PUBLIC_ORIGIN=https://実際のホスト名` を設定する。末尾スラッシュ・パスは付けない。
+5. `https://実際のホスト名/accounting-of-AI/` を開く。ルート `/` からも転送される。生成したJS/CSSとAPIが同じ公開先から返ることを確認する。
+6. 公開先を確定したら `chrome-extension/popup.js` の送信先 `WEB_APP_URLS` を更新し、`python3 scripts/package-extension.py` で配布ZIPを更新する。現在の拡張は既存のPages・preview・localhostを参照するため、新しい公開先への切替はこの操作が必要。
 
-| コード | 確認すること |
-| --- | --- |
-| AI_NOT_CONFIGURED | 接続を有効にする設定があるか |
-| AUTH_ERROR | キーが有効か、学校でAPI利用が許可されているか |
-| MODEL_UNAVAILABLE | モデルIDとプロジェクトの利用権限 |
-| RATE_LIMITED | 学校の利用上限・割り当て・時間帯 |
-| CONTENT_BLOCKED | Googleが生成を停止した内容。制限を迂回せず送信内容を見直す |
-| OUTPUT_TRUNCATED | 文章を短くする。途中で切れた文章を成功として返さない |
+Blueprintは無料プラン・自動デプロイ無効の初期設定。新規契約やサービス作成・公開はこの変更では実行しない。Render固有のURL以外では `PUBLIC_ORIGIN` とプラットフォームの `PORT` を指定すれば同じNodeサーバーを使える。公開時は0.0.0.0、開発時は127.0.0.1にバインドする。
 
-権限エラーのときは、学校のキーの制限を勝手に解除せず担当者へ確認してください。キーや上流のエラー全文はこのサーバーから返しません。
+ブラウザの帳簿はURLのオリジン単位で保存される。Pagesから新しいRender URLへ移しても、以前の帳簿は自動転送されない。旧サイトを消さず、必要なデータの移行方式を決めてから本番の入口を切り替える。端末間同期・ユーザーログイン・サーバー側の帳簿保存は未実装。
 
-## 一般公開するときの「設置先」
+全員が自分のキーを持ち込む小規模な試用を対象とする。CORSは認証ではなく、公開APIの第三者からの直接アクセスを防ぐものではない。不特定多数に提供する場合はアプリ利用者の認証・アクセス頻度制限を別途設計する。現状は同時実行数・サイズ・時間を制限しているが、利用者別の回数制限はない。
 
-パソコン内のサーバーはそのPCが起動している間だけ使える開発用です。ほかの利用者も本番サイトから使うには、サーバープログラムを継続稼働させる設置先が必要です。GitHub Pagesは画面を公開できますが、このNode.jsサーバーを実行できません。
-
-学校に契約済みの環境があればサービス名だけ確認してください。新規契約や有料サービスの利用は、候補・費用を説明して許可を得てから行います。公開前にログイン認証、利用者別・全体の回数／費用上限、HTTPS、サーバー側の秘密設定を整えます。現在は127.0.0.1だけで待ち受け、公開用認証は未実装です。CORSはログイン認証の代わりにはなりません。
-
-本番のキーは設置先の秘密設定欄 `GEMINI_API_KEY` に登録します。接続先が未定の現在は、ここへキーを渡す必要はありません。
-
-## 開発者向け
-
-`server/.env.example` を `server/.env` にコピーし、必要な場合だけサーバー用の設定を入れられます。`server/.env` はGitの対象外です。キーをファイルに残したくない場合はWindows起動スクリプトを使います。
+## 検証
 
 ```sh
-pnpm ai:server
-node --experimental-strip-types --test tests/*.test.ts
+TZ=Asia/Tokyo node --experimental-strip-types --test tests/*.test.ts
+TZ=America/Los_Angeles node --experimental-strip-types --test tests/*.test.ts
+python3 -m unittest tests/test_package_extension.py
+python3 scripts/package-extension.py --check
 pnpm build
 ```
 
-開発画面の起動は `pnpm dev:ai`（AI欄あり）または `pnpm dev`（初期状態でAI欄なし）。`/api/ai` はローカルの8787番へ転送されます。ポート変更時は `vite.config.ts` とサーバー設定を合わせます。許可オリジンは開発時の5173番だけです。
+ブラウザテストはViteを起動した状態で `tests/browser/geminiWriting.cjs` を実行する。Playwrightの場所は `PLAYWRIGHT_MODULE`、Chromiumの実行ファイルは `CHROMIUM_PATH` で指定できる。テストが8787番に模擬Google通信のサーバーを起動するため、通常のAIサーバーは停止しておく。架空のキーと応答だけを使い、実Geminiへの課金呼び出しはしない。
 
-リクエストは `{text, instruction?}`、応答は `{text}`。原文6000文字、依頼500文字、結果8000文字、リクエスト全体32KiBが上限です。文字数はJavaScript文字列長で数えます。生成待ちは15秒・同時2件、出力トークン上限2048。自動再試行は行いません。モデルの仕様や費用は学校で許可された設定を別途確認します。
+## 公式資料
 
-テストではローカルHTTPと模擬Gemini応答だけを使い、実APIや実キーは使いません。Windows PowerShellの実機実行は未確認です。
-
-実装形式の参照（Google公式、実API呼び出しではない資料）：
-
-- https://github.com/googleapis/js-genai
-- https://github.com/google-gemini/cookbook/blob/main/README.md
-- https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started.ipynb
-- https://ai.google.dev/gemini-api/docs/interactions
-- https://ai.google.dev/gemini-api/docs/pricing
+- Render Node: https://render.com/docs/deploy-node-express-app
+- Render Blueprint: https://render.com/docs/blueprint-spec
+- Render無料枠: https://render.com/docs/free
+- Render料金: https://render.com/pricing
+- Railway Node: https://railway.com/guides/express
+- GitHub Pages: https://docs.github.com/en/pages/getting-started-with-github-pages/what-is-github-pages
+- Geminiキー: https://ai.google.dev/gemini-api/docs/api-key
+- Gemini Interactions: https://ai.google.dev/gemini-api/docs/interactions

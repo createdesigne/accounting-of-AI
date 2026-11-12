@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { AiWritingPanel } from "./AiWritingPanel";
+import { AiSettingsButton } from "./AiSettings";
 import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, parseLedgerDate, periodBounds, selectPeriod, shiftPeriod } from "./ledgerPeriods";
 import { buildReportSummary } from "./reportSummary";
 import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
@@ -1208,6 +1209,7 @@ function Header({ onOpenSettlement }: { onOpenSettlement: () => void }) {
         <h1>私とAIの確定申告</h1>
         {IS_PREVIEW && <p className="preview-notice">確認用プレビュー · 本番の記録には影響しません</p>}
       </div>
+      <AiSettingsButton />
       <button
         className="icon-button"
         type="button"
@@ -1850,7 +1852,7 @@ function ConversationCandidateForm({
   onChange: (field: CandidateField, value: string) => void;
   onIssue: () => void;
 }) {
-  const aiServerUrl = import.meta.env.VITE_AI_SERVER_URL?.trim();
+  const aiServerUrl = import.meta.env.VITE_AI_SERVER_URL?.trim() || '/api/ai';
   return (
     <div className="candidate-form">
       <div className="candidate-form-heading">

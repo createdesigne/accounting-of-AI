@@ -1,3 +1,11 @@
+.ai-settings-dialog { width: min(92vw, 480px); max-height: 85dvh; overflow: auto; padding: 24px; border: 1px solid #cbd5e1; border-radius: 20px; color: #1e293b; background: #fff; }
+.ai-settings-dialog::backdrop { background: rgb(15 23 42 / 45%); }
+.ai-settings-dialog p { font-size: 14px; line-height: 1.7; }
+.ai-settings-dialog input { width: 100%; min-width: 0; padding: 12px; border: 1px solid #cbd5e1; border-radius: 10px; font: inherit; }
+.ai-settings-dialog h2 { margin-top: 0; }
+.top-header > div:first-child { flex: 1; min-width: 0; }
+.ai-key-status { font-weight: 700; }
+@media print { .ai-settings-dialog { display: none !important; } }
 :root {
   color: #1e293b;
   background: #e0f2fe;

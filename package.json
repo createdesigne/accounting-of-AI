@@ -8,8 +8,9 @@
     "dev:ai": "node scripts/dev-ai.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "ai:server": "node --env-file-if-exists=server/.env server/index.mjs",
-    "ai:setup": "node scripts/setup-gemini-env.mjs"
+    "ai:server": "node server/index.mjs",
+    "ai:setup": "node scripts/ai-settings-help.mjs",
+    "start": "node server/index.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^4.3.4",
@@ -23,5 +24,9 @@
   "devDependencies": {
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3"
-  }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.7.1"
 }

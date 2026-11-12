@@ -1,6 +1,8 @@
 export type AiWritingRequest = { text: string; instruction?: string };
 export type AiWritingResult = { text: string };
 const errors = {
+  API_KEY_REQUIRED: 'AI設定からGemini APIキーを入力してください。',
+  INVALID_CREDENTIALS: 'AI設定のAPIキーとモデルを確認してください。',
   AI_NOT_CONFIGURED: 'AIサーバーはまだ接続されていません。',
   INVALID_INPUT: '送信する文章と依頼内容を確認してください。',
   TOO_LARGE: '文章が長すぎます。短くしてお試しください。',
@@ -22,9 +24,8 @@ export class AiClientError extends Error {
   constructor(code: ErrorCode) { super(errors[code]); this.name = 'AiClientError'; this.code = code; }
 }
 
-// Prepared integration point only: no existing screen calls it automatically.
-// The server URL contains no key. Call only after the user confirms the selected text.
-export function createAiClient({ baseUrl = '', fetchImpl = fetch, timeoutMs = 20000 }: { baseUrl?: string; fetchImpl?: typeof fetch; timeoutMs?: number } = {}) {
+// Credentials are request-scoped headers, never URL parameters or ledger fields.
+export function createAiClient({ baseUrl = '', apiKey = '', model = 'gemini-3.5-flash-lite', fetchImpl = fetch, timeoutMs = 20000 }: { baseUrl?: string; apiKey?: string; model?: string; fetchImpl?: typeof fetch; timeoutMs?: number } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000) throw new Error('Invalid timeout');
   if (baseUrl) {
     const u = new URL(baseUrl, 'https://local.invalid');
@@ -35,6 +36,8 @@ export function createAiClient({ baseUrl = '', fetchImpl = fetch, timeoutMs = 20
   return {
     async rewrite(input: AiWritingRequest, { signal }: { signal?: AbortSignal } = {}): Promise<AiWritingResult> {
       if (!baseUrl) throw new AiClientError('AI_NOT_CONFIGURED');
+      if (!apiKey) throw new AiClientError('API_KEY_REQUIRED');
+      if (!/^[\x21-\x7e]{1,512}$/.test(apiKey) || !/^gemini-[a-zA-Z0-9._-]{1,120}$/.test(model)) throw new AiClientError('INVALID_CREDENTIALS');
       if (!input || typeof input.text !== 'string' || !input.text.trim() || input.text.length > 6000
         || Object.keys(input).some(k => !['text', 'instruction'].includes(k))
         || (input.instruction !== undefined && (typeof input.instruction !== 'string' || input.instruction.length > 500))) throw new AiClientError('INVALID_INPUT');
@@ -44,7 +47,7 @@ export function createAiClient({ baseUrl = '', fetchImpl = fetch, timeoutMs = 20
       const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
       try {
         const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/rewrite`, {
-          method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input), signal: controller.signal,
+          method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'X-Gemini-Model': model }, body: JSON.stringify(input), signal: controller.signal,
         });
         const result = await response.json();
         if (!response.ok) throw new AiClientError(typeof result?.error?.code === 'string' && Object.prototype.hasOwnProperty.call(errors, result.error.code) ? result.error.code : 'PROVIDER_ERROR');
