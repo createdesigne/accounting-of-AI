@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { isBalancedJournalEntry, recordMonthEndAdjustment, TIME_ACCOUNTS } from '../src/timeAccounting.ts';
+import { createAccountingPeriodState, withClosedAccountingPeriod } from '../src/accountingPeriods.ts';
 import {
   TIME_ACCOUNTING_STORAGE_BASE_KEY,
   TimeAccountingImportError,
@@ -8,7 +9,9 @@ import {
   correctImportedTimeRecord,
   correctionEntryIdForTimeRecord,
   importTimeRecords,
+  loadSharedAccountingPeriodState,
   loadTimeAccountingStore,
+  saveAccountingPeriodState,
   reregisterImportedTimeRecord,
   reregistrationEntryIdForTimeRecord,
   reversalEntryIdForTimeRecord,
@@ -338,7 +341,7 @@ test('restores the dedicated ledger after a page reload', async () => {
   const storage = new MemoryStorage();
   await importTimeRecords([timeRecord('reload:day:2026-11-10', 59)], options(storage));
   const restored = loadTimeAccountingStore(storage);
-  assert.equal(restored.storeVersion, 1);
+  assert.equal(restored.storeVersion, 2);
   assert.equal(restored.ledger.unit, 'second');
   assert.equal(restored.ledger.measurements[0].actualInputSeconds, 59);
   assert.equal(restored.importedRecords[0].recordId, 'reload:day:2026-11-10');
@@ -536,5 +539,82 @@ test('allows zero effective seconds but rejects negative corrections', async () 
   await assert.rejects(
     () => correctImportedTimeRecord(record.recordId, -1, '', options(storage, locks)),
     (error) => error instanceof TimeAccountingImportError && error.code === 'INVALID_RECORD',
+  );
+});
+
+test('migrates the existing version-one store with an open shared period state', async () => {
+  const storage = new MemoryStorage();
+  const imported = await importTimeRecords([
+    timeRecord('period-migration:day:2026-11-10', 61),
+  ], options(storage));
+  const versionOne = {
+    storeVersion: 1,
+    ledger: imported.store.ledger,
+    importedRecords: imported.store.importedRecords,
+  };
+  storage.setItem(TIME_ACCOUNTING_STORAGE_BASE_KEY, JSON.stringify(versionOne));
+  const restored = loadTimeAccountingStore(storage);
+  assert.equal(restored.storeVersion, 2);
+  assert.equal(restored.ledger.measurements[0].actualInputSeconds, 61);
+  assert.deepEqual(restored.periodState.closedPeriods, []);
+});
+
+test('persists and restores shared month-close state without changing either ledger collection', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const imported = await importTimeRecords([
+    timeRecord('period-save:day:2026-11-10', 61),
+  ], options(storage, locks));
+  const periodState = withClosedAccountingPeriod(
+    createAccountingPeriodState('Asia/Tokyo'),
+    '2026-10',
+    '2026-11-01T01:02:03.000Z',
+  );
+  const saved = await saveAccountingPeriodState(periodState, { storage, locks });
+  assert.deepEqual(saved.store.ledger, imported.store.ledger);
+  assert.deepEqual(saved.store.importedRecords, imported.store.importedRecords);
+  assert.deepEqual(loadTimeAccountingStore(storage).periodState, periodState);
+  assert.deepEqual(loadSharedAccountingPeriodState(storage), periodState);
+  const importedAfterSave = await importTimeRecords([
+    timeRecord('period-save-next:day:2026-11-11', 59, '2026-11-11'),
+  ], options(storage, locks));
+  assert.deepEqual(importedAfterSave.store.periodState, periodState);
+});
+
+test('a failed month-close state save leaves the previous complete store untouched', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  await importTimeRecords([timeRecord('period-failure:day:2026-11-10', 61)], options(storage, locks));
+  const snapshot = storage.getItem(TIME_ACCOUNTING_STORAGE_BASE_KEY);
+  storage.failNextSet = true;
+  const periodState = withClosedAccountingPeriod(
+    createAccountingPeriodState('UTC'),
+    '2026-10',
+    '2026-11-01T00:00:00.000Z',
+  );
+  await assert.rejects(
+    () => saveAccountingPeriodState(periodState, { storage, locks }),
+    (error) => error instanceof TimeAccountingImportError && error.code === 'SAVE_FAILED',
+  );
+  assert.equal(storage.getItem(TIME_ACCOUNTING_STORAGE_BASE_KEY), snapshot);
+  assert.deepEqual(loadTimeAccountingStore(storage).periodState.closedPeriods, []);
+});
+
+test('serializes stale month-close state saves without losing either closed month', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const october = withClosedAccountingPeriod(
+    createAccountingPeriodState('Asia/Tokyo'), '2026-10', '2026-11-01T00:00:00.000Z',
+  );
+  const november = withClosedAccountingPeriod(
+    createAccountingPeriodState('Asia/Tokyo'), '2026-11', '2026-12-01T00:00:00.000Z',
+  );
+  await Promise.all([
+    saveAccountingPeriodState(october, { storage, locks }),
+    saveAccountingPeriodState(november, { storage, locks }),
+  ]);
+  assert.deepEqual(
+    loadTimeAccountingStore(storage).periodState.closedPeriods.map((item) => item.periodKey),
+    ['2026-10', '2026-11'],
   );
 });

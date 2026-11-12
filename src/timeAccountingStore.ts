@@ -15,9 +15,18 @@ import {
   timeRecordFingerprint,
   type TimeRecordPreview,
 } from "./timeRecordTransfer.ts";
+import {
+  createAccountingPeriodState,
+  normalizeAccountingPeriodState,
+  withClosedAccountingPeriod,
+  type AccountingPeriodState,
+} from "./accountingPeriods.ts";
 
 export const TIME_ACCOUNTING_STORAGE_BASE_KEY = "watashi-to-ai-time-accounting-ledger";
-export const TIME_ACCOUNTING_IMPORT_LOCK = "watashi-to-ai-time-accounting-import";
+/** Shared mutation lock for future thought-journal and current time-journal writes. */
+export const ACCOUNTING_BOOK_MUTATION_LOCK = "watashi-to-ai-time-accounting-import";
+/** @deprecated Use ACCOUNTING_BOOK_MUTATION_LOCK for new shared accounting operations. */
+export const TIME_ACCOUNTING_IMPORT_LOCK = ACCOUNTING_BOOK_MUTATION_LOCK;
 
 export type ImportedTimeRecord = Readonly<{
   recordId: string;
@@ -41,9 +50,11 @@ export type TimeRecordAccountingAction = Readonly<{
 }>;
 
 export type TimeAccountingStore = Readonly<{
-  storeVersion: 1;
+  storeVersion: 2;
   ledger: TimeAccountingLedger;
   importedRecords: readonly ImportedTimeRecord[];
+  /** Shared by time journals and, in a later stage, thought-journal mutations. */
+  periodState: AccountingPeriodState;
 }>;
 
 export type TimeImportResult = Readonly<{
@@ -95,6 +106,10 @@ export type TimeAccountingImportOptions = {
   storageKey?: string;
   now?: () => number;
 };
+
+export type SaveAccountingPeriodStateResult = Readonly<{
+  store: TimeAccountingStore;
+}>;
 
 export class TimeAccountingImportError extends Error {
   readonly code:
@@ -217,7 +232,7 @@ export function loadTimeAccountingStore(
   storageKey = TIME_ACCOUNTING_STORAGE_BASE_KEY,
 ): TimeAccountingStore {
   const raw = storage.getItem(storageKey);
-  if (raw === null) return createStore(createTimeAccountingLedger(), []);
+  if (raw === null) return createStore(createTimeAccountingLedger(), [], createAccountingPeriodState());
   let value: unknown;
   try {
     value = JSON.parse(raw);
@@ -225,22 +240,82 @@ export function loadTimeAccountingStore(
     throw new TimeAccountingImportError("STORE_INVALID", "時間会計データを読み込めませんでした。");
   }
   try {
-    if (isObject(value) && value.storeVersion === 1) {
+    if (isObject(value) && (value.storeVersion === 1 || value.storeVersion === 2)) {
       if (!Array.isArray(value.importedRecords)) throw new Error("importedRecords");
       const importedRecords = value.importedRecords.map(parseImportedRecord);
       const ids = new Set(importedRecords.map((record) => record.recordId));
       if (ids.size !== importedRecords.length) throw new Error("duplicate imported record");
       const ledger = migrateTimeAccountingLedger(value.ledger);
       validateImportedRecordLinks(ledger, importedRecords);
-      return createStore(ledger, importedRecords);
+      const periodState = value.storeVersion === 2
+        ? normalizeAccountingPeriodState(value.periodState)
+        : createAccountingPeriodState();
+      return createStore(ledger, importedRecords, periodState);
     }
     // Before this store envelope existed, a minute- or second-ledger may have
     // been saved directly. The accounting migration owns that conversion.
-    return createStore(migrateTimeAccountingLedger(value), []);
+    return createStore(migrateTimeAccountingLedger(value), [], createAccountingPeriodState());
   } catch (error) {
     if (error instanceof TimeAccountingImportError) throw error;
     throw new TimeAccountingImportError("STORE_INVALID", "時間会計データが壊れているため取り込めません。");
   }
+}
+
+export function loadSharedAccountingPeriodState(
+  storage: Pick<Storage, "getItem"> = window.localStorage,
+  storageKey = TIME_ACCOUNTING_STORAGE_BASE_KEY,
+) {
+  return loadTimeAccountingStore(storage, storageKey).periodState;
+}
+
+/**
+ * Persists only the shared period state inside the same envelope as the time
+ * ledger. No closing journal is created and no user-facing close action calls
+ * this function in the first implementation stage.
+ */
+export async function saveAccountingPeriodState(
+  periodState: AccountingPeriodState,
+  options: TimeAccountingImportOptions = {},
+): Promise<SaveAccountingPeriodStateResult> {
+  const normalized = normalizeAccountingPeriodState(periodState);
+  const storage = options.storage ?? window.localStorage;
+  const locks = options.locks === null
+    ? undefined
+    : options.locks ?? globalThis.navigator?.locks as unknown as LockManagerLike | undefined;
+  const storageKey = options.storageKey ?? TIME_ACCOUNTING_STORAGE_BASE_KEY;
+  if (!locks?.request) {
+    throw new TimeAccountingImportError(
+      "LOCK_UNAVAILABLE",
+      "安全な排他制御を利用できないため、月末締め状態を保存できません。",
+    );
+  }
+  return locks.request(TIME_ACCOUNTING_IMPORT_LOCK, { mode: "exclusive" }, async () => {
+    const current = loadTimeAccountingStore(storage, storageKey);
+    if (current.periodState.closedPeriods.length > 0
+      && current.periodState.accountingTimeZone !== normalized.accountingTimeZone) {
+      throw new TimeAccountingImportError(
+        "INVALID_RECORD",
+        "締め済み月があるため、会計タイムゾーンを変更できません。",
+      );
+    }
+    let merged = current.periodState.closedPeriods.length === 0
+      ? createAccountingPeriodState(normalized.accountingTimeZone)
+      : current.periodState;
+    for (const closed of normalized.closedPeriods) {
+      merged = withClosedAccountingPeriod(merged, closed.periodKey, closed.closedAt);
+    }
+    const next = createStore(current.ledger, current.importedRecords, merged);
+    try {
+      storage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      throw new TimeAccountingImportError("SAVE_FAILED", "月末締め状態を保存できませんでした。");
+    }
+    const verified = loadTimeAccountingStore(storage, storageKey);
+    if (JSON.stringify(verified.periodState) !== JSON.stringify(merged)) {
+      throw new TimeAccountingImportError("SAVE_FAILED", "月末締め状態の保存を確認できませんでした。");
+    }
+    return Object.freeze({ store: verified });
+  });
 }
 
 export function sourceEventIdForTimeRecord(recordId: string) {
@@ -323,7 +398,7 @@ async function importUnderLock(
     importedSeconds += record.durationSeconds;
   }
 
-  const next = createStore(ledger, importedRecords);
+  const next = createStore(ledger, importedRecords, current.periodState);
   try {
     storage.setItem(storageKey, JSON.stringify(next));
   } catch {
@@ -450,7 +525,7 @@ async function cancelUnderLock(
       actedAt: cancelledAt,
     })]),
   });
-  const next = createStore(ledger, importedRecords);
+  const next = createStore(ledger, importedRecords, current.periodState);
   try {
     storage.setItem(storageKey, JSON.stringify(next));
   } catch {
@@ -546,7 +621,7 @@ async function reregisterUnderLock(
       actedAt,
     })]),
   });
-  const next = createStore(ledger, importedRecords);
+  const next = createStore(ledger, importedRecords, current.periodState);
   try {
     storage.setItem(storageKey, JSON.stringify(next));
   } catch {
@@ -644,7 +719,7 @@ async function correctUnderLock(
     ...imported,
     actions: Object.freeze([...existingActions, action]),
   });
-  const next = createStore(ledger, importedRecords);
+  const next = createStore(ledger, importedRecords, current.periodState);
   try {
     storage.setItem(storageKey, JSON.stringify(next));
   } catch {
@@ -773,11 +848,13 @@ function parseAccountingAction(value: unknown): TimeRecordAccountingAction {
 function createStore(
   ledger: TimeAccountingLedger,
   importedRecords: readonly ImportedTimeRecord[],
+  periodState: AccountingPeriodState,
 ): TimeAccountingStore {
   return Object.freeze({
-    storeVersion: 1 as const,
+    storeVersion: 2 as const,
     ledger,
     importedRecords: Object.freeze([...importedRecords]),
+    periodState,
   });
 }
 

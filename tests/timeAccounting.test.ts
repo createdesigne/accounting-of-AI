@@ -41,6 +41,24 @@ test('records seconds as balanced AI clearing and time contribution lines', () =
   assert.equal(isBalancedJournalEntry(ledger.entries[0]), true);
 });
 
+test('keeps the actual usage date separate from a later accounting posting date', () => {
+  const ledger = recordAiUsage(createTimeAccountingLedger(), {
+    ...usage,
+    occurredOn: '2026-10-31',
+    postedOn: '2026-11-01',
+    actualInputSeconds: 61,
+  });
+  assert.equal(ledger.measurements[0].occurredOn, '2026-10-31');
+  assert.equal(ledger.entries[0].postedOn, '2026-11-01');
+  assert.deepEqual(migrateTimeAccountingLedger(ledger), ledger);
+  assert.throws(
+    () => recordAiUsage(createTimeAccountingLedger(), {
+      ...usage, occurredOn: '2026-11-01', postedOn: '2026-10-31',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'INVALID_DATE',
+  );
+});
+
 test('preserves 1, 59, 60 and 61 seconds exactly and keeps every entry balanced', () => {
   let ledger = createTimeAccountingLedger();
   for (const seconds of [1, 59, 60, 61]) {

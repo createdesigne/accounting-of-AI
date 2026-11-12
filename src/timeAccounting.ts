@@ -66,6 +66,8 @@ export type RecordAiUsageInput = Readonly<{
   entryId: string;
   sourceEventId: string;
   occurredOn: string;
+  /** Accounting posting date. Defaults to occurredOn for existing callers. */
+  postedOn?: string;
   actualInputSeconds: number;
   estimatedSavedSeconds?: number;
 }>;
@@ -149,6 +151,11 @@ export function recordAiUsage(
   requireIdentifier(input.entryId, "entryId");
   requireIdentifier(input.sourceEventId, "sourceEventId");
   requireCalendarDate(input.occurredOn, "occurredOn");
+  const postedOn = input.postedOn ?? input.occurredOn;
+  requireCalendarDate(postedOn, "postedOn");
+  if (postedOn < input.occurredOn) {
+    throw new TimeAccountingError("INVALID_DATE", "postedOn cannot be before occurredOn.");
+  }
   requireSeconds(input.actualInputSeconds, "actualInputSeconds", false);
   const estimatedSavedSeconds = input.estimatedSavedSeconds ?? 0;
   requireSeconds(estimatedSavedSeconds, "estimatedSavedSeconds", true);
@@ -171,7 +178,7 @@ export function recordAiUsage(
   const entry = createEntry(
     input.entryId,
     "ai-usage",
-    input.occurredOn,
+    postedOn,
     input.sourceEventId,
     TIME_ACCOUNTS.aiClearing,
     TIME_ACCOUNTS.timeContribution,
@@ -710,6 +717,7 @@ function validateLedgerLinks(
   for (const measurement of measurements) {
     const usage = entriesById.get(measurement.usageEntryId);
     if (!usage || usage.kind !== "ai-usage" || usage.sourceEventId !== measurement.sourceEventId
+      || usage.postedOn < measurement.occurredOn
       || usage.lines[0].seconds !== measurement.actualInputSeconds) {
       invalidLedger("Measurement usage entry is missing or inconsistent.");
     }
