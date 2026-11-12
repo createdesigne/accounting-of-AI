@@ -22,6 +22,10 @@ import {
   withClosedAccountingPeriod,
   type AccountingPeriodState,
 } from "./accountingPeriods.ts";
+import {
+  buildMonthEndClosePreview,
+  type MonthEndClosePreview,
+} from "./monthEndClosing.ts";
 
 export const TIME_ACCOUNTING_STORAGE_BASE_KEY = "watashi-to-ai-time-accounting-ledger";
 /** Shared mutation lock for future thought-journal and current time-journal writes. */
@@ -112,6 +116,18 @@ export type SaveAccountingPeriodStateResult = Readonly<{
   store: TimeAccountingStore;
 }>;
 
+export type MonthEndCloseOptions = TimeAccountingImportOptions & {
+  thoughtJournalStorageKey?: string;
+  confirmedThoughtExplorationSourceEventIds?: readonly string[];
+};
+
+export type MonthEndCloseResult = Readonly<{
+  closed: boolean;
+  alreadyClosed: boolean;
+  preview: MonthEndClosePreview;
+  store: TimeAccountingStore;
+}>;
+
 export class TimeAccountingImportError extends Error {
   readonly code:
     | "INVALID_RECORD"
@@ -121,7 +137,8 @@ export class TimeAccountingImportError extends Error {
     | "SAVE_FAILED"
     | "UNKNOWN_RECORD"
     | "INACTIVE_RECORD"
-    | "CLOSED_PERIOD";
+    | "CLOSED_PERIOD"
+    | "CLOSE_VALIDATION_FAILED";
 
   constructor(
     code: TimeAccountingImportError["code"],
@@ -131,6 +148,88 @@ export class TimeAccountingImportError extends Error {
     this.name = "TimeAccountingImportError";
     this.code = code;
   }
+}
+
+/** Builds a consistent preview under the same lock used by every journal mutation. */
+export async function previewAccountingPeriodClose(
+  periodKey: string,
+  options: MonthEndCloseOptions = {},
+): Promise<MonthEndClosePreview> {
+  const storage = options.storage ?? window.localStorage;
+  const locks = options.locks === null
+    ? undefined
+    : options.locks ?? globalThis.navigator?.locks as unknown as LockManagerLike | undefined;
+  const storageKey = options.storageKey ?? TIME_ACCOUNTING_STORAGE_BASE_KEY;
+  if (!locks?.request) {
+    throw new TimeAccountingImportError("LOCK_UNAVAILABLE", "安全な排他制御を利用できないため、月末締めを確認できません。");
+  }
+  return locks.request(ACCOUNTING_BOOK_MUTATION_LOCK, { mode: "exclusive" }, async () => (
+    buildClosePreview(periodKey, storage, storageKey, options)
+  ));
+}
+
+/**
+ * Atomically saves the projected time ledger and closed state in one storage
+ * value. Thought journals are read-only during close and share this same lock.
+ */
+export async function closeAccountingPeriod(
+  periodKey: string,
+  options: MonthEndCloseOptions = {},
+): Promise<MonthEndCloseResult> {
+  const storage = options.storage ?? window.localStorage;
+  const locks = options.locks === null
+    ? undefined
+    : options.locks ?? globalThis.navigator?.locks as unknown as LockManagerLike | undefined;
+  const storageKey = options.storageKey ?? TIME_ACCOUNTING_STORAGE_BASE_KEY;
+  const now = options.now ?? Date.now;
+  if (!locks?.request) {
+    throw new TimeAccountingImportError("LOCK_UNAVAILABLE", "安全な排他制御を利用できないため、月末締めを実行できません。");
+  }
+  return locks.request(ACCOUNTING_BOOK_MUTATION_LOCK, { mode: "exclusive" }, async () => {
+    const current = loadTimeAccountingStore(storage, storageKey);
+    const preview = buildClosePreview(periodKey, storage, storageKey, options, current);
+    if (preview.alreadyClosed) {
+      return Object.freeze({ closed: false, alreadyClosed: true, preview, store: current });
+    }
+    if (!preview.canClose) {
+      throw new TimeAccountingImportError(
+        "CLOSE_VALIDATION_FAILED",
+        `月末締めの事前検証で${preview.validationIssues.length}件の問題が見つかりました。`,
+      );
+    }
+    const closedAtDate = new Date(now());
+    if (!Number.isFinite(closedAtDate.getTime())) {
+      throw new TimeAccountingImportError("INVALID_RECORD", "月末締め日時が正しくありません。");
+    }
+    const periodState = withClosedAccountingPeriod(
+      current.periodState,
+      periodKey,
+      closedAtDate.toISOString(),
+    );
+    const next = createStore(preview.projectedLedger, current.importedRecords, periodState);
+    try {
+      storage.setItem(storageKey, JSON.stringify(next));
+    } catch {
+      throw new TimeAccountingImportError("SAVE_FAILED", "月末締めを保存できませんでした。");
+    }
+    let verified: TimeAccountingStore;
+    try {
+      verified = loadTimeAccountingStore(storage, storageKey);
+    } catch {
+      throw new TimeAccountingImportError("SAVE_FAILED", "月末締めの保存を確認できませんでした。");
+    }
+    const savedClose = verified.periodState.closedPeriods.find((item) => item.periodKey === periodKey);
+    const transferIds = new Set(verified.ledger.entries.map((entry) => entry.id));
+    if (!savedClose || preview.plannedTransfers.some((item) => !transferIds.has(item.entryId))) {
+      throw new TimeAccountingImportError("SAVE_FAILED", "月末締めの保存を確認できませんでした。");
+    }
+    return Object.freeze({
+      closed: true,
+      alreadyClosed: false,
+      preview,
+      store: verified,
+    });
+  });
 }
 
 export async function cancelImportedTimeRecord(
@@ -317,6 +416,36 @@ export async function saveAccountingPeriodState(
     }
     return Object.freeze({ store: verified });
   });
+}
+
+function buildClosePreview(
+  periodKey: string,
+  storage: StorageLike,
+  storageKey: string,
+  options: MonthEndCloseOptions,
+  current = loadTimeAccountingStore(storage, storageKey),
+) {
+  let thoughtJournalData: unknown = [];
+  const thoughtJournalStorageKey = options.thoughtJournalStorageKey ?? "watashi-to-ai-thought-receipts";
+  const rawThoughtJournal = storage.getItem(thoughtJournalStorageKey);
+  if (rawThoughtJournal !== null) {
+    try {
+      thoughtJournalData = JSON.parse(rawThoughtJournal);
+    } catch {
+      thoughtJournalData = Object.freeze({ invalidStoredJson: true });
+    }
+  }
+  try {
+    return buildMonthEndClosePreview({
+      periodKey,
+      ledger: current.ledger,
+      periodState: current.periodState,
+      thoughtJournalData,
+      confirmedThoughtExplorationSourceEventIds: options.confirmedThoughtExplorationSourceEventIds,
+    });
+  } catch {
+    throw new TimeAccountingImportError("INVALID_RECORD", "月末締めの対象月が正しくありません。");
+  }
 }
 
 export function sourceEventIdForTimeRecord(recordId: string) {

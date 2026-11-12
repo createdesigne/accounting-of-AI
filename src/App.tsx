@@ -31,6 +31,7 @@ import {
   deleteThinkingLedgerRecord,
   updateThinkingLedgerRecord,
 } from "./thinkingLedgerStore";
+import { saveThoughtJournalRecord } from "./thoughtJournalStore";
 import {
   buildTimeAccountingView,
   buildTimeImportHistory,
@@ -844,14 +845,6 @@ function App() {
   const allReceiptStats = useMemo(() => buildStats(receiptData), [receiptData]);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(receiptData));
-    } catch {
-      // 保存できない環境でも、画面上の追加体験はそのまま使えます。
-    }
-  }, [receiptData]);
-
-  useEffect(() => {
     if (activeTab !== "tax" || !analysisFocus) return;
 
     window.setTimeout(() => {
@@ -998,21 +991,20 @@ function App() {
     scrollScreenToTop("auto");
   }
 
-  function saveScannedReceipt() {
+  async function saveScannedReceipt() {
     if (!scannedReceipt) return;
     const receiptToSave = { ...normalizeReceipt(scannedReceipt), journal: getReceiptJournal(scannedReceipt) };
-
-    const exists = receiptData.some(receipt => receipt.id === receiptToSave.id);
-    const updated = exists
-      ? receiptData.map(receipt => receipt.id === receiptToSave.id ? { ...receipt, journal: receiptToSave.journal } : receipt)
-      : [receiptToSave, ...receiptData];
+    let updated: readonly ThoughtReceipt[];
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      setReaderError("保存できませんでした。ブラウザの保存設定を確認して、もう一度お試しください。調整した数値はこの画面に残っています。");
+      updated = await saveThoughtJournalRecord(receiptToSave, {
+        storageKey: STORAGE_KEY,
+        periodStorageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      });
+    } catch (error) {
+      setReaderError(error instanceof Error ? error.message : "保存できませんでした。ブラウザの保存設定を確認して、もう一度お試しください。調整した数値はこの画面に残っています。");
       return;
     }
-    setReceiptData(updated);
+    setReceiptData([...updated]);
     setReaderError("");
     setReaderStep("closed");
     setScannedReceipt(null);
