@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AccountingPeriodClosedError,
   accountingPeriodAt,
   accountingPeriodForDate,
+  assertAccountingDateIsOpen,
   createAccountingPeriodState,
   isAccountingPeriodClosed,
   isDateInAccountingPeriod,
@@ -10,8 +12,22 @@ import {
   nextAccountingPeriod,
   nextOpenAccountingPeriod,
   normalizeAccountingPeriodState,
+  resolveOpenAccountingDate,
   withClosedAccountingPeriod,
 } from "../src/accountingPeriods.ts";
+
+test("締め済み月への直接書き込みを拒否し、必要な調整日は次の未締め月に移す", () => {
+  let state = createAccountingPeriodState("Asia/Tokyo");
+  state = withClosedAccountingPeriod(state, "2026-11", "2026-12-01T00:00:00.000Z");
+  state = withClosedAccountingPeriod(state, "2026-12", "2027-01-01T00:00:00.000Z");
+  assert.doesNotThrow(() => assertAccountingDateIsOpen(state, "2026-10-31"));
+  assert.throws(
+    () => assertAccountingDateIsOpen(state, "2026-11-30"),
+    (error) => error instanceof AccountingPeriodClosedError && error.periodKey === "2026-11",
+  );
+  assert.equal(resolveOpenAccountingDate(state, "2026-10-31"), "2026-10-31");
+  assert.equal(resolveOpenAccountingDate(state, "2026-11-30"), "2027-01-01");
+});
 
 test("未締め月と締め済み月を区別し、締め日時を保持する", () => {
   const open = createAccountingPeriodState("Asia/Tokyo");

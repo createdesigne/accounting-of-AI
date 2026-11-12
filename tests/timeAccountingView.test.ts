@@ -4,6 +4,7 @@ import { createTimeAccountingLedger, recordAiUsage } from "../src/timeAccounting
 import { cancelImportedTimeRecord, correctImportedTimeRecord, importTimeRecords, loadTimeAccountingStore, reregisterImportedTimeRecord } from "../src/timeAccountingStore.ts";
 import { buildTimeAccountingView, buildTimeImportHistory } from "../src/timeAccountingView.ts";
 import type { TimeRecordPreview } from "../src/timeRecordTransfer.ts";
+import { dateKey } from "../src/ledgerPeriods.ts";
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -227,7 +228,7 @@ test("訂正履歴は再読み込み後も差分・理由・有効秒数を復�
   assert.deepEqual(history.actions[0], {
     kind: "correction", entryId: `ai-usage-correction:${record.recordId}`,
     relatedEntryId: `ai-usage:${record.recordId}`, actedAt: "2026-11-12T03:04:05.000Z",
-    postedOn: "2026-11-12", debitAccount: "時間拠出", creditAccount: "AI仮受品",
+    postedOn: dateKey(new Date("2026-11-12T03:04:05Z")), debitAccount: "時間拠出", creditAccount: "AI仮受品",
     beforeSeconds: 61, afterSeconds: 45, deltaSeconds: -16, reason: "休憩を除外",
   });
 });

@@ -26,6 +26,12 @@ import {
   type TimeAccountingStore,
 } from "./timeAccountingStore";
 import {
+  addThinkingLedgerRecords,
+  clearThinkingLedgerRecords,
+  deleteThinkingLedgerRecord,
+  updateThinkingLedgerRecord,
+} from "./thinkingLedgerStore";
+import {
   buildTimeAccountingView,
   buildTimeImportHistory,
   type TimeImportHistoryRow,
@@ -121,6 +127,8 @@ type CandidateField = keyof ThoughtReceiptCandidate;
 type IssuedThinkingReceipt = ThoughtReceiptCandidate & {
   receiptNo: string;
   issuedAt: string;
+  /** Accounting date is separate from the original conversation/issue date. */
+  accountingPostedOn?: string;
 };
 
 // 応募用プロトタイプなので、外部DBではなく画面確認用のサンプルデータを置いています。
@@ -724,20 +732,23 @@ function App() {
     return () => window.removeEventListener("message", receiveTimeRecords);
   }, []);
 
-  function persistLedger(records: IssuedThinkingReceipt[]) {
-    localStorage.setItem(THINKING_LEDGER_KEY, JSON.stringify(records));
-    setThinkingLedger(records);
+  function applyThinkingLedger(records: readonly IssuedThinkingReceipt[]) {
+    setThinkingLedger([...records]);
     setLedgerStatus("ready");
   }
 
-  function updateLedgerReceipt(receipt: IssuedThinkingReceipt) {
-    const current = loadThinkingLedger();
-    if (!current.some((item) => item.receiptNo === receipt.receiptNo)) throw new Error("記録が見つかりません。再読み込みしてください。");
-    persistLedger(current.map((item) => item.receiptNo === receipt.receiptNo ? receipt : item));
+  const thinkingMutationOptions = () => ({
+    storageKey: THINKING_LEDGER_KEY,
+    periodStorageKey: TIME_ACCOUNTING_STORAGE_KEY,
+    parseRecord: normalizeIssuedReceipt,
+  });
+
+  async function updateLedgerReceipt(receipt: IssuedThinkingReceipt) {
+    applyThinkingLedger(await updateThinkingLedgerRecord(receipt, thinkingMutationOptions()));
   }
 
-  function deleteLedgerReceipt(receiptNo: string) {
-    persistLedger(loadThinkingLedger().filter((item) => item.receiptNo !== receiptNo));
+  async function deleteLedgerReceipt(receiptNo: string) {
+    applyThinkingLedger(await deleteThinkingLedgerRecord(receiptNo, thinkingMutationOptions()));
   }
 
   async function importTimeRecordPreview() {
@@ -1188,14 +1199,15 @@ function App() {
     scrollScreenToTop("smooth");
   }
 
-  function resetDemoData() {
+  async function resetDemoData() {
     if (!window.confirm("デモデータをリセットしますか？")) return;
 
     try {
+      const cleared = await clearThinkingLedgerRecords(thinkingMutationOptions());
       localStorage.removeItem(RAW_CONVERSATION_KEY);
-      localStorage.removeItem(THINKING_LEDGER_KEY);
+      applyThinkingLedger(cleared);
     } catch {
-      showToast("保存先にアクセスできないため、リセットできませんでした。");
+      showToast("締め済み月を含むか保存先にアクセスできないため、リセットできませんでした。");
       return;
     }
 
@@ -1260,34 +1272,24 @@ function App() {
     scrollScreenToTop("auto");
   }
 
-  function saveIssuedReceiptToLedger() {
+  async function saveIssuedReceiptToLedger() {
     if (!issuedReceipt) return;
 
     try {
-      const receiptData = issuedReceipt;
-      const current = loadThinkingLedger();
-      const exists = current.some((receipt) => receipt.receiptNo === receiptData.receiptNo);
-      const updatedLedger = exists ? current : [receiptData, ...current];
-      persistLedger(updatedLedger);
+      applyThinkingLedger(await addThinkingLedgerRecords([issuedReceipt], thinkingMutationOptions()));
       setLedgerMessage("思考帳簿に保存しました");
       setLedgerMessage("帳簿に保存しました。");
-    } catch {
-      setLedgerMessage("帳簿に保存できませんでした。ブラウザの保存設定を確認してください。");
+    } catch (error) {
+      setLedgerMessage(error instanceof Error ? error.message : "帳簿に保存できませんでした。ブラウザの保存設定を確認してください。");
     }
   }
 
-  function addSampleLedgerData() {
+  async function addSampleLedgerData() {
     try {
-      const current = loadThinkingLedger();
-      const receiptNos = new Set(current.map((receipt) => receipt.receiptNo));
-      const samplesToAdd = sampleThinkingLedgerReceipts.filter(
-        (receipt) => !receiptNos.has(receipt.receiptNo),
-      );
-      const updatedLedger = [...samplesToAdd, ...current];
-      persistLedger(updatedLedger);
+      applyThinkingLedger(await addThinkingLedgerRecords(sampleThinkingLedgerReceipts, thinkingMutationOptions()));
       showToast("開発確認用のサンプル帳簿データを追加しました。");
-    } catch {
-      showToast("サンプル帳簿データを追加できませんでした。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "サンプル帳簿データを追加できませんでした。");
     }
   }
 
@@ -2492,8 +2494,8 @@ function LedgerBreakdown({
 function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
   receipt: IssuedThinkingReceipt;
   onClose: () => void;
-  onUpdate: (receipt: IssuedThinkingReceipt) => void;
-  onDelete: (receiptNo: string) => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => Promise<void>;
+  onDelete: (receiptNo: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(receipt);
   const [editing, setEditing] = useState(false);
@@ -2511,10 +2513,10 @@ function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
   return (
     <section className="ledger-detail-card" ref={detailRef} tabIndex={-1} aria-label="レシート詳細">
       <SectionTitle icon={<ReceiptText size={18} />} title="レシート詳細" />
-      {editing ? <form className="ledger-edit-form" onSubmit={(event) => {
+      {editing ? <form className="ledger-edit-form" onSubmit={async (event) => {
         event.preventDefault();
         if (!ledgerDate(draft)) { setError("発行日時または会話日時を、年月日まで入力してください。"); return; }
-        try { onUpdate(draft); setEditing(false); setError(""); } catch { setError("保存できませんでした。保存先を確認し、再読み込みしてからお試しください。"); }
+        try { await onUpdate(draft); setEditing(false); setError(""); } catch (error) { setError(error instanceof Error ? error.message : "保存できませんでした。保存先を確認し、再読み込みしてからお試しください。"); }
       }}>
         <p>レシート番号：{receipt.receiptNo}</p>
         {fields.map(({ key, label }) => <label key={key}>{label}<textarea aria-label={label} rows={key === "selfDecision" || key === "aiAdded" ? 3 : 1} value={draft[key]} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
@@ -2533,8 +2535,8 @@ function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
       </>}
       {confirmDelete && <div className="report-delete-confirm" role="alert">
         <p>「{receipt.topic}」を帳簿から削除します。週間・月間・年間の集計からも除かれます。</p>
-        <button className="secondary-action" type="button" onClick={() => {
-          try { onDelete(receipt.receiptNo); onClose(); } catch { setError("削除できませんでした。保存先を確認してください。"); }
+        <button className="secondary-action" type="button" onClick={async () => {
+          try { await onDelete(receipt.receiptNo); onClose(); } catch (error) { setError(error instanceof Error ? error.message : "削除できませんでした。保存先を確認してください。"); }
         }}>削除を確定</button>
         <button className="secondary-action" type="button" onClick={() => setConfirmDelete(false)}>削除をキャンセル</button>
       </div>}
@@ -2554,8 +2556,8 @@ function SavedLedgerList({
   receipts: IssuedThinkingReceipt[];
   onAddSamples: () => void;
   initialReceiptNo?: string;
-  onUpdate: (receipt: IssuedThinkingReceipt) => void;
-  onDelete: (receiptNo: string) => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => Promise<void>;
+  onDelete: (receiptNo: string) => Promise<void>;
 }) {
   const [selectedReceiptNo, setSelectedReceiptNo] = useState<string | null>(initialReceiptNo ?? null);
   const selectedReceipt =
@@ -3245,8 +3247,8 @@ function ReceiptsScreen({
   monthKey: string | null;
   range: { anchor: Date; kind: SettlementView; receiptNo?: string } | null;
   returnView: SettlementView;
-  onUpdate: (receipt: IssuedThinkingReceipt) => void;
-  onDelete: (receiptNo: string) => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => Promise<void>;
+  onDelete: (receiptNo: string) => Promise<void>;
   onBackAnnual: () => void;
   onClearMonth: () => void;
   filter: ReceiptFilter | null;
@@ -4249,6 +4251,7 @@ function normalizeIssuedReceipt(receipt: unknown): IssuedThinkingReceipt | null 
     selfDecision: target.selfDecision,
     feelingAfter: target.feelingAfter,
     thinkingBalance: target.thinkingBalance,
+    ...(typeof target.accountingPostedOn === "string" ? { accountingPostedOn: target.accountingPostedOn } : {}),
   } as IssuedThinkingReceipt;
 }
 

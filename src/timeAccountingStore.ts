@@ -18,6 +18,7 @@ import {
 import {
   createAccountingPeriodState,
   normalizeAccountingPeriodState,
+  resolveOpenAccountingDate,
   withClosedAccountingPeriod,
   type AccountingPeriodState,
 } from "./accountingPeriods.ts";
@@ -383,6 +384,7 @@ async function importUnderLock(
       entryId: expectedEntryId,
       sourceEventId,
       occurredOn: record.localDate,
+      postedOn: resolveOpenAccountingDate(current.periodState, record.localDate),
       actualInputSeconds: record.durationSeconds,
     });
     const metadata = Object.freeze({
@@ -494,7 +496,7 @@ async function cancelUnderLock(
     throw new TimeAccountingImportError("INVALID_RECORD", "取消日時が正しくありません。");
   }
   const cancelledAt = cancelledDate.toISOString();
-  const postedOn = localDate(cancelledDate);
+  const postedOn = resolveOpenAccountingDate(current.periodState, localDate(cancelledDate));
   const cancellationCount = existingActions.filter((action) => action.kind === "cancellation").length;
   const reversalEntryId = reversalEntryIdForTimeRecord(recordId, cancellationCount + 1);
   let ledger: TimeAccountingLedger;
@@ -590,7 +592,7 @@ async function reregisterUnderLock(
     throw new TimeAccountingImportError("INVALID_RECORD", "再登録日時が正しくありません。");
   }
   const actedAt = actedDate.toISOString();
-  const postedOn = localDate(actedDate);
+  const postedOn = resolveOpenAccountingDate(current.periodState, localDate(actedDate));
   const reregistrationCount = existingActions.filter(
     (action) => action.kind === "reregistration",
   ).length;
@@ -686,7 +688,7 @@ async function correctUnderLock(
     throw new TimeAccountingImportError("INVALID_RECORD", "訂正日時が正しくありません。");
   }
   const actedAt = actedDate.toISOString();
-  const postedOn = localDate(actedDate);
+  const postedOn = resolveOpenAccountingDate(current.periodState, localDate(actedDate));
   const existingActions = imported.actions ?? [];
   const correctionCount = existingActions.filter((action) => action.kind === "correction").length;
   const correctionEntryId = correctionEntryIdForTimeRecord(recordId, correctionCount + 1);

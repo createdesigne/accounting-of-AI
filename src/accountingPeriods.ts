@@ -13,6 +13,17 @@ export type AccountingPeriodState = Readonly<{
   closedPeriods: readonly ClosedAccountingPeriod[];
 }>;
 
+export class AccountingPeriodClosedError extends Error {
+  readonly code = "ACCOUNTING_PERIOD_CLOSED";
+  readonly periodKey: AccountingPeriodKey;
+
+  constructor(periodKey: AccountingPeriodKey) {
+    super(`${periodKey} は締め済みのため、仕訳を変更できません。`);
+    this.name = "AccountingPeriodClosedError";
+    this.periodKey = periodKey;
+  }
+}
+
 export function createAccountingPeriodState(
   accountingTimeZone = resolvedTimeZone(),
 ): AccountingPeriodState {
@@ -62,6 +73,31 @@ export function isAccountingPeriodClosed(
 ): boolean {
   requirePeriodKey(periodKey);
   return state.closedPeriods.some((item) => item.periodKey === periodKey);
+}
+
+/** Rejects a direct add, edit or delete whose accounting date is closed. */
+export function assertAccountingDateIsOpen(
+  state: AccountingPeriodState,
+  accountingDate: string,
+): void {
+  const periodKey = accountingPeriodForDate(accountingDate);
+  if (isAccountingPeriodClosed(state, periodKey)) {
+    throw new AccountingPeriodClosedError(periodKey);
+  }
+}
+
+/**
+ * Keeps an open accounting date unchanged. A date in a closed month is moved
+ * to the first day of the first later open month. The original event date must
+ * be stored separately by the caller.
+ */
+export function resolveOpenAccountingDate(
+  state: AccountingPeriodState,
+  desiredAccountingDate: string,
+): string {
+  const desiredPeriod = accountingPeriodForDate(desiredAccountingDate);
+  const openPeriod = nextOpenAccountingPeriod(state, desiredPeriod);
+  return openPeriod === desiredPeriod ? desiredAccountingDate : `${openPeriod}-01`;
 }
 
 /** Returns the supplied month when it is open, otherwise the first later open month. */

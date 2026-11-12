@@ -618,3 +618,68 @@ test('serializes stale month-close state saves without losing either closed mont
     ['2026-10', '2026-11'],
   );
 });
+
+test('late records keep their actual date and post on the first day of the next open month', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  let periodState = withClosedAccountingPeriod(
+    createAccountingPeriodState('Asia/Tokyo'), '2026-10', '2026-11-01T00:00:00.000Z',
+  );
+  periodState = withClosedAccountingPeriod(periodState, '2026-11', '2026-12-01T00:00:00.000Z');
+  await saveAccountingPeriodState(periodState, { storage, locks });
+
+  const late = await importTimeRecords([
+    timeRecord('late-closed:day:2026-10-31', 61, '2026-10-31'),
+  ], options(storage, locks));
+  assert.equal(late.store.ledger.measurements[0].occurredOn, '2026-10-31');
+  assert.equal(late.store.ledger.entries[0].postedOn, '2026-12-01');
+  assert.equal(late.store.ledger.entries[0].lines[0].seconds, 61);
+
+  const open = await importTimeRecords([
+    timeRecord('open-period:day:2026-12-15', 59, '2026-12-15'),
+  ], options(storage, locks));
+  assert.equal(open.store.ledger.entries[1].postedOn, '2026-12-15');
+});
+
+test('cancellation, re-registration and correction never rewrite a closed month', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const record = timeRecord('closed-actions:day:2026-09-30', 61, '2026-09-30');
+  await importTimeRecords([record], {
+    storage, locks, now: () => Date.parse('2026-09-30T12:00:00Z'),
+  });
+  let periodState = withClosedAccountingPeriod(
+    createAccountingPeriodState('Asia/Tokyo'), '2026-09', '2026-10-01T00:00:00.000Z',
+  );
+  periodState = withClosedAccountingPeriod(periodState, '2026-10', '2026-11-01T00:00:00.000Z');
+  await saveAccountingPeriodState(periodState, { storage, locks });
+  const actionOptions = { storage, locks, now: () => Date.parse('2026-09-30T12:00:00Z') };
+
+  const cancelled = await cancelImportedTimeRecord(record.recordId, actionOptions);
+  const restored = await reregisterImportedTimeRecord(record.recordId, actionOptions);
+  const corrected = await correctImportedTimeRecord(record.recordId, 45, '差分', actionOptions);
+  assert.deepEqual(
+    corrected.store.ledger.entries.map((entry) => entry.postedOn),
+    ['2026-09-30', '2026-11-01', '2026-11-01', '2026-11-01'],
+  );
+  assert.equal(cancelled.store.ledger.entries[0].postedOn, '2026-09-30');
+  assert.equal(restored.store.ledger.entries[0].postedOn, '2026-09-30');
+  assert.equal(corrected.store.ledger.measurements[0].occurredOn, '2026-09-30');
+  assert.ok(corrected.store.ledger.entries.every(isBalancedJournalEntry));
+});
+
+test('a close racing another tab wins before its queued late import', async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const periodState = withClosedAccountingPeriod(
+    createAccountingPeriodState('Asia/Tokyo'), '2026-10', '2026-11-01T00:00:00.000Z',
+  );
+  const [, imported] = await Promise.all([
+    saveAccountingPeriodState(periodState, { storage, locks }),
+    importTimeRecords([
+      timeRecord('close-race:day:2026-10-31', 60, '2026-10-31'),
+    ], options(storage, locks)),
+  ]);
+  assert.equal(imported.store.ledger.measurements[0].occurredOn, '2026-10-31');
+  assert.equal(imported.store.ledger.entries[0].postedOn, '2026-11-01');
+});
