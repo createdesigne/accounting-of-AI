@@ -47,6 +47,17 @@
         font-size: 12px;
         line-height: 1.6;
       }
+
+      .tracking {
+        margin: 16px 0;
+        padding-top: 14px;
+        border-top: 1px solid #cbd5e1;
+      }
+
+      .tracking h2 { margin: 0; font-size: 14px; }
+      .tracking-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+      .tracking-actions button { min-height: 40px; }
+      #trackingStop { color: #334155; background: #e2e8f0; }
     </style>
   </head>
   <body>
@@ -55,6 +66,15 @@
     <label>送信先<select id="destination"><option value="production">本番サイト</option><option value="preview">確認用プレビュー</option><option value="local">ローカル開発用</option></select></label>
     <button id="createReceipt" type="button">思考レシート化する</button>
     <p id="status" role="status" aria-live="polite">ボタンを押すと、現在のAI会話を選択したWebアプリへ渡します。内容を確認してから帳簿に保存できます。</p>
+    <section class="tracking" aria-labelledby="trackingHeading">
+      <h2 id="trackingHeading">ChatGPT利用時間</h2>
+      <p>開始を押した後、ChatGPTを操作している時間だけ端末内に記録します。会話本文や入力内容は取得・送信しません。</p>
+      <div class="tracking-actions">
+        <button id="trackingStart" type="button">計測を開始</button>
+        <button id="trackingStop" type="button">計測を停止</button>
+      </div>
+      <p id="trackingStatus" role="status" aria-live="polite">計測状態を確認しています…</p>
+    </section>
     <p id="version" aria-label="拡張機能のバージョン"></p>
     <script src="popup.js"></script>
   </body>
