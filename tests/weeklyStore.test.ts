@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   deleteWeeklyRecord,
+  deleteWeeklyTask,
   loadWeeklyConversationStore,
   loadWeeklyRecordStore,
   saveManualWeeklyRecord,
+  saveWeeklyTask,
   WEEKLY_CONVERSATIONS_STORAGE_KEY,
   WEEKLY_RECORDS_STORAGE_KEY,
   WeeklyStoreError,
@@ -91,6 +93,16 @@ test("off persists neither time nor conversation and needs no lock", async () =>
   assert.equal(storage.getItem(WEEKLY_CONVERSATIONS_STORAGE_KEY), null);
 });
 
+test("changing an existing record to off removes both time and content", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  await saveManualWeeklyRecord(manual("off-existing", 60), { storage, locks });
+  const result = await saveManualWeeklyRecord({ ...manual("off-existing", 60), privacy: "off" }, { storage, locks });
+  assert.equal(result.persisted, false);
+  assert.equal(result.store.records.length, 0);
+  assert.equal(loadWeeklyConversationStore(storage).conversations.length, 0);
+});
+
 test("time-only removes previously saved content for the same record", async () => {
   const storage = new MemoryStorage();
   const locks = new SerialLocks();
@@ -124,4 +136,37 @@ test("invalid weekly data is reported and never silently overwritten", () => {
     (error) => error instanceof WeeklyStoreError && error.code === "STORE_INVALID",
   );
   assert.equal(storage.getItem(WEEKLY_RECORDS_STORAGE_KEY), "{broken");
+});
+
+test("tasks are saved, edited and protected while an activity refers to them", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const task = {
+    id: "task-a",
+    title: "発表構成",
+    goal: "論点を整理する",
+    plannedAiasLevel: 3 as const,
+    activityCategory: "壁打ち" as const,
+    delegatedToAi: "比較案を出す",
+    humanDecision: "採用案は本人が決める",
+    createdAt: "2026-11-13T09:00:00+09:00",
+  };
+  let store = await saveWeeklyTask(task, { storage, locks });
+  assert.equal(store.tasks[0].activityCategory, "壁打ち");
+  store = await saveWeeklyTask({ ...task, title: "発表構成を確定" }, { storage, locks });
+  assert.equal(store.tasks.length, 1);
+  assert.equal(store.tasks[0].title, "発表構成を確定");
+
+  await saveManualWeeklyRecord({ ...manual("linked", 120), taskId: task.id }, { storage, locks });
+  await assert.rejects(
+    () => saveWeeklyTask({ ...task, plannedAiasLevel: 1, delegatedToAi: "AIを使用しない" }, { storage, locks }),
+    (error) => error instanceof WeeklyStoreError && error.code === "TASK_IN_USE",
+  );
+  await assert.rejects(
+    () => deleteWeeklyTask(task.id, { storage, locks }),
+    (error) => error instanceof WeeklyStoreError && error.code === "TASK_IN_USE",
+  );
+  await deleteWeeklyRecord("linked", { storage, locks });
+  store = await deleteWeeklyTask(task.id, { storage, locks });
+  assert.equal(store.tasks.length, 0);
 });

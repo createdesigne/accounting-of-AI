@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildManualWeeklyRecord, parseWeeklyRecord, WeeklyDataValidationError } from "../src/weeklyData.ts";
+import { buildManualWeeklyRecord, buildWeeklyTask, parseWeeklyRecord, WeeklyDataValidationError } from "../src/weeklyData.ts";
 
 function input(overrides: Record<string, unknown> = {}) {
   return {
@@ -71,4 +71,37 @@ test("persisted analysis accepts null but rejects an invalid score", () => {
     () => parseWeeklyRecord({ ...valid, analysis: { ...valid.analysis, initiative: 10 } }),
     /analysis is invalid/,
   );
+});
+
+test("manual notes stay user-authored and a no-AI activity is not an analysis target", () => {
+  const built = buildManualWeeklyRecord(input({
+    activeSeconds: 0,
+    analysisApplicable: false,
+    accountingDisposition: "unclassified",
+    manualNotes: {
+      interactionSummary: "AIを使わずに構成を考えた",
+      ownThoughts: "順番は自分で判断した",
+      discovery: "先に結論を書くと整理しやすい",
+    },
+  }));
+  assert.equal(built.record.analysisStatus, "not-applicable");
+  assert.equal(built.record.analysis.initiative, null);
+  assert.equal(built.record.manualNotes?.ownThoughts, "順番は自分で判断した");
+  assert.equal(built.record.analysis.discovery, null);
+});
+
+test("AIAS is stored as advance task design with an activity category", () => {
+  const task = buildWeeklyTask({
+    id: "task-level-1",
+    title: "自力で構成を作る",
+    goal: "AIを使わない基準を残す",
+    plannedAiasLevel: 1,
+    activityCategory: "文章作成",
+    delegatedToAi: "AIを使用しない",
+    humanDecision: null,
+    createdAt: "2026-11-13T09:00:00+09:00",
+  });
+  assert.equal(task.plannedAiasLevel, 1);
+  assert.equal(task.activityCategory, "文章作成");
+  assert.equal(task.delegatedToAi, "AIを使用しない");
 });

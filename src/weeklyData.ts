@@ -22,6 +22,12 @@ export type WeeklyRecordLinksV1 = Readonly<{
   thoughtReceiptId: string;
 }>;
 
+export type WeeklyManualNotesV1 = Readonly<{
+  interactionSummary: string | null;
+  ownThoughts: string | null;
+  discovery: string | null;
+}>;
+
 export type WeeklyRecordV1 = Readonly<{
   schemaVersion: 1;
   id: string;
@@ -43,6 +49,8 @@ export type WeeklyRecordV1 = Readonly<{
   analysisStatus: AnalysisStatus;
   analysis: ThoughtAnalysisV1;
   selfReflection: string | null;
+  /** User-authored fields. They are never populated by an AI analysis. */
+  manualNotes: WeeklyManualNotesV1 | null;
   links: WeeklyRecordLinksV1;
 }>;
 
@@ -52,8 +60,20 @@ export type TaskV1 = Readonly<{
   title: string;
   goal: string | null;
   plannedAiasLevel: 1 | 2 | 3 | 4 | 5 | null;
+  activityCategory: AnalysisActivityCategory;
   delegatedToAi: string | null;
   humanDecision: string | null;
+  createdAt: string;
+}>;
+
+export type WeeklyTaskInput = Readonly<{
+  id: string;
+  title: string;
+  goal?: string | null;
+  plannedAiasLevel: 1 | 2 | 3 | 4 | 5 | null;
+  activityCategory: AnalysisActivityCategory;
+  delegatedToAi?: string | null;
+  humanDecision?: string | null;
   createdAt: string;
 }>;
 
@@ -88,6 +108,13 @@ export type ManualWeeklyRecordInput = Readonly<{
   activityCategory: AnalysisActivityCategory;
   accountingDisposition: AccountingDisposition;
   selfReflection?: string | null;
+  /** False only for an activity configured before starting as no-AI use. */
+  analysisApplicable?: boolean;
+  manualNotes?: Readonly<{
+    interactionSummary?: string | null;
+    ownThoughts?: string | null;
+    discovery?: string | null;
+  }> | null;
   conversation?: Readonly<{
     id: string;
     title?: string | null;
@@ -139,7 +166,9 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
   const conversationId = input.privacy === "full" && input.conversation
     ? requireIdentifier(input.conversation.id, "conversation.id")
     : null;
-  const analysis = createNotConnectedAnalysis(input.id);
+  const analysis = input.analysisApplicable === false
+    ? Object.freeze({ ...createNotConnectedAnalysis(input.id), analysisStatus: "not-applicable" as const })
+    : createNotConnectedAnalysis(input.id);
   const record: WeeklyRecordV1 = Object.freeze({
     schemaVersion: WEEKLY_RECORD_SCHEMA_VERSION,
     id: input.id,
@@ -160,6 +189,11 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
     analysisStatus: analysis.analysisStatus,
     analysis,
     selfReflection: normalizeNullableText(input.selfReflection),
+    manualNotes: input.manualNotes ? Object.freeze({
+      interactionSummary: normalizeNullableText(input.manualNotes.interactionSummary),
+      ownThoughts: normalizeNullableText(input.manualNotes.ownThoughts),
+      discovery: normalizeNullableText(input.manualNotes.discovery),
+    }) : null,
     links: Object.freeze({
       conversationId,
       usageId: `${input.id}:usage`,
@@ -178,6 +212,30 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
     })
     : null;
   return Object.freeze({ record, conversation });
+}
+
+export function buildWeeklyTask(input: WeeklyTaskInput): TaskV1 {
+  requireIdentifier(input.id, "task.id");
+  requireTimestamp(input.createdAt, "task.createdAt");
+  if (!input.title.trim()) invalid("task.title is required.");
+  if (input.plannedAiasLevel !== null && ![1, 2, 3, 4, 5].includes(input.plannedAiasLevel)) {
+    invalid("task.plannedAiasLevel is invalid.");
+  }
+  if (!isActivityCategory(input.activityCategory)) invalid("task.activityCategory is invalid.");
+  requireNullableText(input.goal, "task.goal");
+  requireNullableText(input.delegatedToAi, "task.delegatedToAi");
+  requireNullableText(input.humanDecision, "task.humanDecision");
+  return Object.freeze({
+    schemaVersion: WEEKLY_RECORD_SCHEMA_VERSION,
+    id: input.id,
+    title: input.title.trim(),
+    goal: normalizeNullableText(input.goal),
+    plannedAiasLevel: input.plannedAiasLevel,
+    activityCategory: input.activityCategory,
+    delegatedToAi: normalizeNullableText(input.delegatedToAi),
+    humanDecision: normalizeNullableText(input.humanDecision),
+    createdAt: new Date(input.createdAt).toISOString(),
+  });
 }
 
 export function parseWeeklyRecord(value: unknown): WeeklyRecordV1 {
@@ -199,6 +257,7 @@ export function parseWeeklyRecord(value: unknown): WeeklyRecordV1 {
   if (!isOneOf(value.accountingDisposition, ["expense", "asset", "work-in-progress", "unclassified"])) invalid("accountingDisposition is invalid.");
   if (!isOneOf(value.analysisStatus, ["not-connected", "pending", "complete", "failed", "not-applicable"])) invalid("analysisStatus is invalid.");
   requireNullableText(value.selfReflection, "selfReflection");
+  const manualNotes = parseManualNotes(value.manualNotes);
   let analysis: ThoughtAnalysisV1;
   try { analysis = parseThoughtAnalysisV1(value.analysis); } catch { return invalid("analysis is invalid."); }
   if (analysis.recordId !== value.id || analysis.analysisStatus !== value.analysisStatus) invalid("analysis link is invalid.");
@@ -206,7 +265,10 @@ export function parseWeeklyRecord(value: unknown): WeeklyRecordV1 {
   requireOptionalIdentifier(value.links.conversationId, "links.conversationId");
   requireIdentifier(value.links.usageId, "links.usageId");
   requireIdentifier(value.links.thoughtReceiptId, "links.thoughtReceiptId");
-  return value as unknown as WeeklyRecordV1;
+  return Object.freeze({
+    ...(value as unknown as WeeklyRecordV1),
+    manualNotes,
+  });
 }
 
 export function parseConversationContent(value: unknown): WeeklyConversationContentV1 {
@@ -227,6 +289,19 @@ function freezeConversation(value: WeeklyConversationContentV1): WeeklyConversat
     return Object.freeze({ role: message.role, text: message.text });
   });
   return Object.freeze({ ...value, messages: Object.freeze(messages) });
+}
+
+function parseManualNotes(value: unknown): WeeklyManualNotesV1 | null {
+  if (value === undefined || value === null) return null;
+  if (!isObject(value)) invalid("manualNotes is invalid.");
+  requireNullableText(value.interactionSummary, "manualNotes.interactionSummary");
+  requireNullableText(value.ownThoughts, "manualNotes.ownThoughts");
+  requireNullableText(value.discovery, "manualNotes.discovery");
+  return Object.freeze({
+    interactionSummary: normalizeNullableText(value.interactionSummary as string | null | undefined),
+    ownThoughts: normalizeNullableText(value.ownThoughts as string | null | undefined),
+    discovery: normalizeNullableText(value.discovery as string | null | undefined),
+  });
 }
 
 function isActivityCategory(value: unknown): value is AnalysisActivityCategory {

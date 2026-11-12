@@ -32,6 +32,7 @@ import {
   updateThinkingLedgerRecord,
 } from "./thinkingLedgerStore";
 import { saveThoughtJournalRecord } from "./thoughtJournalStore";
+import { WeeklyManualScreen } from "./weekly/WeeklyManualScreen";
 import {
   buildTimeAccountingView,
   buildTimeImportHistory,
@@ -65,7 +66,7 @@ import {
   X,
 } from "lucide-react";
 
-type TabKey = "home" | "journal" | "receipts" | "analysis" | "tax";
+type TabKey = "home" | "weekly" | "journal" | "receipts" | "analysis" | "tax";
 type SettlementView = LedgerPeriod;
 
 type JournalUnit = {
@@ -493,6 +494,7 @@ const moodFlow = [
 
 const tabLabels: Record<TabKey, string> = {
   home: "ホーム",
+  weekly: "記録",
   journal: "仕訳",
   receipts: "帳簿",
   analysis: "月次",
@@ -1442,6 +1444,7 @@ function App() {
               )}
             </div>
           )}
+          {!isSettlementOpen && activeTab === "weekly" && <WeeklyManualScreen />}
           {!isSettlementOpen && activeTab === "journal" && (
             <JournalScreen
               receipts={currentReceiptData}
@@ -3596,6 +3599,7 @@ function BottomNav({
 }) {
   const tabs: Array<{ key: TabKey; icon: ReactNode }> = [
     { key: "home", icon: <ReceiptText size={20} /> },
+    { key: "weekly", icon: <Sparkles size={20} /> },
     { key: "journal", icon: <BookOpenText size={20} /> },
     { key: "receipts", icon: <NotebookTabs size={20} /> },
     { key: "tax", icon: <CalendarDays size={20} /> },

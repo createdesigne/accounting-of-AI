@@ -1,9 +1,11 @@
 import {
   buildManualWeeklyRecord,
+  buildWeeklyTask,
   parseConversationContent,
   parseWeeklyRecord,
   type ManualWeeklyRecordInput,
   type TaskV1,
+  type WeeklyTaskInput,
   type WeeklyConversationContentV1,
   type WeeklyRecordV1,
 } from "./weeklyData.ts";
@@ -42,7 +44,7 @@ export type SaveManualWeeklyRecordResult = Readonly<{
 }>;
 
 export class WeeklyStoreError extends Error {
-  readonly code: "STORE_INVALID" | "LOCK_UNAVAILABLE" | "SAVE_FAILED" | "UNKNOWN_RECORD";
+  readonly code: "STORE_INVALID" | "LOCK_UNAVAILABLE" | "SAVE_FAILED" | "UNKNOWN_RECORD" | "UNKNOWN_TASK" | "TASK_IN_USE";
 
   constructor(code: WeeklyStoreError["code"], message: string) {
     super(message);
@@ -95,6 +97,17 @@ export async function saveManualWeeklyRecord(
   options: WeeklyStoreOptions = {},
 ): Promise<SaveManualWeeklyRecordResult> {
   if (input.privacy === "off") {
+    const current = loadWeeklyRecordStore(options.storage);
+    if (current.records.some((record) => record.id === input.id)) {
+      const store = await removeWeeklyRecord(input.id, options);
+      return Object.freeze({
+        persisted: false,
+        inserted: false,
+        deduplicated: false,
+        record: null,
+        store,
+      });
+    }
     return Object.freeze({
       persisted: false,
       inserted: false,
@@ -140,6 +153,50 @@ export async function saveManualWeeklyRecord(
 export async function deleteWeeklyRecord(
   recordId: string,
   options: WeeklyStoreOptions = {},
+): Promise<WeeklyRecordStoreV1> {
+  return removeWeeklyRecord(recordId, options);
+}
+
+export async function saveWeeklyTask(
+  input: WeeklyTaskInput,
+  options: WeeklyStoreOptions = {},
+): Promise<WeeklyRecordStoreV1> {
+  const task = buildWeeklyTask(input);
+  return withMutation(options, (store, contents) => {
+    const existing = store.tasks.find((item) => item.id === task.id);
+    if (existing && store.records.some((record) => record.taskId === task.id)
+      && (existing.plannedAiasLevel !== task.plannedAiasLevel
+        || existing.activityCategory !== task.activityCategory
+        || existing.delegatedToAi !== task.delegatedToAi)) {
+      throw new WeeklyStoreError("TASK_IN_USE", "活動開始後はAIAS Level・活動テーマ・AIの役割を変更できません。");
+    }
+    const tasks = existing
+      ? store.tasks.map((item) => item.id === task.id ? task : item)
+      : [...store.tasks, task];
+    const nextStore = freezeRecordStore(store.records, tasks);
+    return { nextStore, nextContents: contents, result: nextStore };
+  });
+}
+
+export async function deleteWeeklyTask(
+  taskId: string,
+  options: WeeklyStoreOptions = {},
+): Promise<WeeklyRecordStoreV1> {
+  return withMutation(options, (store, contents) => {
+    if (!store.tasks.some((task) => task.id === taskId)) {
+      throw new WeeklyStoreError("UNKNOWN_TASK", "削除する課題設定が見つかりません。");
+    }
+    if (store.records.some((record) => record.taskId === taskId)) {
+      throw new WeeklyStoreError("TASK_IN_USE", "活動記録に使われている課題設定は削除できません。");
+    }
+    const nextStore = freezeRecordStore(store.records, store.tasks.filter((task) => task.id !== taskId));
+    return { nextStore, nextContents: contents, result: nextStore };
+  });
+}
+
+async function removeWeeklyRecord(
+  recordId: string,
+  options: WeeklyStoreOptions,
 ): Promise<WeeklyRecordStoreV1> {
   return withMutation(options, (store, contents) => {
     if (!store.records.some((record) => record.id === recordId)) {
@@ -205,14 +262,23 @@ function parseTask(value: unknown): TaskV1 {
     || typeof value.title !== "string" || typeof value.createdAt !== "string"
     || Number.isNaN(new Date(value.createdAt).getTime())
     || !nullableString(value.goal) || !nullableString(value.delegatedToAi) || !nullableString(value.humanDecision)
-    || !(value.plannedAiasLevel === null || [1, 2, 3, 4, 5].includes(value.plannedAiasLevel as number))) {
+    || !(value.plannedAiasLevel === null || [1, 2, 3, 4, 5].includes(value.plannedAiasLevel as number))
+    || !isActivityCategory(value.activityCategory)) {
     return invalidStore("週次課題の内容が正しくありません。");
   }
-  return Object.freeze(value as unknown as TaskV1);
+  return Object.freeze({
+    ...(value as unknown as TaskV1),
+    activityCategory: (value.activityCategory ?? null) as TaskV1["activityCategory"],
+  });
 }
 
 function nullableString(value: unknown): value is string | null {
   return value === null || typeof value === "string";
+}
+
+function isActivityCategory(value: unknown) {
+  return value === undefined || value === null
+    || ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"].includes(value as string);
 }
 
 function emptyRecordStore(): WeeklyRecordStoreV1 {
