@@ -1,5 +1,10 @@
 import { dateKey, periodBounds } from "./ledgerPeriods.ts";
-import type { AccountingDisposition, WeeklyRecordV1 } from "./weeklyData.ts";
+import type {
+  AccountingDisposition,
+  TaskV1,
+  WeeklyRecordV1,
+  WeeklyTimeSource,
+} from "./weeklyData.ts";
 
 export const WEEKLY_ACCOUNTS = {
   aiClearing: "AI仮受品",
@@ -15,6 +20,15 @@ export const WEEKLY_ACCOUNTS = {
   accumulatedTimeLoss: "累積時間損失",
 } as const;
 
+export const WEEKLY_EXPENSE_ACCOUNTS = Object.freeze([
+  WEEKLY_ACCOUNTS.consultationExpense,
+  WEEKLY_ACCOUNTS.thoughtExplorationExpense,
+  WEEKLY_ACCOUNTS.deliverableExpense,
+  WEEKLY_ACCOUNTS.researchExpense,
+  WEEKLY_ACCOUNTS.learningExpense,
+  WEEKLY_ACCOUNTS.otherExpense,
+] as const);
+
 export type WeeklyAccount = typeof WEEKLY_ACCOUNTS[keyof typeof WEEKLY_ACCOUNTS];
 export type WeeklyJournalLine = Readonly<{
   side: "debit" | "credit";
@@ -26,7 +40,13 @@ export type WeeklyJournalEntry = Readonly<{
   recordId: string;
   weekKey: string;
   kind: "usage-recognition" | "classification";
+  timeSource: WeeklyTimeSource;
   lines: readonly [WeeklyJournalLine, WeeklyJournalLine];
+}>;
+
+export type WeeklyStatementLine = Readonly<{
+  account: WeeklyAccount;
+  seconds: number;
 }>;
 
 export type WeeklyAllocation = Readonly<{
@@ -69,6 +89,17 @@ export type WeeklySettlementV1 = Readonly<{
     contributedTimeSeconds: number;
     expenseSeconds: number;
     isBalanced: boolean;
+  }>;
+  balanceSheet: Readonly<{
+    debit: readonly WeeklyStatementLine[];
+    credit: readonly WeeklyStatementLine[];
+    debitSeconds: number;
+    creditSeconds: number;
+    isBalanced: boolean;
+  }>;
+  profitAndLoss: Readonly<{
+    expenses: readonly WeeklyStatementLine[];
+    totalExpenseSeconds: number;
   }>;
   analysis: Readonly<{
     notConnectedCount: number;
@@ -128,12 +159,11 @@ export function allocateRecordToWeeks(record: WeeklyRecordV1): readonly WeeklyAl
 export function buildWeeklySettlement(
   records: readonly WeeklyRecordV1[],
   anchor: Date,
+  tasks: readonly TaskV1[] = [],
 ): WeeklySettlementV1 {
   const bounds = periodBounds(anchor, "weekly");
   const weekKey = dateKey(bounds.start);
-  const allocations = records.flatMap((record) => allocateRecordToWeeks(record)
-    .filter((allocation) => allocation.weekKey === weekKey)
-    .map((allocation) => ({ record, allocation })));
+  const allocations = weeklyRecordAllocations(records, tasks, weekKey);
   const entries = allocations.flatMap(({ record, allocation }) =>
     buildJournalEntries(record, allocation.seconds, allocation.weekKey));
   const totals = {
@@ -152,6 +182,22 @@ export function buildWeeklySettlement(
   const accumulatedTimeLossSeconds = totals.expenseSeconds;
   const statementDebit = assetAndClearingSeconds + accumulatedTimeLossSeconds;
   const statementCredit = totals.recordSeconds;
+  const balanceSheetDebit = Object.freeze([
+    Object.freeze({ account: WEEKLY_ACCOUNTS.aiClearing, seconds: totals.unclassifiedSeconds }),
+    Object.freeze({ account: WEEKLY_ACCOUNTS.deliverableAsset, seconds: totals.assetSeconds }),
+    Object.freeze({ account: WEEKLY_ACCOUNTS.workInProgress, seconds: totals.workInProgressSeconds }),
+    Object.freeze({ account: WEEKLY_ACCOUNTS.accumulatedTimeLoss, seconds: totals.expenseSeconds }),
+  ]);
+  const balanceSheetCredit = Object.freeze([
+    Object.freeze({ account: WEEKLY_ACCOUNTS.timeContribution, seconds: totals.recordSeconds }),
+  ]);
+  const expenses = Object.freeze(WEEKLY_EXPENSE_ACCOUNTS.map((account) => Object.freeze({
+    account,
+    seconds: sum(entries.filter((entry) => entry.kind === "classification")
+      .flatMap((entry) => entry.lines)
+      .filter((line) => line.side === "debit" && line.account === account)
+      .map((line) => line.seconds)),
+  })));
   const uniqueRecordIds = [...new Set(allocations.map(({ record }) => record.id))];
   return Object.freeze({
     schemaVersion: 1,
@@ -170,6 +216,14 @@ export function buildWeeklySettlement(
       expenseSeconds: totals.expenseSeconds,
       isBalanced: statementDebit === statementCredit,
     }),
+    balanceSheet: Object.freeze({
+      debit: balanceSheetDebit,
+      credit: balanceSheetCredit,
+      debitSeconds: statementDebit,
+      creditSeconds: statementCredit,
+      isBalanced: statementDebit === statementCredit,
+    }),
+    profitAndLoss: Object.freeze({ expenses, totalExpenseSeconds: totals.expenseSeconds }),
     analysis: Object.freeze({
       notConnectedCount: allocations.filter(({ record }) => record.analysisStatus === "not-connected").length,
       notEvaluatedCount: allocations.filter(({ record }) => record.analysis.initiative === null
@@ -184,11 +238,13 @@ export function buildJournalEntries(
   weekKey = dateKey(weekBoundsForTimestamp(record.startedAt ?? record.recordedAt).start),
 ): readonly WeeklyJournalEntry[] {
   requireSeconds(seconds);
+  if (record.analysisStatus === "not-applicable" || seconds === 0) return Object.freeze([]);
   const recognition = freezeEntry({
     id: `${record.id}:${weekKey}:recognition`,
     recordId: record.id,
     weekKey,
     kind: "usage-recognition",
+    timeSource: record.timeSource,
     lines: [
       { side: "debit", account: WEEKLY_ACCOUNTS.aiClearing, seconds },
       { side: "credit", account: WEEKLY_ACCOUNTS.timeContribution, seconds },
@@ -201,12 +257,24 @@ export function buildJournalEntries(
     recordId: record.id,
     weekKey,
     kind: "classification",
+    timeSource: record.timeSource,
     lines: [
       { side: "debit", account: debitAccount, seconds },
       { side: "credit", account: WEEKLY_ACCOUNTS.aiClearing, seconds },
     ],
   });
   return Object.freeze([recognition, classification]);
+}
+
+export function buildWeeklyJournalEntries(
+  records: readonly WeeklyRecordV1[],
+  anchor: Date,
+  tasks: readonly TaskV1[] = [],
+): readonly WeeklyJournalEntry[] {
+  const weekKey = dateKey(periodBounds(anchor, "weekly").start);
+  return Object.freeze(weeklyRecordAllocations(records, tasks, weekKey).flatMap(({ record, allocation }) => (
+    buildJournalEntries(record, allocation.seconds, allocation.weekKey)
+  )));
 }
 
 export function isBalancedWeeklyEntry(entry: WeeklyJournalEntry): boolean {
@@ -235,6 +303,32 @@ function dispositionSeconds(
 ) {
   return sum(allocations.filter(({ record }) => record.accountingDisposition === disposition)
     .map(({ allocation }) => allocation.seconds));
+}
+
+function weeklyRecordAllocations(
+  records: readonly WeeklyRecordV1[],
+  tasks: readonly TaskV1[],
+  weekKey: string,
+) {
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  return deduplicateRecords(records)
+    .filter((record) => record.analysisStatus !== "not-applicable"
+      && (record.taskId === null || taskById.get(record.taskId)?.plannedAiasLevel !== 1))
+    .flatMap((record) => allocateRecordToWeeks(record)
+      .filter((allocation) => allocation.weekKey === weekKey && allocation.seconds > 0)
+      .map((allocation) => ({ record, allocation })));
+}
+
+function deduplicateRecords(records: readonly WeeklyRecordV1[]) {
+  const recordIds = new Set<string>();
+  const sourceEventIds = new Set<string>();
+  return records.filter((record) => {
+    if (recordIds.has(record.id)) return false;
+    if (record.sourceEventId !== null && sourceEventIds.has(record.sourceEventId)) return false;
+    recordIds.add(record.id);
+    if (record.sourceEventId !== null) sourceEventIds.add(record.sourceEventId);
+    return true;
+  });
 }
 
 function freezeAllocation(recordId: string, start: Date, end: Date, seconds: number): WeeklyAllocation {

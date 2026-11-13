@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   allocateRecordToWeeks,
   buildJournalEntries,
+  buildWeeklyJournalEntries,
   buildWeeklySettlement,
   isBalancedWeeklyEntry,
   weekBoundsForTimestamp,
@@ -17,7 +18,7 @@ function record(
   id: string,
   activeSeconds: number,
   disposition: "expense" | "asset" | "work-in-progress" | "unclassified",
-  category: "壁打ち" | "文章作成" | null,
+  category: "相談" | "壁打ち" | "文章作成" | "情報収集" | "学習" | "その他" | null,
   recordedAt = localTimestamp(2026, 10, 10, 12),
 ) {
   return buildManualWeeklyRecord({
@@ -75,10 +76,63 @@ test("two manual records produce exact weekly totals and balanced journals", () 
   assert.equal(settlement.trialBalance.isBalanced, true);
   assert.equal(settlement.statement.isBalanced, true);
   assert.equal(settlement.statement.accumulatedTimeLossSeconds, 720);
+  assert.equal(settlement.balanceSheet.debitSeconds, 1800);
+  assert.equal(settlement.balanceSheet.creditSeconds, 1800);
+  assert.equal(settlement.profitAndLoss.totalExpenseSeconds, 720);
+  assert.equal(settlement.profitAndLoss.expenses.find((line) => line.account === "思考探究費")?.seconds, 720);
   assert.equal(settlement.analysis.notConnectedCount, 2);
   assert.equal(settlement.analysis.notEvaluatedCount, 2);
   assert.ok([expense, asset].flatMap((item) => buildJournalEntries(item)).every(isBalancedWeeklyEntry));
   assert.equal(new Set(settlement.journalEntryIds).size, settlement.journalEntryIds.length);
+});
+
+test("Level 1 no-AI records do not create time journals", () => {
+  const noAi = buildManualWeeklyRecord({
+    id: "level-1",
+    recordedAt: localTimestamp(2026, 10, 10, 12),
+    activeSeconds: 720,
+    aiService: "other",
+    privacy: "time-only",
+    activityCategory: "学習",
+    accountingDisposition: "unclassified",
+    analysisApplicable: false,
+  }).record;
+  const settlement = buildWeeklySettlement([noAi], new Date(2026, 10, 12));
+  assert.equal(settlement.totals.recordSeconds, 0);
+  assert.equal(settlement.totals.recordCount, 0);
+  assert.deepEqual(buildJournalEntries(noAi), []);
+});
+
+test("duplicate record and source IDs are not counted twice", () => {
+  const first = { ...record("first", 720, "expense", "壁打ち"), sourceEventId: "source-1" };
+  const duplicateId = { ...first };
+  const duplicateSource = { ...record("second", 720, "expense", "壁打ち"), sourceEventId: "source-1" };
+  const settlement = buildWeeklySettlement([first, duplicateId, duplicateSource], new Date(2026, 10, 12));
+  assert.equal(settlement.totals.recordSeconds, 720);
+  assert.equal(settlement.totals.recordCount, 1);
+});
+
+test("all six user-selected expense categories map to their fixed accounts", () => {
+  const cases = [
+    ["相談", "相談活動費"],
+    ["壁打ち", "思考探究費"],
+    ["文章作成", "成果物利用費"],
+    ["情報収集", "情報収集費"],
+    ["学習", "学習活動費"],
+    ["その他", "その他AI利用費"],
+  ] as const;
+  for (const [category, account] of cases) {
+    const entries = buildJournalEntries(record(`expense-${category}`, 60, "expense", category));
+    assert.equal(entries[1].lines[0].account, account);
+  }
+});
+
+test("manual and measured time sources remain distinct in journals", () => {
+  const manual = record("manual-source", 60, "expense", "壁打ち");
+  const measured = { ...record("measured-source", 90, "expense", "壁打ち"), timeSource: "measured" as const };
+  const entries = buildWeeklyJournalEntries([manual, measured], new Date(2026, 10, 12));
+  assert.equal(entries.filter((entry) => entry.timeSource === "manual").length, 2);
+  assert.equal(entries.filter((entry) => entry.timeSource === "measured").length, 2);
 });
 
 test("month and year boundaries do not change Monday-based selection", () => {
