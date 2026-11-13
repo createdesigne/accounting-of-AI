@@ -5,7 +5,13 @@ import { loadWeeklyRecordStore, WEEKLY_RECORDS_STORAGE_KEY, type WeeklyRecordSto
 import type { AccountingDisposition, WeeklyTimeSource } from "../weeklyData.ts";
 import "./weeklyDashboardScreen.css";
 
-export function WeeklyDashboardScreen({ onOpenRecords }: { onOpenRecords: () => void }) {
+export function WeeklyDashboardScreen({
+  onOpenRecords,
+  onOpenReflection,
+}: {
+  onOpenRecords: () => void;
+  onOpenReflection: (anchor: Date) => void;
+}) {
   const [anchor, setAnchor] = useState(() => new Date());
   const [store, setStore] = useState<WeeklyRecordStoreV1>(() => emptyOrLoadedStore());
   const [loadError, setLoadError] = useState("");
@@ -128,7 +134,10 @@ export function WeeklyDashboardScreen({ onOpenRecords }: { onOpenRecords: () => 
         </div>}
       </section>
 
-      <button className="weekly-dashboard-record-button" type="button" onClick={onOpenRecords}>課題設定・手入力を開く</button>
+      <div className="weekly-dashboard-actions">
+        <button className="weekly-dashboard-record-button reflection" type="button" onClick={() => onOpenReflection(anchor)}>この週の振り返りを開く</button>
+        <button className="weekly-dashboard-record-button" type="button" onClick={onOpenRecords}>課題設定・手入力を開く</button>
+      </div>
     </div>
   );
 }

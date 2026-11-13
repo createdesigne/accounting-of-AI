@@ -1,0 +1,350 @@
+.weekly-reflection {
+  gap: 18px;
+}
+
+.weekly-reflection-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px;
+  border-radius: 24px;
+  color: #f8fafc;
+  background: linear-gradient(135deg, #164e63, #0e7490 58%, #0891b2);
+  box-shadow: 0 18px 44px rgba(14, 116, 144, 0.2);
+}
+
+.weekly-reflection-hero h2,
+.weekly-reflection-hero p {
+  margin: 0;
+}
+
+.weekly-reflection-hero h2 {
+  margin: 5px 0 8px;
+}
+
+.weekly-reflection-hero > span {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 800;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.weekly-reflection-panel {
+  padding: 22px;
+  border: 1px solid #cffafe;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
+}
+
+.weekly-reflection-preparation {
+  padding: 15px 17px;
+  border: 1px solid #a5f3fc;
+  border-radius: 16px;
+  color: #155e75;
+  background: #ecfeff;
+}
+
+.weekly-reflection-preparation p {
+  margin: 5px 0 0;
+  line-height: 1.6;
+}
+
+.weekly-reflection-panel.previous-challenge {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
+  gap: 20px;
+  align-items: center;
+  background: #ecfeff;
+}
+
+.weekly-reflection-panel h3,
+.weekly-reflection-panel p {
+  margin: 0;
+}
+
+.weekly-reflection-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weekly-reflection-heading h3,
+.weekly-reflection-heading p {
+  margin: 0;
+}
+
+.weekly-reflection-heading > strong {
+  color: #0e7490;
+}
+
+.weekly-reflection-note {
+  margin-top: 10px !important;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.65;
+}
+
+.weekly-reflection-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  margin-top: 18px;
+}
+
+.weekly-reflection-fields label {
+  display: grid;
+  gap: 8px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 800;
+}
+
+.weekly-reflection-fields textarea {
+  min-height: 128px;
+  padding: 12px 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 13px;
+  resize: vertical;
+  color: #0f172a;
+  background: #f8fafc;
+  font: inherit;
+  line-height: 1.6;
+}
+
+.weekly-reflection-fields textarea:focus {
+  border-color: #0891b2;
+  outline: 3px solid rgba(8, 145, 178, 0.12);
+}
+
+.weekly-reflection-fields textarea:disabled {
+  color: #64748b;
+  border-color: #e2e8f0;
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+
+.weekly-reflection-activities {
+  display: grid;
+  gap: 11px;
+  margin-top: 18px;
+}
+
+.weekly-reflection-activities > label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 15px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  cursor: pointer;
+  background: #f8fafc;
+}
+
+.weekly-reflection-activities > label.selected {
+  border-color: #22d3ee;
+  background: #ecfeff;
+}
+
+.weekly-reflection-activities > label.disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.weekly-reflection-activities input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: #0891b2;
+}
+
+.weekly-reflection-activity-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.weekly-reflection-activity-copy > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.weekly-reflection-activity-copy small {
+  color: #64748b;
+  overflow-wrap: anywhere;
+}
+
+.weekly-reflection-activity-copy p {
+  margin-top: 4px;
+  color: #334155;
+}
+
+.weekly-reflection-empty {
+  margin-top: 16px !important;
+  padding: 18px;
+  border-radius: 14px;
+  color: #64748b;
+  text-align: center;
+  background: #f8fafc;
+}
+
+.weekly-reflection-missing {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 14px;
+  border-radius: 14px;
+  background: #fff7ed;
+}
+
+.weekly-reflection-missing h4 {
+  margin: 0;
+  color: #9a3412;
+}
+
+.weekly-reflection-missing > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: #7c2d12;
+  font-size: 0.84rem;
+}
+
+.weekly-reflection-missing button {
+  padding: 6px 9px;
+  border: 1px solid #fdba74;
+  border-radius: 9px;
+  color: #9a3412;
+  background: #fff;
+}
+
+.weekly-reflection-task-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 11px;
+  margin-top: 16px;
+}
+
+.weekly-reflection-task-list article {
+  display: grid;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 15px;
+  background: #f8fafc;
+}
+
+.weekly-reflection-task-list article > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.weekly-reflection-task-list article > div span {
+  flex: 0 0 auto;
+  color: #0e7490;
+  font-weight: 800;
+}
+
+.weekly-reflection-task-list small {
+  color: #64748b;
+}
+
+.weekly-reflection-context {
+  padding: 15px 17px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  color: #475569;
+  background: #eff6ff;
+}
+
+.weekly-reflection-context p {
+  margin: 4px 0;
+}
+
+.weekly-reflection-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px;
+}
+
+.weekly-reflection-actions button {
+  min-height: 44px;
+  padding: 11px 15px;
+  border-radius: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.weekly-reflection-actions .secondary {
+  color: #0e7490;
+  border: 1px solid #67e8f9;
+  background: #ecfeff;
+}
+
+.weekly-reflection-actions .primary {
+  color: #fff;
+  border: 1px solid #0891b2;
+  background: #0891b2;
+}
+
+.weekly-reflection-actions .primary:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.weekly-reflection-alert {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+}
+
+.weekly-reflection-alert.error {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.weekly-reflection-alert.success {
+  color: #166534;
+  background: #f0fdf4;
+}
+
+@media (max-width: 720px) {
+  .weekly-reflection-fields,
+  .weekly-reflection-panel.previous-challenge,
+  .weekly-reflection-task-list {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 390px) {
+  .weekly-reflection-hero,
+  .weekly-reflection-heading,
+  .weekly-reflection-activity-copy > span {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .weekly-reflection-panel,
+  .weekly-reflection-hero {
+    padding: 17px;
+    border-radius: 18px;
+  }
+
+  .weekly-reflection-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .weekly-reflection-missing > div {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

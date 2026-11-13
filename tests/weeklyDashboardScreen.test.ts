@@ -5,13 +5,15 @@ import test from "node:test";
 const screen = readFileSync(new URL("../src/weekly/WeeklyDashboardScreen.tsx", import.meta.url), "utf8");
 const workspace = readFileSync(new URL("../src/weekly/WeeklyWorkspaceScreen.tsx", import.meta.url), "utf8");
 
-test("weekly workspace keeps dashboard, manual records and settlement in separated components", () => {
+test("weekly workspace keeps dashboard, manual records, settlement and reflection in separated components", () => {
   assert.match(workspace, /WeeklyDashboardScreen/);
   assert.match(workspace, /WeeklyManualScreen/);
   assert.match(workspace, /WeeklySettlementScreen/);
+  assert.match(workspace, /WeeklyReflectionScreen/);
   assert.match(workspace, /週次ダッシュボード/);
   assert.match(workspace, /課題設定・手入力/);
   assert.match(workspace, /週次仕訳・決算/);
+  assert.match(workspace, /今週の振り返り/);
 });
 
 test("dashboard exposes week navigation and required factual sections", () => {

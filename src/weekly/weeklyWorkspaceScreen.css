@@ -5,12 +5,18 @@
 
 .weekly-workspace-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 6px;
   padding: 5px;
   border: 1px solid #dbeafe;
   border-radius: 15px;
   background: rgba(239, 246, 255, 0.9);
+}
+
+@media (max-width: 720px) {
+  .weekly-workspace-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 390px) {

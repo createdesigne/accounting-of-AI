@@ -307,6 +307,18 @@
   background: #2563eb;
 }
 
+.weekly-dashboard-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weekly-dashboard-record-button.reflection {
+  color: #0e7490;
+  border-color: #67e8f9;
+  background: #ecfeff;
+}
+
 .weekly-dashboard-error {
   margin: 0;
   padding: 12px;
@@ -318,6 +330,9 @@
 }
 
 @media (max-width: 370px) {
+  .weekly-dashboard-actions {
+    grid-template-columns: 1fr;
+  }
   .weekly-dashboard-hero,
   .weekly-dashboard-panel {
     padding: 15px;
