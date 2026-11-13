@@ -1,5 +1,6 @@
 const WEB_APP_URLS = {
-  production: "https://createdesigne.github.io/accounting-of-AI/",
+  production: "https://accounting-of-ai.vercel.app/accounting-of-AI/",
+  legacy: "https://createdesigne.github.io/accounting-of-AI/",
   preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
   local: "http://localhost:5173/accounting-of-AI/",
 };
@@ -30,7 +31,7 @@ button.addEventListener("click", async () => {
 
     const rawConversation = normalizeConversation(extracted?.result, tab);
     const url = new URL(WEB_APP_URLS[destination.value] || WEB_APP_URLS.production);
-    // A fragment is read by the app; conversation text is not sent to Pages in the HTTP URL.
+    // A fragment is read by the app; conversation text is not sent to the server in the HTTP URL.
     url.hash = new URLSearchParams({ draft: JSON.stringify(rawConversation) }).toString();
     if (url.href.length > 1500000) throw new Error("会話が長すぎるため送れません。短い会話でお試しください。");
 

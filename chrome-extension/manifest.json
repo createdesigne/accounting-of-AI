@@ -1,9 +1,13 @@
 {
   "manifest_version": 3,
   "name": "AI Thought Receipt Bridge",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "AI conversation pages can be sent to the thought receipt web app.",
-  "permissions": ["activeTab", "scripting", "tabs"],
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "tabs"
+  ],
   "action": {
     "default_title": "思考レシート化する",
     "default_popup": "popup.html"
