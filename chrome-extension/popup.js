@@ -1,4 +1,5 @@
 const WEB_APP_URLS = {
+  vercel: "https://accounting-of-ai.vercel.app/accounting-of-AI/",
   production: "https://createdesigne.github.io/accounting-of-AI/",
   preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
   local: "http://localhost:5173/accounting-of-AI/",

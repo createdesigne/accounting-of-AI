@@ -14,7 +14,7 @@ fs.mkdirSync(output, { recursive: true });
   let mode = 'success'; let calls = 0;
   const testKey = 'not-a-real-key-for-browser-tests';
   const proposedText = 'テスト応答：体験の流れと展示で伝える文章を整理した。';
-  const provider = createGeminiProvider({ apiKey: testKey, model: 'gemini-test-model', fetchImpl: async (_url, options) => {
+  const fetchImpl = async (_url, options) => {
     calls++;
     await new Promise((resolve, reject) => {
       const timer = setTimeout(resolve, mode === 'slow' ? 1500 : 200);
@@ -22,8 +22,15 @@ fs.mkdirSync(output, { recursive: true });
     });
     return mode === 'quota' ? Response.json({ error: { message: 'private upstream message' } }, { status: 429 })
       : Response.json({ id: 'test-response', status: 'completed', steps: [{ type: 'model_output', content: [{ type: 'text', text: proposedText }] }] });
-  } });
-  const server = createAiServer({ provider });
+  };
+  let server;
+  if (process.env.SERVER_ADAPTER === 'vercel') {
+    const { createServer } = require('node:http');
+    const { createVercelHandler } = await import(pathToFileURL(path.resolve(__dirname, '../../server/vercel.mjs')));
+    server = createServer(createVercelHandler({ AI_ENABLED: 'true', GEMINI_API_KEY: testKey, GEMINI_MODEL: 'gemini-test-model', AI_ALLOWED_ORIGINS: new URL(base).origin }, { fetchImpl }));
+  } else {
+    server = createAiServer({ provider: createGeminiProvider({ apiKey: testKey, model: 'gemini-test-model', fetchImpl }) });
+  }
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(8787, '127.0.0.1', resolve); });
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
   try {
@@ -107,7 +114,7 @@ fs.mkdirSync(output, { recursive: true });
       assert.equal(request.headers['x-goog-api-key'], undefined);
     }
     assert.deepEqual(errors, []);
-    console.log('PASS: browser → Vite proxy → server → real SDK with mocked Interactions; opt-in send, loading, preview/discard/apply, no automatic storage, save without duplicates, other definitions preserved, quota/cancel/stale-response/empty/length checks, 320–768px; no browser API key.');
+    console.log(`PASS (${process.env.SERVER_ADAPTER || 'local'}): browser → Vite proxy → server → real SDK with mocked Interactions; opt-in send, loading, preview/discard/apply, no automatic storage, save without duplicates, other definitions preserved, quota/cancel/stale-response/empty/length checks, 320–768px; no browser API key.`);
   } finally {
     await browser.close();
     await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });

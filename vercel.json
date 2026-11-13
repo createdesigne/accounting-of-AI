@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "vite",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm build:vercel",
+  "outputDirectory": "dist",
+  "functions": {
+    "api/ai/*.mjs": { "maxDuration": 30 }
+  },
+  "redirects": [
+    { "source": "/", "destination": "/accounting-of-AI/", "permanent": false },
+    { "source": "/accounting-of-AI", "destination": "/accounting-of-AI/", "permanent": false }
+  ],
+  "rewrites": [
+    { "source": "/accounting-of-AI/:path*", "destination": "/:path*" }
+  ]
+}

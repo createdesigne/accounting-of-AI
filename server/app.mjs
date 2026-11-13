@@ -7,14 +7,14 @@ const ERROR_STATUS = {
   CONTENT_BLOCKED: 422, OUTPUT_TRUNCATED: 502, INVALID_OUTPUT: 502, PROVIDER_ERROR: 502, TIMEOUT: 504,
 };
 
-export function createAiServer({ provider = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
+export function createAiHandler({ provider = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000 || !Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 10) throw new AiError('INVALID_CONFIG');
   if (provider !== null && typeof provider?.rewrite !== 'function') throw new AiError('INVALID_CONFIG');
   if (!Array.isArray(allowedOrigins) || allowedOrigins.some(origin => {
     try { const u = new URL(origin); return u.origin !== origin || !['http:', 'https:'].includes(u.protocol); } catch { return true; }
   })) throw new AiError('INVALID_CONFIG');
   let active = 0;
-  const server = createServer(async (req, res) => {
+  return async (req, res) => {
     const reply = (code, data) => {
       if (res.destroyed || res.writableEnded) return;
       res.writeHead(code ? ERROR_STATUS[code] : 200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -66,7 +66,11 @@ export function createAiServer({ provider = null, allowedOrigins = ['http://127.
       reply(controller.signal.aborted ? 'TIMEOUT'
         : error instanceof AiError && Object.hasOwn(ERROR_STATUS, error.code) ? error.code : 'PROVIDER_ERROR');
     } finally { clearTimeout(timer); res.off('close', disconnect); active--; }
-  });
+  };
+}
+
+export function createAiServer(options = {}) {
+  const server = createServer(createAiHandler(options));
   server.requestTimeout = 15000;
   server.headersTimeout = 10000;
   return server;

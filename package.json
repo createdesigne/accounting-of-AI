@@ -3,10 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@9.15.9",
+  "engines": { "node": "22.x" },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "dev:ai": "node scripts/dev-ai.mjs",
     "build": "tsc && vite build",
+    "build:vercel": "node scripts/build-vercel.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "ai:server": "node --env-file-if-exists=server/.env server/index.mjs",
     "ai:setup": "node scripts/setup-gemini-env.mjs"
