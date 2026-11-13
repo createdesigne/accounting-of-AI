@@ -10,8 +10,16 @@ import {
   saveWeeklyTask,
   WEEKLY_CONVERSATIONS_STORAGE_KEY,
   WEEKLY_RECORDS_STORAGE_KEY,
+  type WeeklyConversationStoreV1,
   type WeeklyRecordStoreV1,
 } from "../weeklyStore.ts";
+import {
+  loadWeeklyAnalysisStore,
+  resolveWeeklyAnalysisState,
+  WEEKLY_ANALYSES_STORAGE_KEY,
+  type WeeklyAnalysisDisplayState,
+  type WeeklyAnalysisStoreV1,
+} from "../weeklyAnalysisStore.ts";
 import "./weeklyManualScreen.css";
 
 const categories = ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"] as const;
@@ -67,6 +75,8 @@ const emptyActivity = (): ActivityDraft => ({
 
 export function WeeklyManualScreen() {
   const [store, setStore] = useState<WeeklyRecordStoreV1>(() => safeLoadStore());
+  const [conversationStore, setConversationStore] = useState<WeeklyConversationStoreV1>(() => safeLoadConversationStore());
+  const [analysisStore, setAnalysisStore] = useState<WeeklyAnalysisStoreV1>(() => safeLoadAnalysisStore());
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTask);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(emptyActivity);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -77,6 +87,10 @@ export function WeeklyManualScreen() {
   const [loadError, setLoadError] = useState("");
 
   const tasksById = useMemo(() => new Map(store.tasks.map((task) => [task.id, task])), [store.tasks]);
+  const conversationsByRecord = useMemo(
+    () => new Map(conversationStore.conversations.map((conversation) => [conversation.recordId, conversation])),
+    [conversationStore.conversations],
+  );
   const selectedTask = activityDraft.taskId ? tasksById.get(activityDraft.taskId) ?? null : null;
   const selectedTaskIsNoAi = selectedTask?.plannedAiasLevel === 1;
   const records = useMemo(
@@ -87,9 +101,12 @@ export function WeeklyManualScreen() {
   useEffect(() => {
     const refresh = (event?: StorageEvent) => {
       if (event && event.key !== WEEKLY_RECORDS_STORAGE_KEY
-        && event.key !== WEEKLY_CONVERSATIONS_STORAGE_KEY && event.key !== null) return;
+        && event.key !== WEEKLY_CONVERSATIONS_STORAGE_KEY
+        && event.key !== WEEKLY_ANALYSES_STORAGE_KEY && event.key !== null) return;
       try {
         setStore(loadWeeklyRecordStore());
+        setConversationStore(loadWeeklyConversationStore());
+        setAnalysisStore(loadWeeklyAnalysisStore());
         setLoadError("");
       } catch (error) {
         setLoadError(messageOf(error, "週次記録を読み込めませんでした。保存値は変更していません。"));
@@ -234,6 +251,7 @@ export function WeeklyManualScreen() {
         } : null,
       });
       setStore(result.store);
+      setConversationStore(loadWeeklyConversationStore());
       const wasEditing = editingRecordId !== null;
       setEditingRecordId(null);
       setActivityDraft(emptyActivity());
@@ -248,7 +266,7 @@ export function WeeklyManualScreen() {
   }
 
   function editRecord(record: WeeklyRecordV1) {
-    const contents = loadWeeklyConversationStore().conversations.find((item) => item.recordId === record.id);
+    const contents = conversationsByRecord.get(record.id);
     setEditingRecordId(record.id);
     setActivityDraft({
       taskId: record.taskId ?? "",
@@ -271,6 +289,7 @@ export function WeeklyManualScreen() {
     setBusy(true);
     try {
       setStore(await deleteWeeklyRecord(record.id));
+      setConversationStore(loadWeeklyConversationStore());
       if (editingRecordId === record.id) cancelRecordEdit();
       setActivityMessage("活動記録を削除しました。");
     } catch (error) {
@@ -362,13 +381,14 @@ export function WeeklyManualScreen() {
         {records.length === 0 ? <p className="weekly-empty">実データはまだありません。固定サンプルは集計していません。</p> : <div className="weekly-record-list">{records.map((record) => {
           const task = record.taskId ? tasksById.get(record.taskId) : undefined;
           const noAi = task?.plannedAiasLevel === 1 || record.analysisStatus === "not-applicable";
+          const analysisState = resolveWeeklyAnalysisState(record, analysisStore, conversationsByRecord.get(record.id) ?? null);
           return <article className="weekly-record-card" key={record.id}>
             <div className="weekly-record-top"><div><time>{formatDateTime(record.recordedAt)}</time><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong></div><span>{noAi ? "AI不使用" : `${record.activeSeconds}秒`}</span></div>
             <div className="weekly-tags"><span>{record.activityCategory ?? "未分類"}</span><span>{dispositionLabel(record.accountingDisposition)}</span><span>{record.timeSource === "manual" ? "手入力" : record.timeSource}</span>{task && <span>Level {task.plannedAiasLevel ?? "未設定"}</span>}</div>
             {record.manualNotes?.interactionSummary && <p><b>概要：</b>{record.manualNotes.interactionSummary}</p>}
             {record.manualNotes?.ownThoughts && <p><b>自分の判断：</b>{record.manualNotes.ownThoughts}</p>}
             {record.manualNotes?.discovery && <p><b>発見・学び：</b>{record.manualNotes.discovery}</p>}
-            <div className={`weekly-analysis-state compact${noAi ? " not-applicable" : ""}`}><strong>{noAi ? "AI分析：対象外" : "AI分析：未接続・未評価"}</strong><span>{noAi ? "Level 1として事前設定されたAI不使用課題です。" : "評価値：— / — / —（0点ではありません）"}</span></div>
+            <WeeklyAnalysisPanel state={analysisState} noAi={noAi} />
             <div className="weekly-item-actions"><button type="button" onClick={() => editRecord(record)}>編集</button><button type="button" className="danger" onClick={() => void removeRecord(record)}>削除</button></div>
           </article>;
         })}</div>}
@@ -379,6 +399,58 @@ export function WeeklyManualScreen() {
 
 function safeLoadStore(): WeeklyRecordStoreV1 {
   try { return loadWeeklyRecordStore(); } catch { return Object.freeze({ schemaVersion: 1, records: Object.freeze([]), tasks: Object.freeze([]) }); }
+}
+
+function safeLoadAnalysisStore(): WeeklyAnalysisStoreV1 {
+  try { return loadWeeklyAnalysisStore(); } catch {
+    return Object.freeze({ schemaVersion: 1, entries: Object.freeze([]) });
+  }
+}
+
+function safeLoadConversationStore(): WeeklyConversationStoreV1 {
+  try { return loadWeeklyConversationStore(); } catch {
+    return Object.freeze({ schemaVersion: 1, conversations: Object.freeze([]) });
+  }
+}
+
+function WeeklyAnalysisPanel({ state, noAi }: { state: WeeklyAnalysisDisplayState; noAi: boolean }) {
+  if (noAi || state.analysisStatus === "not-applicable") {
+    return <div className="weekly-analysis-state compact not-applicable"><strong>AI分析：対象外</strong><span>Level 1として事前設定されたAI不使用課題です。</span></div>;
+  }
+  if (state.analysisStatus === "not-connected") {
+    return <div className="weekly-analysis-state compact"><strong>AI分析：未接続・未評価</strong><span>評価値：— / — / —（0点ではありません）</span></div>;
+  }
+  if (state.analysisStatus === "pending") {
+    return <div className="weekly-analysis-state compact"><strong>AI分析：分析待ち</strong><span>本人の入力と会計データは変更しません。</span></div>;
+  }
+  const response = state.response;
+  if (!response) {
+    return <div className="weekly-analysis-state compact"><strong>AI分析：分析失敗</strong><span>結果を読み込めません。本人の入力は保持されています。</span></div>;
+  }
+  const sourceLabel = response.origin === "test-fixture"
+    ? "テスト用分析（実際のGemini分析ではありません）"
+    : "Gemini分析";
+  if (state.analysisStatus === "failed") {
+    return <div className="weekly-analysis-state compact failed"><strong>{sourceLabel}：分析失敗</strong><span>エラー：{response.error?.code ?? "INVALID_OUTPUT"}。本人の入力と会計データは変更していません。</span></div>;
+  }
+  const analysis = response.analysis;
+  if (!analysis) return null;
+  return <div className={`weekly-analysis-state compact complete${response.origin === "test-fixture" ? " fixture" : ""}`}>
+    <strong>{sourceLabel}：分析完了</strong>
+    <span>本人入力とは別の保存領域に保持しています。AIAS Levelの能力評価ではありません。</span>
+    <dl className="weekly-analysis-details">
+      <div><dt>分析上の活動テーマ</dt><dd>{analysis.activityCategory ?? "判定不可"}</dd></div>
+      <div><dt>AIが担った役割</dt><dd>{analysis.aiRole ?? "判定不可"}</dd></div>
+      <div><dt>研究指標</dt><dd>自発性 {scoreLabel(analysis.initiative)}／論理性 {scoreLabel(analysis.reasoning)}／批判的判断 {scoreLabel(analysis.criticalJudgment)}</dd></div>
+      <div><dt>思考の変化</dt><dd>{analysis.thinkingChange ?? "判定不可"}</dd></div>
+      <div><dt>発見・学び</dt><dd>{analysis.discovery ?? "判定不可"}</dd></div>
+    </dl>
+    {analysis.evidence.length > 0 && <div className="weekly-analysis-evidence"><b>分析根拠となる会話箇所</b><ul>{analysis.evidence.map((evidence, index) => <li key={`${evidence.target}:${evidence.messageIndex}:${index}`}>会話 {evidence.messageIndex + 1}：「{evidence.quote}」</li>)}</ul></div>}
+  </div>;
+}
+
+function scoreLabel(value: number | null) {
+  return value === null ? "評価不可" : `${value}`;
 }
 
 function createId(prefix: string) {

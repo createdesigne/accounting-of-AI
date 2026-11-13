@@ -2,6 +2,8 @@
 
 本担当が実装するのは**週次アプリの受け皿**。共同開発者が実装するのは**Gemini API呼び出しと分析**。2人が同じファイルを同時編集しないため、契約を合意するまでは相方のAPI側ファイルに手を加えない。
 
+Phase 6の詳細な送受信案、エラー形式、認証上の未合意事項は [`weekly-analysis-api-contract.md`](./weekly-analysis-api-contract.md) を参照する。既存の `/api/ai/rewrite` は変更せず、将来の `/api/ai/analyze-weekly` を別の境界として扱う。
+
 ## 境界
 
 | 本担当 | Gemini担当 |

@@ -21,6 +21,9 @@ test("the manual screen exposes required advance task and activity fields", () =
   assert.match(screen, /Level 1の課題です。AI利用時間は0秒/);
   assert.match(screen, /AI分析：未接続・未評価/);
   assert.match(screen, /未評価（null）/);
+  assert.match(screen, /テスト用分析（実際のGemini分析ではありません）/);
+  assert.match(screen, /本人入力とは別の保存領域/);
+  assert.match(screen, /分析根拠となる会話箇所/);
 });
 
 test("the weekly UI contains no external analysis call and has a narrow-width layout", () => {
