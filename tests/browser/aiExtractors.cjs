@@ -5,7 +5,14 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const { providers, conversationMarkup } = require('./aiConversationFixtures.cjs');
 const script = fs.readFileSync(process.env.EXTRACTOR_SOURCE || path.resolve(__dirname, '../../chrome-extension/popup.js'), 'utf8');
-const sandbox = vm.createContext({ document: { getElementById: () => ({ addEventListener() {} }) } });
+const popupElement = { addEventListener() {}, value: 'production', textContent: '', disabled: false };
+const sandbox = vm.createContext({
+  document: {
+    getElementById: id => ['trackingStart', 'trackingStop', 'trackingStatus', 'timeLedgerTransfer', 'timeTransferStatus'].includes(id)
+      ? null
+      : popupElement,
+  },
+});
 vm.runInContext(script, sandbox);
 const extractor = vm.runInContext('extractConversationFromPage.toString()', sandbox);
 (async () => {

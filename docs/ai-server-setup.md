@@ -74,7 +74,7 @@ vercel git connect https://github.com/createdesigne/accounting-of-AI.git --proje
 
 ### 旧サイトと帳簿
 
-ブラウザの帳簿はURLのオリジン単位で保存される。GitHub PagesからVercelへ移しても以前の帳簿は自動転送されない。旧サイト https://createdesigne.github.io/accounting-of-AI/ を残し、Chrome拡張v0.3.2では「旧サイト（以前の帳簿）」も選択できる。新しい既定の送信先はVercel本番。旧サイトにはVercel APIを接続していない。端末間同期・ユーザーログイン・サーバー側の帳簿保存は未実装。
+ブラウザの帳簿はURLのオリジン単位で保存される。GitHub PagesからVercelへ移しても以前の帳簿は自動転送されない。旧サイト https://createdesigne.github.io/accounting-of-AI/ を残し、Chrome拡張v0.4.5では「旧サイト（以前の帳簿）」も選択できる。新しい既定の送信先はVercel本番。旧サイトにはVercel APIを接続していない。端末間同期・ユーザーログイン・サーバー側の帳簿保存は未実装。
 
 ## 他のデプロイ先
 

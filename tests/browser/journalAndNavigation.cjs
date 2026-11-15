@@ -18,7 +18,13 @@ function fixture(name) {
   }
   visit(tree); return JSON.parse(JSON.stringify(result));
 }
-const sample = fixture('sampleScannedReceipt');
+const now = new Date();
+const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+const sample = { ...fixture('sampleScannedReceipt'), date: `${currentMonth}-01` };
+const receiptSeed = fixture('initialReceipts').map((receipt, index) => ({
+  ...receipt,
+  date: `${currentMonth}-${String(Math.min(index + 2, 28)).padStart(2, '0')}`,
+}));
 const ledger = fixture('sampleThinkingLedgerReceipts');
 const categories = fixture('journalCategories');
 const prefix = new URL(base).pathname.startsWith('/accounting-of-AI/preview/') ? 'preview-month-ledger:' : '';
@@ -29,18 +35,26 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
   const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', args: ['--no-sandbox'] });
   try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
-    await context.addInitScript(({ ledger, ledgerKey }) => { if (localStorage.getItem(ledgerKey) === null) localStorage.setItem(ledgerKey, JSON.stringify(ledger)); }, { ledger, ledgerKey });
+    await context.addInitScript(({ ledger, ledgerKey, receiptSeed, key }) => {
+      if (localStorage.getItem(ledgerKey) === null) localStorage.setItem(ledgerKey, JSON.stringify(ledger));
+      if (localStorage.getItem(key) === null) localStorage.setItem(key, JSON.stringify(receiptSeed));
+    }, { ledger, ledgerKey, receiptSeed, key });
     const p = await context.newPage(); const errors = []; p.on('pageerror', e => errors.push(e.message));
     p.setDefaultTimeout(10000);
     await p.goto(base);
     const nav = p.getByRole('navigation', { name: '画面切り替え' });
-    const goHome = () => nav.getByRole('button', { name: 'レシート', exact: true }).click();
+    const goHome = () => nav.getByRole('button', { name: 'ホーム', exact: true }).click();
     const read = () => p.evaluate(key => JSON.parse(localStorage.getItem(key)), key);
+    async function openDevTools(page = p) {
+      const tools = page.locator('.extension-import-card details.dev-tools').first();
+      if (!(await tools.evaluate(element => element.open))) await tools.locator('summary').click();
+    }
     async function preview() {
-      await goHome(); await p.getByRole('button', { name: '思考レシートを読み取る' }).click();
+      await goHome(); await openDevTools();
+      await p.getByRole('button', { name: 'サンプルレシートを読み込む', exact: true }).click();
       const scanBox = await p.locator('.reader-modal').boundingBox();
       assert.ok(scanBox.y >= 0 && scanBox.y + scanBox.height <= p.viewportSize().height);
-      await p.getByRole('button', { name: 'サンプルレシートを読み込む', exact: true }).click();
+      await p.locator('.reader-modal').getByRole('button', { name: 'サンプルレシートを読み込む', exact: true }).click();
       await p.getByRole('heading', { name: '読み取り内容の確認', exact: true }).waitFor();
       const confirmBox = await p.locator('.reader-modal').boundingBox();
       assert.ok(confirmBox.y >= 0 && confirmBox.y + confirmBox.height <= p.viewportSize().height);
@@ -58,7 +72,7 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
       }
     }
     await nav.waitFor(); await goHome();
-    await p.getByRole('button', { name: '思考レシートを読み取る' }).waitFor();
+    await p.getByText('今月のAI実測利用時間', { exact: true }).waitFor();
     const before = await read();
     await preview(); assert.equal(await p.getByRole('slider').count(), 5);
     for (const category of categories) {
@@ -79,7 +93,8 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
     await p.locator('.confirm-journal').scrollIntoViewIfNeeded();
     await p.screenshot({ path: path.join(output, 'journal-sliders.png') });
     await p.getByRole('button', { name: '思考帳簿に保存', exact: true }).click();
-    assert.equal(await p.getByRole('dialog').count(), 0);
+    await p.locator('.reader-backdrop[role="dialog"]').waitFor({ state: 'detached' });
+    assert.equal(await p.locator('.reader-backdrop[role="dialog"]').count(), 0);
     let saved = await read(); assert.equal(saved.length, before.length + 1);
     const added = saved.find(r => r.id === sample.id);
     for (let i = 0; i < categories.length; i++) {
@@ -99,20 +114,20 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
     assert.equal(await p.getByRole('slider', { name: 'AI借入', exact: true }).inputValue(), '1');
     await p.getByRole('slider', { name: 'AI借入', exact: true }).press('End');
     await p.getByRole('button', { name: '思考帳簿に保存', exact: true }).click();
+    await p.locator('.reader-backdrop[role="dialog"]').waitFor({ state: 'detached' });
     saved = await read(); assert.equal(saved.length, before.length + 1);
     assert.equal(saved.filter(r => r.id === sample.id).length, 1); assert.equal(saved.find(r => r.id === sample.id).journal.aiBorrowing.amount, 5);
     assert.equal(await p.locator('.journal-summary-card > strong').textContent(), String(journalTotal(before) + 19));
-    await goHome(); const timeBefore = await p.locator('.hero-total > span').textContent();
-    await p.locator('.hero-total').click();
-    await p.getByRole('dialog', { name: 'AIスクリーンタイム', exact: true }).waitFor();
+    await goHome();
+    const receiptTimeMetric = p.locator('.metric-card').filter({ hasText: 'レシート記載時間（目安）' });
+    const timeBefore = await receiptTimeMetric.locator('strong').textContent();
+    await receiptTimeMetric.click();
+    await p.getByRole('dialog', { name: 'レシート記載時間（目安）', exact: true }).waitFor();
     assert.equal(await p.locator('.screen-time-total').textContent(), timeBefore);
-    assert.ok(await p.locator('.monthly-bars .month-col').count() >= 4);
+    assert.equal(await p.locator('.monthly-bars .month-col').count(), 1);
     for (const width of [320, 390, 768]) {
       await p.setViewportSize({ width, height: 844 });
       assert.ok(await p.locator('.reader-modal').evaluate(e => e.scrollWidth <= e.clientWidth));
-      const graph = await p.locator('.monthly-bars').boundingBox();
-      const note = await p.locator('.screen-time-chart > p').boundingBox();
-      assert.ok(graph.y + graph.height <= note.y);
     }
     await p.setViewportSize({ width: 390, height: 844 });
     await p.keyboard.press('Escape'); assert.equal(await p.getByRole('dialog').count(), 0);
@@ -123,7 +138,7 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
       await p.getByRole('button', { name: '一覧に戻る', exact: true }).first().click();
       await p.getByRole('button', { name: 'レシートに戻る', exact: true }).first().click();
     }
-    await goHome(); await p.getByRole('button', { name: 'サンプル会話を読み込む', exact: true }).click();
+    await goHome(); await openDevTools(); await p.getByRole('button', { name: 'サンプル会話を読み込む', exact: true }).click();
     await p.getByLabel('相談テーマ', { exact: true }).waitFor(); assert.deepEqual(await read(), saved);
     await p.getByRole('button', { name: 'レシートを発行する', exact: true }).click();
     await p.getByAltText('思考レシート復元用QRコード').waitFor();
@@ -138,6 +153,7 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
     await restored.getByRole('button', { name: '帳簿に保存する', exact: true }).waitFor();
     assert.deepEqual(await restored.evaluate(ledgerKey => JSON.parse(localStorage.getItem(ledgerKey)), ledgerKey), ledger);
     await restored.getByRole('button', { name: '帳簿に保存する', exact: true }).click();
+    await restored.getByRole('status').filter({ hasText: '帳簿に保存しました。' }).waitFor();
     assert.equal(await restored.evaluate(ledgerKey => JSON.parse(localStorage.getItem(ledgerKey)).length, ledgerKey), ledger.length + 1);
     if (prefix) {
       assert.equal(await p.evaluate(() => localStorage.getItem('thinkingLedger')), null);
@@ -147,9 +163,12 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
     assert.deepEqual(errors, []); await context.close();
 
     const blocked = await browser.newContext(); const q = await blocked.newPage(); await q.goto(base);
-    await q.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: 'レシート', exact: true }).click();
-    await q.getByRole('button', { name: '思考レシートを読み取る' }).click();
+    await q.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: 'ホーム', exact: true }).click();
+    await q.getByText('今月の思考レシートはまだありません。', { exact: false }).waitFor();
+    assert.equal(await q.evaluate(key => localStorage.getItem(key), key), null);
+    await openDevTools(q);
     await q.getByRole('button', { name: 'サンプルレシートを読み込む', exact: true }).click();
+    await q.locator('.reader-modal').getByRole('button', { name: 'サンプルレシートを読み込む', exact: true }).click();
     const storedBefore = await q.evaluate(key => localStorage.getItem(key), key);
     await q.getByRole('slider', { name: 'AI借入', exact: true }).focus(); await q.keyboard.press('Home');
     await q.evaluate(key => { const original = Storage.prototype.setItem; window.restoreTestWrites = () => Storage.prototype.setItem = original; Storage.prototype.setItem = function(k, v) { if (k === key) throw new DOMException('Full', 'QuotaExceededError'); return original.call(this, k, v); }; }, key);
@@ -158,6 +177,7 @@ const journalTotal = receipts => receipts.reduce((sum, receipt) => sum + categor
     assert.equal(await q.getByRole('slider', { name: 'AI借入', exact: true }).inputValue(), '1');
     assert.equal(await q.evaluate(key => localStorage.getItem(key), key), storedBefore);
     await q.evaluate(() => window.restoreTestWrites()); await q.getByRole('button', { name: '思考帳簿に保存', exact: true }).click();
+    await q.locator('.reader-backdrop[role="dialog"]').waitFor({ state: 'detached' });
     assert.equal(await q.evaluate(({ key, id }) => JSON.parse(localStorage.getItem(key)).find(r => r.id === id)?.journal.aiBorrowing.amount, { key, id: sample.id }), 1);
     await blocked.close();
     console.log('PASS: all five 1–5 sliders, keyboard/bounds, staged changes/cancel, save/reload/re-save without duplicates, exact journal totals/tags/details, original samples and other ledger unchanged; home filters/details/time modal; sample conversation/issue/QR restore; print invocation and clipboard failure fallback; 320–768px; quota failure retains draft and retry saves.');

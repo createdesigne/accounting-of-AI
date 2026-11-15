@@ -1,0 +1,336 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  TIME_ACCOUNTS,
+  TimeAccountingError,
+  accountBalanceSeconds,
+  calculateTimeProfitAndLoss,
+  createTimeAccountingLedger,
+  correctAiUsage,
+  effectiveTimeMeasurementSeconds,
+  isBalancedJournalEntry,
+  journalTotals,
+  migrateTimeAccountingLedger,
+  recordAiUsage,
+  recordMonthEndAdjustment,
+  reregisterAiUsage,
+  reverseAiUsage,
+  summarizeTimeMeasurements,
+} from '../src/timeAccounting.ts';
+
+const usage = {
+  entryId: 'entry-use-001',
+  sourceEventId: 'conversation-001',
+  occurredOn: '2026-10-20',
+  actualInputSeconds: 3_600,
+  estimatedSavedSeconds: 10_800,
+};
+
+test('records seconds as balanced AI clearing and time contribution lines', () => {
+  const ledger = recordAiUsage(createTimeAccountingLedger(), usage);
+  assert.equal(ledger.version, 2);
+  assert.equal(ledger.unit, 'second');
+  assert.deepEqual(ledger.entries[0], {
+    id: 'entry-use-001', kind: 'ai-usage', postedOn: '2026-10-20', sourceEventId: 'conversation-001',
+    lines: [
+      { side: 'debit', account: 'AI仮受品', seconds: 3_600, measurement: 'actual-input' },
+      { side: 'credit', account: '時間拠出', seconds: 3_600, measurement: 'actual-input' },
+    ],
+  });
+  assert.deepEqual(journalTotals(ledger.entries[0]), { debitSeconds: 3_600, creditSeconds: 3_600 });
+  assert.equal(isBalancedJournalEntry(ledger.entries[0]), true);
+});
+
+test('keeps the actual usage date separate from a later accounting posting date', () => {
+  const ledger = recordAiUsage(createTimeAccountingLedger(), {
+    ...usage,
+    occurredOn: '2026-10-31',
+    postedOn: '2026-11-01',
+    actualInputSeconds: 61,
+  });
+  assert.equal(ledger.measurements[0].occurredOn, '2026-10-31');
+  assert.equal(ledger.entries[0].postedOn, '2026-11-01');
+  assert.deepEqual(migrateTimeAccountingLedger(ledger), ledger);
+  assert.throws(
+    () => recordAiUsage(createTimeAccountingLedger(), {
+      ...usage, occurredOn: '2026-11-01', postedOn: '2026-10-31',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'INVALID_DATE',
+  );
+});
+
+test('preserves 1, 59, 60 and 61 seconds exactly and keeps every entry balanced', () => {
+  let ledger = createTimeAccountingLedger();
+  for (const seconds of [1, 59, 60, 61]) {
+    ledger = recordAiUsage(ledger, {
+      entryId: `entry-${seconds}`, sourceEventId: `event-${seconds}`,
+      occurredOn: '2026-10-20', actualInputSeconds: seconds,
+    });
+  }
+  assert.deepEqual(ledger.measurements.map(item => item.actualInputSeconds), [1, 59, 60, 61]);
+  assert.deepEqual(ledger.entries.map(entry => journalTotals(entry)), [
+    { debitSeconds: 1, creditSeconds: 1 },
+    { debitSeconds: 59, creditSeconds: 59 },
+    { debitSeconds: 60, creditSeconds: 60 },
+    { debitSeconds: 61, creditSeconds: 61 },
+  ]);
+  assert.ok(ledger.entries.every(isBalancedJournalEntry));
+});
+
+test('appends balanced difference journals for 61→45 and then 45→90 seconds', () => {
+  const recorded = recordAiUsage(createTimeAccountingLedger(), {
+    ...usage, actualInputSeconds: 61,
+  });
+  const reduced = correctAiUsage(recorded, {
+    entryId: 'correction-down', sourceEventId: usage.sourceEventId,
+    postedOn: '2026-10-21', correctedInputSeconds: 45, reason: '休憩時間を除外',
+  });
+  assert.equal(reduced.measurements[0].actualInputSeconds, 61);
+  assert.equal(effectiveTimeMeasurementSeconds(reduced.measurements[0]), 45);
+  assert.deepEqual(reduced.entries[1], {
+    id: 'correction-down', kind: 'usage-correction', postedOn: '2026-10-21',
+    sourceEventId: usage.sourceEventId, correctsEntryId: usage.entryId,
+    effectiveSecondsBefore: 61, effectiveSecondsAfter: 45, correctionReason: '休憩時間を除外',
+    lines: [
+      { side: 'debit', account: '時間拠出', seconds: 16, measurement: 'actual-input' },
+      { side: 'credit', account: 'AI仮受品', seconds: 16, measurement: 'actual-input' },
+    ],
+  });
+  const increased = correctAiUsage(reduced, {
+    entryId: 'correction-up', sourceEventId: usage.sourceEventId,
+    postedOn: '2026-10-22', correctedInputSeconds: 90,
+  });
+  assert.equal(effectiveTimeMeasurementSeconds(increased.measurements[0]), 90);
+  assert.equal(increased.entries[2].correctsEntryId, 'correction-down');
+  assert.deepEqual(increased.entries[2].lines.map((line) => [line.account, line.seconds]), [
+    ['AI仮受品', 45], ['時間拠出', 45],
+  ]);
+  assert.ok(increased.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(increased, TIME_ACCOUNTS.aiClearing), 90);
+  assert.throws(
+    () => correctAiUsage(increased, {
+      entryId: 'unchanged', sourceEventId: usage.sourceEventId,
+      postedOn: '2026-10-23', correctedInputSeconds: 90,
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'NO_CORRECTION_CHANGE',
+  );
+});
+
+test('moves the same seconds to thought exploration expense at month end', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const adjusted = recordMonthEndAdjustment(used, {
+    entryId: 'entry-close-001', sourceEventId: 'conversation-001', postedOn: '2026-10-31',
+  });
+  assert.deepEqual(adjusted.entries[1].lines, [
+    { side: 'debit', account: '思考探究費', seconds: 3_600, measurement: 'actual-input' },
+    { side: 'credit', account: 'AI仮受品', seconds: 3_600, measurement: 'actual-input' },
+  ]);
+  assert.ok(adjusted.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(adjusted, TIME_ACCOUNTS.aiClearing), 0);
+  assert.equal(accountBalanceSeconds(adjusted, TIME_ACCOUNTS.timeContribution), -3_600);
+  assert.deepEqual(calculateTimeProfitAndLoss(adjusted), { thoughtExplorationExpenseSeconds: 3_600 });
+});
+
+test('adds one balanced inverse entry without deleting the original usage', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const reversed = reverseAiUsage(used, {
+    entryId: 'entry-reversal-001', sourceEventId: usage.sourceEventId, postedOn: '2026-10-21',
+  });
+  assert.equal(reversed.entries.length, 2);
+  assert.deepEqual(reversed.entries[0], used.entries[0]);
+  assert.deepEqual(reversed.entries[1], {
+    id: 'entry-reversal-001', kind: 'usage-reversal', postedOn: '2026-10-21',
+    sourceEventId: usage.sourceEventId, reversesEntryId: usage.entryId,
+    lines: [
+      { side: 'debit', account: '時間拠出', seconds: 3_600, measurement: 'actual-input' },
+      { side: 'credit', account: 'AI仮受品', seconds: 3_600, measurement: 'actual-input' },
+    ],
+  });
+  assert.equal(reversed.measurements[0].actualInputSeconds, 3_600);
+  assert.equal(reversed.measurements[0].reversalEntryId, 'entry-reversal-001');
+  assert.ok(reversed.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(reversed, TIME_ACCOUNTS.aiClearing), 0);
+  assert.equal(accountBalanceSeconds(reversed, TIME_ACCOUNTS.timeContribution), 0);
+  assert.throws(
+    () => reverseAiUsage(reversed, {
+      entryId: 'entry-reversal-002', sourceEventId: usage.sourceEventId, postedOn: '2026-10-22',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'ALREADY_REVERSED',
+  );
+});
+
+test('protects a closed period and posts its reversal only after the closing entry', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const adjusted = recordMonthEndAdjustment(used, {
+    entryId: 'entry-close-001', sourceEventId: usage.sourceEventId, postedOn: '2026-10-31',
+  });
+  const snapshot = JSON.stringify(adjusted);
+  assert.throws(
+    () => reverseAiUsage(adjusted, {
+      entryId: 'closed-reversal', sourceEventId: usage.sourceEventId, postedOn: '2026-10-31',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'REVERSAL_IN_CLOSED_PERIOD',
+  );
+  assert.equal(JSON.stringify(adjusted), snapshot);
+  const corrected = reverseAiUsage(adjusted, {
+    entryId: 'open-reversal', sourceEventId: usage.sourceEventId, postedOn: '2026-11-01',
+  });
+  assert.deepEqual(corrected.entries.slice(0, 2), adjusted.entries);
+  assert.equal(corrected.entries[2].postedOn, '2026-11-01');
+  assert.equal(corrected.entries[2].reversesEntryId, usage.entryId);
+});
+
+test('re-registers a reversed usage and permits a later append-only re-cancellation', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  const reversed = reverseAiUsage(used, {
+    entryId: 'reversal-1', sourceEventId: usage.sourceEventId, postedOn: '2026-10-21',
+  });
+  const restored = reregisterAiUsage(reversed, {
+    entryId: 'reregistration-1', sourceEventId: usage.sourceEventId, postedOn: '2026-10-22',
+  });
+  assert.deepEqual(restored.entries.slice(0, 2), reversed.entries);
+  assert.deepEqual(restored.entries[2], {
+    id: 'reregistration-1', kind: 'usage-reregistration', postedOn: '2026-10-22',
+    sourceEventId: usage.sourceEventId, restoresEntryId: 'reversal-1',
+    lines: [
+      { side: 'debit', account: 'AI仮受品', seconds: 3_600, measurement: 'actual-input' },
+      { side: 'credit', account: '時間拠出', seconds: 3_600, measurement: 'actual-input' },
+    ],
+  });
+  assert.deepEqual(restored.measurements[0].correctionEntryIds, ['reversal-1', 'reregistration-1']);
+  assert.equal(accountBalanceSeconds(restored, TIME_ACCOUNTS.aiClearing), 3_600);
+  assert.equal(accountBalanceSeconds(restored, TIME_ACCOUNTS.timeContribution), -3_600);
+  assert.throws(
+    () => reregisterAiUsage(restored, {
+      entryId: 'duplicate-reregistration', sourceEventId: usage.sourceEventId, postedOn: '2026-10-23',
+    }),
+    (error) => error instanceof TimeAccountingError && error.code === 'ALREADY_REGISTERED',
+  );
+  const reversedAgain = reverseAiUsage(restored, {
+    entryId: 'reversal-2', sourceEventId: usage.sourceEventId, postedOn: '2026-10-23',
+  });
+  assert.deepEqual(reversedAgain.entries.slice(0, 3), restored.entries);
+  assert.equal(reversedAgain.entries[3].reversesEntryId, 'reregistration-1');
+  assert.deepEqual(reversedAgain.measurements[0].correctionEntryIds, [
+    'reversal-1', 'reregistration-1', 'reversal-2',
+  ]);
+  assert.ok(reversedAgain.entries.every(isBalancedJournalEntry));
+  assert.equal(accountBalanceSeconds(reversedAgain, TIME_ACCOUNTS.aiClearing), 0);
+  assert.equal(accountBalanceSeconds(reversedAgain, TIME_ACCOUNTS.timeContribution), 0);
+});
+
+test('migrates legacy whole minutes to exact seconds only once', () => {
+  const legacy = {
+    version: 1, unit: 'minute',
+    measurements: [{
+      sourceEventId: 'legacy-event', occurredOn: '2026-09-30',
+      actualInputMinutes: 2, estimatedSavedMinutes: 3,
+      usageEntryId: 'legacy-use', monthEndAdjustmentEntryId: 'legacy-close',
+    }],
+    entries: [
+      {
+        id: 'legacy-use', kind: 'ai-usage', postedOn: '2026-09-30', sourceEventId: 'legacy-event',
+        lines: [
+          { side: 'debit', account: 'AI仮受品', minutes: 2, measurement: 'actual-input' },
+          { side: 'credit', account: '時間拠出', minutes: 2, measurement: 'actual-input' },
+        ],
+      },
+      {
+        id: 'legacy-close', kind: 'month-end-adjustment', postedOn: '2026-09-30', sourceEventId: 'legacy-event',
+        lines: [
+          { side: 'debit', account: '思考探究費', minutes: 2, measurement: 'actual-input' },
+          { side: 'credit', account: 'AI仮受品', minutes: 2, measurement: 'actual-input' },
+        ],
+      },
+    ],
+  };
+  const migrated = migrateTimeAccountingLedger(legacy);
+  assert.equal(migrated.version, 2);
+  assert.equal(migrated.unit, 'second');
+  assert.equal(migrated.measurements[0].actualInputSeconds, 120);
+  assert.equal(migrated.measurements[0].estimatedSavedSeconds, 180);
+  assert.ok(migrated.entries.every(entry => entry.lines.every(line => line.seconds === 120)));
+  assert.deepEqual(migrateTimeAccountingLedger(migrated), migrated);
+});
+
+test('rejects an unbalanced legacy ledger instead of silently migrating it', () => {
+  const invalid = {
+    version: 1, unit: 'minute',
+    measurements: [{ sourceEventId: 'event', occurredOn: '2026-10-20', actualInputMinutes: 1, estimatedSavedMinutes: 0, usageEntryId: 'entry' }],
+    entries: [{
+      id: 'entry', kind: 'ai-usage', postedOn: '2026-10-20', sourceEventId: 'event',
+      lines: [
+        { side: 'debit', account: 'AI仮受品', minutes: 1, measurement: 'actual-input' },
+        { side: 'credit', account: '時間拠出', minutes: 2, measurement: 'actual-input' },
+      ],
+    }],
+  };
+  assert.throws(
+    () => migrateTimeAccountingLedger(invalid),
+    (error) => error instanceof TimeAccountingError && error.code === 'INVALID_LEDGER',
+  );
+});
+
+test('keeps estimated savings separate and excludes them from profit and loss', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  assert.deepEqual(summarizeTimeMeasurements(used), {
+    actualInputSeconds: 3_600, estimatedSavedSeconds: 10_800,
+  });
+  assert.deepEqual(calculateTimeProfitAndLoss(used), { thoughtExplorationExpenseSeconds: 0 });
+  assert.equal(JSON.stringify(used.entries).includes('10800'), false);
+});
+
+test('rejects duplicate source events and duplicate journal entry ids without mutation', () => {
+  const ledger = recordAiUsage(createTimeAccountingLedger(), usage);
+  const snapshot = JSON.stringify(ledger);
+  assert.throws(
+    () => recordAiUsage(ledger, { ...usage, entryId: 'entry-use-002' }),
+    (error) => error instanceof TimeAccountingError && error.code === 'DUPLICATE_SOURCE_EVENT',
+  );
+  assert.throws(
+    () => recordAiUsage(ledger, { ...usage, sourceEventId: 'conversation-002' }),
+    (error) => error instanceof TimeAccountingError && error.code === 'DUPLICATE_ENTRY_ID',
+  );
+  assert.equal(JSON.stringify(ledger), snapshot);
+});
+
+test('allows one adjustment per event and rejects unknown or earlier adjustments', () => {
+  const used = recordAiUsage(createTimeAccountingLedger(), usage);
+  assert.throws(
+    () => recordMonthEndAdjustment(used, { entryId: 'unknown', sourceEventId: 'unknown', postedOn: '2026-10-31' }),
+    (error) => error instanceof TimeAccountingError && error.code === 'UNKNOWN_SOURCE_EVENT',
+  );
+  assert.throws(
+    () => recordMonthEndAdjustment(used, { entryId: 'early', sourceEventId: usage.sourceEventId, postedOn: '2026-10-19' }),
+    (error) => error instanceof TimeAccountingError && error.code === 'ADJUSTMENT_BEFORE_USAGE',
+  );
+  const adjusted = recordMonthEndAdjustment(used, { entryId: 'close', sourceEventId: usage.sourceEventId, postedOn: '2026-10-31' });
+  assert.throws(
+    () => recordMonthEndAdjustment(adjusted, { entryId: 'again', sourceEventId: usage.sourceEventId, postedOn: '2026-10-31' }),
+    (error) => error instanceof TimeAccountingError && error.code === 'ALREADY_ADJUSTED',
+  );
+});
+
+test('accepts only valid whole seconds and calendar dates', () => {
+  for (const actualInputSeconds of [0, -1, 1.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => recordAiUsage(createTimeAccountingLedger(), { ...usage, actualInputSeconds }),
+      (error) => error instanceof TimeAccountingError && error.code === 'INVALID_ACTUAL_SECONDS',
+    );
+  }
+  for (const estimatedSavedSeconds of [-1, 1.5, Number.NaN]) {
+    assert.throws(
+      () => recordAiUsage(createTimeAccountingLedger(), { ...usage, estimatedSavedSeconds }),
+      (error) => error instanceof TimeAccountingError && error.code === 'INVALID_ESTIMATED_SECONDS',
+    );
+  }
+  for (const occurredOn of ['2026/10/20', '2026-02-29', '2026-13-01', '']) {
+    assert.throws(
+      () => recordAiUsage(createTimeAccountingLedger(), { ...usage, occurredOn }),
+      (error) => error instanceof TimeAccountingError && error.code === 'INVALID_DATE',
+    );
+  }
+  assert.doesNotThrow(() => recordAiUsage(createTimeAccountingLedger(), {
+    ...usage, occurredOn: '2028-02-29', estimatedSavedSeconds: 0,
+  }));
+});

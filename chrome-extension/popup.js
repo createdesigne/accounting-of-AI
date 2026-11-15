@@ -4,6 +4,7 @@ const WEB_APP_URLS = {
   preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
   local: "http://localhost:5173/accounting-of-AI/",
 };
+const timeRecordProtocol = globalThis.TimeRecordProtocol;
 
 const button = document.getElementById("createReceipt");
 const statusText = document.getElementById("status");
@@ -11,6 +12,22 @@ const destination = document.getElementById("destination");
 const extensionVersion = globalThis.chrome?.runtime?.getManifest?.().version || "不明";
 const versionText = document.getElementById("version");
 if (versionText) versionText.textContent = `バージョン ${extensionVersion}`;
+
+const trackingStart = document.getElementById("trackingStart");
+const trackingStop = document.getElementById("trackingStop");
+const trackingStatus = document.getElementById("trackingStatus");
+const timeLedgerTransfer = document.getElementById("timeLedgerTransfer");
+const timeTransferStatus = document.getElementById("timeTransferStatus");
+
+if (trackingStart && trackingStop && trackingStatus && chrome.runtime?.sendMessage) {
+  trackingStart.addEventListener("click", () => updateTracking(true));
+  trackingStop.addEventListener("click", () => updateTracking(false));
+  refreshTracking();
+}
+
+if (timeLedgerTransfer && timeTransferStatus && timeRecordProtocol && chrome.runtime?.sendMessage) {
+  timeLedgerTransfer.addEventListener("click", transferFinalizedTimeRecords);
+}
 
 button.addEventListener("click", async () => {
   setStatus("会話を読み取っています...", true);
@@ -47,6 +64,109 @@ function setStatus(message, busy) {
   statusText.textContent = message;
   button.disabled = busy;
   destination.disabled = busy;
+}
+
+async function refreshTracking() {
+  await sendTrackingMessage({ type: "tracking:get" });
+}
+
+async function updateTracking(enabled) {
+  trackingStart.disabled = true;
+  trackingStop.disabled = true;
+  trackingStatus.textContent = enabled ? "計測を開始しています…" : "計測を停止しています…";
+  await sendTrackingMessage({ type: "tracking:setEnabled", enabled });
+}
+
+async function sendTrackingMessage(message) {
+  try {
+    const result = await chrome.runtime.sendMessage(message);
+    if (!result?.ok) throw new Error(result?.message || "計測状態を確認できませんでした。");
+    renderTracking(result);
+  } catch (error) {
+    trackingStatus.textContent = error instanceof Error ? error.message : "計測状態を確認できませんでした。";
+    trackingStart.disabled = false;
+    trackingStop.disabled = false;
+  }
+}
+
+function renderTracking(state) {
+  trackingStart.disabled = state.enabled;
+  trackingStop.disabled = !state.enabled;
+  if (!state.enabled) {
+    trackingStatus.textContent = `停止中（保存済み ${formatDuration(state.totalSeconds)}）`;
+  } else if (state.active) {
+    trackingStatus.textContent = `計測中（合計 ${formatDuration(state.totalSeconds)}）`;
+  } else {
+    trackingStatus.textContent = `待機中：ChatGPTで操作すると計測します（合計 ${formatDuration(state.totalSeconds)}）`;
+  }
+}
+
+async function transferFinalizedTimeRecords() {
+  timeLedgerTransfer.disabled = true;
+  timeTransferStatus.textContent = "確定済みの利用時間を準備しています…";
+  try {
+    const destinationName = destination.value;
+    const response = await chrome.runtime.sendMessage({
+      type: "time-records:getFinalized",
+      destination: destinationName,
+    });
+    if (!response?.ok) throw new Error(response?.message || "利用時間を準備できませんでした。");
+    const validation = timeRecordProtocol.validatePayload(response.payload);
+    if (!validation.ok) throw new Error(validation.error);
+    if (response.payload.records.length === 0) {
+      timeTransferStatus.textContent = "連携できる確定済みの利用時間はまだありません。";
+      return;
+    }
+
+    const targetUrl = timeRecordProtocol.DESTINATIONS[destinationName];
+    if (!targetUrl || !timeRecordProtocol.isAllowedAppUrl(targetUrl)) {
+      throw new Error("許可されていない送信先です。");
+    }
+    const targetTab = await findOrCreateTimeDestination(destinationName, targetUrl);
+    await deliverTimePayload(targetTab.id, response.payload);
+    timeTransferStatus.textContent = `${response.payload.records.length}件の利用時間を確認画面へ渡しました。まだ帳簿には保存されていません。`;
+    if (chrome.tabs.update) await chrome.tabs.update(targetTab.id, { active: true });
+  } catch (error) {
+    console.error(error);
+    timeTransferStatus.textContent = error instanceof Error ? error.message : "利用時間を連携できませんでした。";
+  } finally {
+    timeLedgerTransfer.disabled = false;
+  }
+}
+
+async function findOrCreateTimeDestination(destinationName, targetUrl) {
+  const tabs = await chrome.tabs.query({});
+  const existing = tabs.find((tab) => tab.id && tab.url
+    && timeRecordProtocol.isDestinationUrl(tab.url, destinationName));
+  if (existing) return existing;
+  const created = await chrome.tabs.create({ url: targetUrl, active: false });
+  if (!created?.id || (created.url && !timeRecordProtocol.isDestinationUrl(created.url, destinationName))) {
+    throw new Error("連携先のWebアプリを開けませんでした。");
+  }
+  return created;
+}
+
+async function deliverTimePayload(tabId, payload) {
+  let lastError;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    try {
+      const response = await chrome.tabs.sendMessage(tabId, { type: "time-records:deliver", payload });
+      if (response?.ok) return;
+      lastError = new Error(response?.message || "Webアプリが連携データを受け取れませんでした。");
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  throw lastError instanceof Error ? lastError : new Error("Webアプリへの接続がタイムアウトしました。");
+}
+
+function formatDuration(totalSeconds) {
+  const seconds = Math.max(0, Number.isFinite(totalSeconds) ? Math.floor(totalSeconds) : 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return hours ? `${hours}時間${minutes}分${rest}秒` : `${minutes}分${rest}秒`;
 }
 
 function normalizeConversation(extracted, tab) {
