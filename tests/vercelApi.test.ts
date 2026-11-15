@@ -6,6 +6,7 @@ import { createAiHandler } from '../server/app.mjs';
 import { vercelOrigins } from '../server/vercel.mjs';
 import healthHandler from '../api/ai/health.mjs';
 import rewriteHandler from '../api/ai/rewrite.mjs';
+import analyzeWeeklyHandler from '../api/ai/analyze-weekly.mjs';
 
 const allowed = 'https://deployment.example';
 async function start(handler, parsed = false) {
@@ -38,12 +39,15 @@ test('Vercel parsed-body requests preserve credentials, limits, sanitized errors
   } finally { await app.close(); }
 });
 test('Vercel entrypoints return health and reject missing keys without an upstream request', async () => {
-  const app = await start((req, res) => req.url.endsWith('health') ? healthHandler(req, res) : rewriteHandler(req, res), true);
+  const app = await start((req, res) => req.url.endsWith('health') ? healthHandler(req, res)
+    : req.url.endsWith('analyze-weekly') ? analyzeWeeklyHandler(req, res) : rewriteHandler(req, res), true);
   try {
     const health = await fetch(app.url + '/api/ai/health');
     assert.equal(health.status, 200); assert.equal((await health.json()).credentialMode, 'per_request');
     const response = await fetch(app.url + '/api/ai/rewrite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: 'test' }) });
     assert.equal(response.status, 401); assert.deepEqual(await response.json(), { error: { code: 'API_KEY_REQUIRED' } });
+    const analysis = await fetch(app.url + '/api/ai/analyze-weekly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+    assert.equal(analysis.status, 400); assert.deepEqual(await analysis.json(), { error: { code: 'INVALID_INPUT' } });
   } finally { await app.close(); }
 });
 test('only explicit Vercel deployment hosts and HTTPS public origins are allowed', () => {

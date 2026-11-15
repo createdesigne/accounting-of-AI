@@ -7,6 +7,7 @@
 3. 「この画面で使う」を押して閉じる。この時点ではAPI通信しない。
 4. レシート候補で、整える項目・文章の整え方を確認し「Geminiに送信して文章を整える」を押す。
 5. 生成候補を確認し、必要なら反映する。レシートの発行・帳簿への保存は別の操作。
+6. 週次構造化分析では、fullで保存した活動ごとに外部送信の同意欄を確認してから実行する。設定だけでは会話を送信しない。
 
 既定モデルは元のGemini開発ブランチと同じ `gemini-3.5-flash-lite`。モデル欄から変更でき、利用できないモデルを別のモデルに自動置換しない。入力済みの表示は接続成功を意味しない。キーの有効性・モデルの利用権限・割当は送信時に確認される。
 
@@ -19,7 +20,7 @@ API利用料・上限は利用者のキーに紐づくGoogleのプロジェク�
 - キー設定・削除・画面表示・ヘルスチェックはGoogleへ送信しない。
 - 送信時だけ `Authorization: Bearer ...` ヘッダーで中継サーバーへ送り、GoogleへはSDKの `x-goog-api-key` ヘッダーで渡す。キーを隠して保存している仕組みではなく、利用者が入力した秘密を一時的に中継する仕組み。
 - 各リクエストで別のSDKクライアントを作る。利用者AのキーをBへ流用せず、キー未設定時に運営者の環境変数へフォールバックしない。
-- JSON本文は `{text, instruction?}`、応答は `{text}`。選択した文章だけを送り、元の会話全体・帳簿は送らない。
+- 文章編集はJSON本文 `{text, instruction?}`、応答 `{text}`。週次分析は `docs/weekly-analysis-api-contract.md` の構造化形式を使用する。どちらも帳簿全体は送らず、週次分析では本人が同意した活動の保存済み会話範囲だけを送る。
 - アプリはキー・リクエスト本文・上流エラー全文をログへ出さない。公開先でもAuthorizationヘッダーや本文を記録する監視設定は使わない。運営サーバーは通信中のキーを扱うため、利用者は信頼できる設置先で使う。
 - 公開通信はHTTPS。Google側のデータ取り扱いは利用契約に従う。Interactions APIには `store:false` を指定する。
 
@@ -46,7 +47,7 @@ pnpm start
 - プロジェクト: `accounting-of-ai`
 - 管理画面: https://vercel.com/rintaro-chujos-projects/accounting-of-ai
 
-画面は静的ファイル、`/api/ai/health` と `/api/ai/rewrite` はNode.js Functionsとして配信する。`pnpm build:vercel` がViteの出力を `dist/accounting-of-AI/` へ配置するため、既存のアプリ内URLを維持する。Functionの上限は30秒、Googleへの待機は15秒。同時2件の制限はインスタンスごとで、全体の回数・費用制限ではない。
+画面は静的ファイル、`/api/ai/health`、`/api/ai/rewrite`、`/api/ai/analyze-weekly` はNode.js Functionsとして配信する。`pnpm build:vercel` がViteの出力を `dist/accounting-of-AI/` へ配置するため、既存のアプリ内URLを維持する。Functionの上限は30秒、Googleへの待機は15秒。同時2件の制限はインスタンスごとで、全体の回数・費用制限ではない。
 
 Geminiキーの環境変数は登録しない。Vercelの自動環境変数から同一オリジンを許可する。独自ドメインを追加する場合のみ `PUBLIC_ORIGIN=https://実際のホスト名` を指定する。Authorizationヘッダーや本文をログに記録しない。
 

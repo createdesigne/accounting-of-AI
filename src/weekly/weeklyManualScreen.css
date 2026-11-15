@@ -297,6 +297,90 @@
   padding-left: 20px;
 }
 
+.weekly-analysis-consent {
+  display: flex !important;
+  grid-template-columns: auto 1fr;
+  align-items: flex-start;
+  gap: 8px !important;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.weekly-analysis-consent input {
+  width: auto;
+  margin-top: 2px;
+}
+
+.weekly-analysis-run {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.weekly-analysis-warning,
+.weekly-analysis-advisory,
+.weekly-analysis-reviewed {
+  margin: 6px 0 0 !important;
+  padding: 9px 10px;
+  border-radius: 10px;
+  color: #92400e !important;
+  background: #fffbeb;
+  font-size: 11px !important;
+}
+
+.weekly-analysis-metadata {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding: 9px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.weekly-analysis-review {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid currentColor;
+}
+
+.weekly-analysis-review summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.weekly-analysis-review form {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.weekly-analysis-review label {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.weekly-analysis-review input,
+.weekly-analysis-review select,
+.weekly-analysis-review textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #a7f3d0;
+  border-radius: 9px;
+  color: #0f172a;
+  background: #fff;
+  font: inherit;
+}
+
+.weekly-analysis-review textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+
 .weekly-saved-list {
   display: grid;
   gap: 10px;

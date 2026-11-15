@@ -20,6 +20,13 @@ import {
   type WeeklyAnalysisDisplayState,
   type WeeklyAnalysisStoreV1,
 } from "../weeklyAnalysisStore.ts";
+import {
+  findWeeklyAnalysisReview,
+  loadWeeklyAnalysisReviewStore,
+  WEEKLY_ANALYSIS_REVIEWS_STORAGE_KEY,
+  type WeeklyAnalysisReviewStoreV1,
+} from "../weeklyAnalysisReviewStore.ts";
+import { WeeklyAnalysisPanel } from "./WeeklyAnalysisPanel.tsx";
 import "./weeklyManualScreen.css";
 
 const categories = ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"] as const;
@@ -77,6 +84,7 @@ export function WeeklyManualScreen() {
   const [store, setStore] = useState<WeeklyRecordStoreV1>(() => safeLoadStore());
   const [conversationStore, setConversationStore] = useState<WeeklyConversationStoreV1>(() => safeLoadConversationStore());
   const [analysisStore, setAnalysisStore] = useState<WeeklyAnalysisStoreV1>(() => safeLoadAnalysisStore());
+  const [analysisReviewStore, setAnalysisReviewStore] = useState<WeeklyAnalysisReviewStoreV1>(() => safeLoadAnalysisReviewStore());
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTask);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(emptyActivity);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -102,11 +110,13 @@ export function WeeklyManualScreen() {
     const refresh = (event?: StorageEvent) => {
       if (event && event.key !== WEEKLY_RECORDS_STORAGE_KEY
         && event.key !== WEEKLY_CONVERSATIONS_STORAGE_KEY
-        && event.key !== WEEKLY_ANALYSES_STORAGE_KEY && event.key !== null) return;
+        && event.key !== WEEKLY_ANALYSES_STORAGE_KEY
+        && event.key !== WEEKLY_ANALYSIS_REVIEWS_STORAGE_KEY && event.key !== null) return;
       try {
         setStore(loadWeeklyRecordStore());
         setConversationStore(loadWeeklyConversationStore());
         setAnalysisStore(loadWeeklyAnalysisStore());
+        setAnalysisReviewStore(loadWeeklyAnalysisReviewStore());
         setLoadError("");
       } catch (error) {
         setLoadError(messageOf(error, "週次記録を読み込めませんでした。保存値は変更していません。"));
@@ -115,6 +125,16 @@ export function WeeklyManualScreen() {
     window.addEventListener("storage", refresh);
     return () => window.removeEventListener("storage", refresh);
   }, []);
+
+  function refreshAnalysis() {
+    try {
+      setAnalysisStore(loadWeeklyAnalysisStore());
+      setAnalysisReviewStore(loadWeeklyAnalysisReviewStore());
+      setLoadError("");
+    } catch (error) {
+      setLoadError(messageOf(error, "分析結果を読み込めませんでした。保存済みの活動と会計は変更していません。"));
+    }
+  }
 
   async function submitTask(event: FormEvent) {
     event.preventDefault();
@@ -367,7 +387,7 @@ export function WeeklyManualScreen() {
           <label>AIとのやり取りの概要<textarea disabled={activityDraft.privacy !== "full"} value={activityDraft.interactionSummary} onChange={(event) => setActivityDraft({ ...activityDraft, interactionSummary: event.target.value })} /></label>
           <label>自分が考えたこと・判断したこと<textarea disabled={activityDraft.privacy !== "full"} value={activityDraft.ownThoughts} onChange={(event) => setActivityDraft({ ...activityDraft, ownThoughts: event.target.value })} /></label>
           <label>発見・学び<textarea disabled={activityDraft.privacy !== "full"} value={activityDraft.discovery} onChange={(event) => setActivityDraft({ ...activityDraft, discovery: event.target.value })} /></label>
-          <div className="weekly-analysis-state"><strong>AI分析：未接続・未評価</strong><span>自動スコアは生成しません。3指標はすべて未評価（null）です。</span></div>
+          <div className="weekly-analysis-state"><strong>AI分析：保存後に任意で実行</strong><span>初期値は未評価（null）です。会話本文の外部送信に明示同意した場合だけ分析できます。</span></div>
           <div className="weekly-form-actions">
             <button className="primary-action" type="submit" disabled={busy}>{editingRecordId ? "活動記録を更新" : "活動記録を保存"}</button>
             {editingRecordId && <button className="secondary-action" type="button" onClick={cancelRecordEdit}>編集をやめる</button>}
@@ -388,7 +408,15 @@ export function WeeklyManualScreen() {
             {record.manualNotes?.interactionSummary && <p><b>概要：</b>{record.manualNotes.interactionSummary}</p>}
             {record.manualNotes?.ownThoughts && <p><b>自分の判断：</b>{record.manualNotes.ownThoughts}</p>}
             {record.manualNotes?.discovery && <p><b>発見・学び：</b>{record.manualNotes.discovery}</p>}
-            <WeeklyAnalysisPanel state={analysisState} noAi={noAi} />
+            <WeeklyAnalysisPanel
+              record={record}
+              task={task ?? null}
+              conversation={conversationsByRecord.get(record.id) ?? null}
+              state={analysisState}
+              noAi={noAi}
+              review={findWeeklyAnalysisReview(analysisReviewStore, analysisState.response?.analysisId)}
+              onChanged={refreshAnalysis}
+            />
             <div className="weekly-item-actions"><button type="button" onClick={() => editRecord(record)}>編集</button><button type="button" className="danger" onClick={() => void removeRecord(record)}>削除</button></div>
           </article>;
         })}</div>}
@@ -407,50 +435,16 @@ function safeLoadAnalysisStore(): WeeklyAnalysisStoreV1 {
   }
 }
 
+function safeLoadAnalysisReviewStore(): WeeklyAnalysisReviewStoreV1 {
+  try { return loadWeeklyAnalysisReviewStore(); } catch {
+    return Object.freeze({ schemaVersion: 1, reviews: Object.freeze([]) });
+  }
+}
+
 function safeLoadConversationStore(): WeeklyConversationStoreV1 {
   try { return loadWeeklyConversationStore(); } catch {
     return Object.freeze({ schemaVersion: 1, conversations: Object.freeze([]) });
   }
-}
-
-function WeeklyAnalysisPanel({ state, noAi }: { state: WeeklyAnalysisDisplayState; noAi: boolean }) {
-  if (noAi || state.analysisStatus === "not-applicable") {
-    return <div className="weekly-analysis-state compact not-applicable"><strong>AI分析：対象外</strong><span>Level 1として事前設定されたAI不使用課題です。</span></div>;
-  }
-  if (state.analysisStatus === "not-connected") {
-    return <div className="weekly-analysis-state compact"><strong>AI分析：未接続・未評価</strong><span>評価値：— / — / —（0点ではありません）</span></div>;
-  }
-  if (state.analysisStatus === "pending") {
-    return <div className="weekly-analysis-state compact"><strong>AI分析：分析待ち</strong><span>本人の入力と会計データは変更しません。</span></div>;
-  }
-  const response = state.response;
-  if (!response) {
-    return <div className="weekly-analysis-state compact"><strong>AI分析：分析失敗</strong><span>結果を読み込めません。本人の入力は保持されています。</span></div>;
-  }
-  const sourceLabel = response.origin === "test-fixture"
-    ? "テスト用分析（実際のGemini分析ではありません）"
-    : "Gemini分析";
-  if (state.analysisStatus === "failed") {
-    return <div className="weekly-analysis-state compact failed"><strong>{sourceLabel}：分析失敗</strong><span>エラー：{response.error?.code ?? "INVALID_OUTPUT"}。本人の入力と会計データは変更していません。</span></div>;
-  }
-  const analysis = response.analysis;
-  if (!analysis) return null;
-  return <div className={`weekly-analysis-state compact complete${response.origin === "test-fixture" ? " fixture" : ""}`}>
-    <strong>{sourceLabel}：分析完了</strong>
-    <span>本人入力とは別の保存領域に保持しています。AIAS Levelの能力評価ではありません。</span>
-    <dl className="weekly-analysis-details">
-      <div><dt>分析上の活動テーマ</dt><dd>{analysis.activityCategory ?? "判定不可"}</dd></div>
-      <div><dt>AIが担った役割</dt><dd>{analysis.aiRole ?? "判定不可"}</dd></div>
-      <div><dt>研究指標</dt><dd>自発性 {scoreLabel(analysis.initiative)}／論理性 {scoreLabel(analysis.reasoning)}／批判的判断 {scoreLabel(analysis.criticalJudgment)}</dd></div>
-      <div><dt>思考の変化</dt><dd>{analysis.thinkingChange ?? "判定不可"}</dd></div>
-      <div><dt>発見・学び</dt><dd>{analysis.discovery ?? "判定不可"}</dd></div>
-    </dl>
-    {analysis.evidence.length > 0 && <div className="weekly-analysis-evidence"><b>分析根拠となる会話箇所</b><ul>{analysis.evidence.map((evidence, index) => <li key={`${evidence.target}:${evidence.messageIndex}:${index}`}>会話 {evidence.messageIndex + 1}：「{evidence.quote}」</li>)}</ul></div>}
-  </div>;
-}
-
-function scoreLabel(value: number | null) {
-  return value === null ? "評価不可" : `${value}`;
 }
 
 function createId(prefix: string) {

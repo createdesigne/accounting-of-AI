@@ -20,6 +20,12 @@ import {
   saveManualWeeklyRecord,
   saveWeeklyTask,
 } from "../src/weeklyStore.ts";
+import {
+  loadWeeklyAnalysisReviewStore,
+  saveWeeklyAnalysisReview,
+  WEEKLY_ANALYSIS_REVIEWS_STORAGE_KEY,
+  WeeklyAnalysisReviewStoreError,
+} from "../src/weeklyAnalysisReviewStore.ts";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();
@@ -245,4 +251,59 @@ test("a failed analysis is retained without changing accounting", async () => {
   const settlementAfter = buildWeeklySettlement(loadWeeklyRecordStore(context.storage).records, new Date("2026-11-10T03:00:00.000Z"));
   assert.deepEqual(settlementAfter, settlementBefore);
   assert.equal(resolveWeeklyAnalysisState(context.record, loadWeeklyAnalysisStore(context.storage), context.conversation).analysisStatus, "failed");
+});
+
+test("a person's corrections are saved separately without overwriting AI output, notes, or accounting", async () => {
+  const context = await setupFullRecord();
+  const response = fixtureResponse(context.request);
+  await queueWeeklyAnalysisRequest(context.request, context);
+  await acceptWeeklyAnalysisResponse(response, context);
+  const weeklyBefore = JSON.stringify(loadWeeklyRecordStore(context.storage));
+  const analysisBefore = JSON.stringify(loadWeeklyAnalysisStore(context.storage));
+  const settlementBefore = buildWeeklySettlement(loadWeeklyRecordStore(context.storage).records, new Date("2026-11-10T03:00:00.000Z"));
+  const saved = await saveWeeklyAnalysisReview({
+    schemaVersion: 1,
+    analysisId: response.analysisId,
+    recordId: context.record.id,
+    thoughtReceiptId: context.record.links.thoughtReceiptId,
+    reviewedAt: "2026-11-10T03:00:00.000Z",
+    fields: {
+      activityCategory: "相談",
+      accountCandidate: "相談活動費",
+      accountingDispositionCandidate: "expense",
+      aiRole: "本人が確認した整理役",
+      collaborationSummary: "AIが比較軸を提示し、本人が採否を決めた",
+      initiative: 50,
+      reasoning: 75,
+      criticalJudgment: 75,
+      thinkingChange: "本人が確認した変化",
+      discovery: "本人が確認した学び",
+      reviewerNote: "会話を再確認して批判的判断を修正",
+    },
+  }, context);
+  assert.equal(saved.reviews.length, 1);
+  assert.equal(loadWeeklyAnalysisReviewStore(context.storage).reviews[0].fields.criticalJudgment, 75);
+  assert.equal(JSON.stringify(loadWeeklyAnalysisStore(context.storage)), analysisBefore);
+  assert.equal(JSON.stringify(loadWeeklyRecordStore(context.storage)), weeklyBefore);
+  assert.deepEqual(buildWeeklySettlement(loadWeeklyRecordStore(context.storage).records, new Date("2026-11-10T03:00:00.000Z")), settlementBefore);
+  assert.notEqual(context.storage.getItem(WEEKLY_ANALYSIS_REVIEWS_STORAGE_KEY), null);
+});
+
+test("a review cannot be attached to another activity or an unknown analysis", async () => {
+  const context = await setupFullRecord();
+  const response = fixtureResponse(context.request);
+  await queueWeeklyAnalysisRequest(context.request, context);
+  await acceptWeeklyAnalysisResponse(response, context);
+  await assert.rejects(() => saveWeeklyAnalysisReview({
+    schemaVersion: 1,
+    analysisId: "unknown-analysis",
+    recordId: "another-record",
+    thoughtReceiptId: context.record.links.thoughtReceiptId,
+    reviewedAt: "2026-11-10T03:00:00.000Z",
+    fields: {
+      activityCategory: null, accountCandidate: null, accountingDispositionCandidate: null,
+      aiRole: null, collaborationSummary: null, initiative: null, reasoning: null,
+      criticalJudgment: null, thinkingChange: null, discovery: null, reviewerNote: null,
+    },
+  }, context), (error: unknown) => error instanceof WeeklyAnalysisReviewStoreError && error.code === "LINK_MISMATCH");
 });

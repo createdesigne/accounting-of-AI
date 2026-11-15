@@ -1,8 +1,8 @@
-# 週次思考分析 API 接続仕様（合意用 v1）
+# 週次思考分析 API 接続仕様（研究用実装 v1）
 
-この文書は、週次アプリと共同開発者が今後接続する `/api/ai/analyze-weekly` の境界を定めるたたき台です。現時点の週次アプリはHTTP通信、Gemini SDK、プロンプト、APIキー管理を実装しません。既存の `/api/ai/rewrite` は変更対象外です。
+この文書は、週次アプリから独立した `/api/ai/analyze-weekly` の境界を定めます。既存の `/api/ai/rewrite` は変更せず、同じ画面内メモリのBYOK設定をリクエスト単位で利用します。APIキーは保存・ログ出力しません。
 
-実装上の正本は `src/integrations/weeklyAnalysisContract.ts` です。
+クライアント契約の正本は `src/integrations/weeklyAnalysisContract.ts`、サーバー境界は `server/weekly-analysis-contract.mjs`、評価基準は [`weekly-analysis-rubric.md`](./weekly-analysis-rubric.md) です。
 
 ## 1. エンドポイント案
 
@@ -10,16 +10,11 @@
 - `Content-Type: application/json`
 - 成功・分析失敗とも、本文は下記の構造化JSONだけを返す
 - 生のGemini応答、SDK例外、APIキー、プロンプトはクライアントへ返さない
-- 同じ `requestId` の再送は二重分析・二重保存を起こさない
+- 同じ `requestId` / `analysisId` の保存は冪等に扱い、異なる結果による上書きを拒否する
 
 ## 2. 認証と同意
 
-以下は共同開発者との合意が必要です。
-
-1. Gemini APIキーはVercelのサーバー環境変数で管理するか、利用者持ち込み方式にするか。
-2. サーバー管理方式の場合、週次アプリ利用者を何で認証し、利用上限をどう設けるか。
-3. Preview環境ではVercel Deployment Protectionを利用するか。
-4. ログに会話本文、引用、分析結果を残すか。残す場合の保持期間と削除手順。
+認証は既存文章編集と同じ利用者持ち込み方式です。`Authorization: Bearer ...` と `X-Gemini-Model` をリクエスト単位で中継し、キーを端末ストレージ・サーバーファイル・URLへ保存しません。Preview保護、利用回数上限、運用ログの保持期間はデプロイ前に要確認です。
 
 週次アプリ側は次の条件をすべて満たす場合だけリクエスト値を生成します。
 
@@ -65,13 +60,13 @@
 
 `conversationFingerprint` は編集後の古い結果を誤反映しないための版識別子であり、認証や改ざん防止用の暗号学的署名ではありません。APIは入力値を応答へそのまま返します。
 
-### 合意が必要な入力上限
+### 実装済みの入力上限
 
-- リクエスト本文の最大バイト数
-- 最大メッセージ数と1メッセージの最大文字数
-- `captureScope: partial | unknown` を分析可能とするか
-- systemメッセージを許可するか
-- 同意日時の有効期間
+- リクエスト本文は最大96KiB
+- 最大200メッセージ、1メッセージ最大12,000文字、本文合計最大60,000文字
+- `captureScope: partial | unknown` は、画面に保存範囲を示したうえで分析可能。ただし不足情報を推測しない
+- system/unknownメッセージは役割を保持して送るが、命令ではなく分析対象データとして扱う
+- 同意は活動ごとの実行直前チェックとし、永続保存や別の分析への流用をしない
 
 ## 4. 出力形式
 
@@ -87,14 +82,20 @@
   "origin": "gemini-api",
   "analysisStatus": "complete",
   "receivedAt": "2026-11-10T02:00:05.000Z",
+  "model": "gemini-3.5-flash-lite",
+  "rubricVersion": "research-thinking-rubric-v1",
+  "analyzedAt": "2026-11-10T02:00:05.000Z",
   "analysis": {
-    "activityCategory": "壁打ち",
-    "aiRole": "比較軸を示す整理役",
-    "initiative": 75,
-    "reasoning": 75,
+    "activityCategory": null,
+    "accountCandidate": null,
+    "accountingDispositionCandidate": null,
+    "aiRole": null,
+    "collaborationBehaviors": [],
+    "initiative": null,
+    "reasoning": null,
     "criticalJudgment": 100,
-    "thinkingChange": "検証可能性を重視するようになった",
-    "discovery": "比較軸を先に決めると判断しやすい",
+    "thinkingChange": null,
+    "discovery": null,
     "evidence": [
       {
         "target": "critical-judgment",
@@ -108,7 +109,7 @@
 }
 ```
 
-研究独自の3指標は `0 | 25 | 50 | 75 | 100 | null` です。`null` は評価不能・根拠不足であり、0点とは異なります。AIAS公式の能力評価ではありません。
+研究独自の3指標は `0 | 25 | 50 | 75 | 100 | null` です。`null` は評価不能・根拠不足であり、0点とは異なります。0にも会話根拠が必要です。AIAS公式の能力評価ではありません。
 
 分析根拠は会話ID、0始まりのメッセージ位置、実際に存在する短い引用を返します。週次アプリは引用が指定メッセージ内に存在しなければ結果を拒否します。
 
@@ -130,6 +131,9 @@
   "origin": "gemini-api",
   "analysisStatus": "failed",
   "receivedAt": "2026-11-10T02:00:05.000Z",
+  "model": "gemini-3.5-flash-lite",
+  "rubricVersion": "research-thinking-rubric-v1",
+  "analyzedAt": "2026-11-10T02:00:05.000Z",
   "analysis": null,
   "error": { "code": "TIMEOUT", "retryable": true }
 }
@@ -137,12 +141,13 @@
 
 許可するコードは `INVALID_INPUT`、`NOT_AUTHENTICATED`、`NOT_AUTHORIZED`、`TOO_LARGE`、`RATE_LIMITED`、`MODEL_UNAVAILABLE`、`CONTENT_BLOCKED`、`INVALID_OUTPUT`、`TIMEOUT`、`PROVIDER_ERROR` です。
 
-HTTPステータスとエラーコードの対応、ネットワーク到達前のエラー形式、再試行回数・間隔は共同開発者との合意が必要です。生のプロバイダーエラーは返しません。
+入力・認証・CORS・サイズ違反はHTTPエラーと有限コードを返します。有効な分析リクエストを開始した後のGemini失敗は、上記の関連ID付き失敗JSONとして返します。ブラウザ到達前の通信失敗はクライアントで同じ失敗形式へ正規化して分離保存します。自動再試行は行わず、本人が再実行します。生のプロバイダーエラーは返しません。
 
 ## 6. 保存と関連付け
 
 - 分析リクエストの本文は分析ストアへ複製しない
 - 分析結果は `watashi-to-ai-weekly-analyses:v1` に保存する
+- 本人の確認・修正値は `watashi-to-ai-weekly-analysis-reviews:v1` に別保存する
 - 本人入力を含む週次記録ストアとは分離する
 - 3つの関連IDと会話版が一致しない結果は拒否する
 - 同一 `requestId` / `analysisId` は重複保存しない

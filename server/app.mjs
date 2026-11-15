@@ -1,16 +1,23 @@
 import { createServer } from 'node:http';
 import { AiError, parseInput, parseResult } from './contract.mjs';
+import {
+  createWeeklyFailureResponse,
+  parseWeeklyAnalysisRequest,
+  parseWeeklyAnalysisResponse,
+  WEEKLY_ANALYSIS_REQUEST_LIMIT,
+} from './weekly-analysis-contract.mjs';
 
 const ERROR_STATUS = {
   API_KEY_REQUIRED: 401, INVALID_CREDENTIALS: 400,
   INVALID_INPUT: 400, TOO_LARGE: 413, FORBIDDEN: 403, NOT_FOUND: 404, METHOD_NOT_ALLOWED: 405,
   AI_NOT_CONFIGURED: 503, BUSY: 429, RATE_LIMITED: 429, AUTH_ERROR: 502, MODEL_UNAVAILABLE: 503,
   CONTENT_BLOCKED: 422, OUTPUT_TRUNCATED: 502, INVALID_OUTPUT: 502, PROVIDER_ERROR: 502, TIMEOUT: 504,
+  NOT_AUTHENTICATED: 401, NOT_AUTHORIZED: 403,
 };
 
 export function createAiHandler({ provider = null, providerFactory = null, staticHandler = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000 || !Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 10) throw new AiError('INVALID_CONFIG');
-  if (provider !== null && typeof provider?.rewrite !== 'function') throw new AiError('INVALID_CONFIG');
+  if (provider !== null && typeof provider?.rewrite !== 'function' && typeof provider?.analyzeWeekly !== 'function') throw new AiError('INVALID_CONFIG');
   if (!Array.isArray(allowedOrigins) || allowedOrigins.some(origin => {
     try { const u = new URL(origin); return u.origin !== origin || !['http:', 'https:'].includes(u.protocol); } catch { return true; }
   })) throw new AiError('INVALID_CONFIG');
@@ -29,7 +36,8 @@ export function createAiHandler({ provider = null, providerFactory = null, stati
     const origin = req.headers.origin;
     if (origin !== undefined && !allowedOrigins.includes(origin)) return reply('FORBIDDEN');
     if (origin) res.setHeader('Access-Control-Allow-Origin', origin);
-    if (!['/api/ai/health', '/api/ai/rewrite'].includes(path)) return reply('NOT_FOUND');
+    if (!['/api/ai/health', '/api/ai/rewrite', '/api/ai/analyze-weekly'].includes(path)) return reply('NOT_FOUND');
+    const weeklyAnalysis = path === '/api/ai/analyze-weekly';
     const method = path.endsWith('/health') ? 'GET' : 'POST';
     if (req.method === 'OPTIONS') {
       const requested = req.headers['access-control-request-method'];
@@ -43,24 +51,27 @@ export function createAiHandler({ provider = null, providerFactory = null, stati
     if (req.headers['content-type']?.split(';')[0].trim().toLowerCase() !== 'application/json') return reply('INVALID_INPUT');
     let input;
     try {
+      const bodyLimit = weeklyAnalysis ? WEEKLY_ANALYSIS_REQUEST_LIMIT : 32 * 1024;
       const declaredLength = Number(req.headers['content-length']);
-      if (Number.isFinite(declaredLength) && declaredLength > 32 * 1024) return reply('TOO_LARGE');
+      if (Number.isFinite(declaredLength) && declaredLength > bodyLimit) return reply('TOO_LARGE');
       // Vercel exposes a lazily parsed body after consuming the original stream.
       // Plain Node requests continue through the bounded raw-stream path.
       if ('body' in req) {
         const body = req.body;
         const serialized = typeof body === 'string' ? body : JSON.stringify(body);
         if (typeof serialized !== 'string') return reply('INVALID_INPUT');
-        if (Buffer.byteLength(serialized, 'utf8') > 32 * 1024) return reply('TOO_LARGE');
-        input = parseInput(typeof body === 'string' ? JSON.parse(body) : body);
+        if (Buffer.byteLength(serialized, 'utf8') > bodyLimit) return reply('TOO_LARGE');
+        const value = typeof body === 'string' ? JSON.parse(body) : body;
+        input = weeklyAnalysis ? parseWeeklyAnalysisRequest(value) : parseInput(value);
       } else {
       const chunks = []; let bytes = 0;
       for await (const chunk of req) {
         bytes += chunk.length;
-        if (bytes > 32 * 1024) { reply('TOO_LARGE'); req.resume(); return; }
+        if (bytes > bodyLimit) { reply('TOO_LARGE'); req.resume(); return; }
         chunks.push(chunk);
       }
-      input = parseInput(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      input = weeklyAnalysis ? parseWeeklyAnalysisRequest(value) : parseInput(value);
       }
     } catch { return reply('INVALID_INPUT'); }
     if (!input) return reply('INVALID_INPUT');
@@ -75,6 +86,8 @@ export function createAiHandler({ provider = null, providerFactory = null, stati
       catch { return reply('INVALID_CREDENTIALS'); }
     }
     if (!requestProvider) return reply('AI_NOT_CONFIGURED');
+    if (weeklyAnalysis && typeof requestProvider.analyzeWeekly !== 'function') return reply('AI_NOT_CONFIGURED');
+    if (!weeklyAnalysis && typeof requestProvider.rewrite !== 'function') return reply('AI_NOT_CONFIGURED');
     if (active >= maxConcurrent) return reply('BUSY');
     active++;
     const controller = new AbortController();
@@ -84,13 +97,27 @@ export function createAiHandler({ provider = null, providerFactory = null, stati
     let timer;
     try {
       const timeout = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new AiError('TIMEOUT')); }, timeoutMs); });
-      const result = parseResult(await Promise.race([Promise.resolve().then(() => requestProvider.rewrite(input, { signal: controller.signal })), timeout]));
+      const rawResult = await Promise.race([Promise.resolve().then(() => weeklyAnalysis
+        ? requestProvider.analyzeWeekly(input, { signal: controller.signal })
+        : requestProvider.rewrite(input, { signal: controller.signal })), timeout]);
+      const result = weeklyAnalysis ? parseWeeklyAnalysisResponse(rawResult) : parseResult(rawResult);
       if (!result) throw new AiError('INVALID_OUTPUT');
       reply(null, result);
     } catch (error) {
       // Only our finite error codes may cross the boundary, never raw provider errors.
-      reply(controller.signal.aborted ? 'TIMEOUT'
-        : error instanceof AiError && Object.hasOwn(ERROR_STATUS, error.code) ? error.code : 'PROVIDER_ERROR');
+      const code = controller.signal.aborted ? 'TIMEOUT'
+        : error instanceof AiError && Object.hasOwn(ERROR_STATUS, error.code) ? error.code : 'PROVIDER_ERROR';
+      if (weeklyAnalysis) {
+        const analysisCode = code === 'AUTH_ERROR' ? 'NOT_AUTHENTICATED'
+          : code === 'BUSY' ? 'RATE_LIMITED'
+          : code === 'OUTPUT_TRUNCATED' ? 'INVALID_OUTPUT'
+          : ['INVALID_INPUT', 'TOO_LARGE', 'RATE_LIMITED', 'MODEL_UNAVAILABLE', 'CONTENT_BLOCKED', 'INVALID_OUTPUT', 'TIMEOUT', 'PROVIDER_ERROR'].includes(code)
+            ? code : 'PROVIDER_ERROR';
+        const model = typeof req.headers['x-gemini-model'] === 'string' ? req.headers['x-gemini-model'] : 'gemini-unknown';
+        try { return reply(null, createWeeklyFailureResponse(input, analysisCode, { model })); }
+        catch { return reply('PROVIDER_ERROR'); }
+      }
+      reply(code);
     } finally { clearTimeout(timer); res.off('close', disconnect); req.off('error', disconnect); active--; }
   };
 }

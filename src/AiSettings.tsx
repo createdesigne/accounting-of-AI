@@ -38,7 +38,7 @@ export function AiSettingsButton() {
         setStatus('この画面で使うキーを設定しました。接続はまだ行っていません。');
       }}>
         <h2 id={titleId}>AI設定</h2>
-        <p>自分のGemini APIキーで文章を整えます。利用料と利用上限は、このキーに紐づくGoogleのプロジェクトに適用されます。</p>
+        <p>自分のGemini APIキーで文章編集と、本人が明示同意した週次会話の研究用構造化分析を行います。利用料と利用上限は、このキーに紐づくGoogleのプロジェクトに適用されます。</p>
         <p className="ai-key-status">{credentials.apiKey ? 'APIキー：設定済み' : 'APIキー：未設定'}</p>
         <label className="candidate-field"><span>Gemini APIキー</span>
           <input type="password" value={draftKey} onChange={e => { setDraftKey(e.target.value); setStatus(''); }} maxLength={512} autoComplete="off" autoCapitalize="none" spellCheck={false}
@@ -46,7 +46,7 @@ export function AiSettingsButton() {
         </label>
         <label className="candidate-field"><span>Geminiモデル</span><input value={model} maxLength={127} onChange={e => { setModel(e.target.value); setStatus(''); }} spellCheck={false} /></label>
         <p>キーはこの画面を開いている間だけ保持します。再読み込みやタブを閉じた後は、もう一度入力してください。</p>
-        <p>文章の送信時に、キーをこのサイトの中継サーバー経由でGoogleへ渡します。アプリはキーを保存しません。設定するだけでは送信されません。</p>
+        <p>文章編集または同意済み週次分析の実行時にだけ、キーをこのサイトの中継サーバー経由でGoogleへ渡します。アプリはキーを保存しません。設定するだけでは送信されません。</p>
         {error && <p role="alert">{error}</p>}
         {status && <p role="status">{status}</p>}
         <div className="ai-writing-actions">

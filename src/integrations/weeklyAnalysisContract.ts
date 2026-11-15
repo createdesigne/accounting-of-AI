@@ -7,10 +7,30 @@ export const WEEKLY_ANALYSIS_SCHEMA_VERSION = 1 as const;
 
 export type WeeklyAnalysisOrigin = "gemini-api" | "test-fixture";
 export type WeeklyAnalysisResponseStatus = "complete" | "failed";
+export type WeeklyAnalysisAccountCandidate =
+  | "相談活動費"
+  | "思考探究費"
+  | "成果物利用費"
+  | "情報収集費"
+  | "学習活動費"
+  | "その他AI利用費"
+  | null;
+export type WeeklyAnalysisDispositionCandidate = "expense" | "asset" | "work-in-progress" | "unclassified" | null;
+export type WeeklyAnalysisCollaborationKind =
+  | "goal-setting"
+  | "comparison"
+  | "verification"
+  | "revision"
+  | "own-decision"
+  | "delegation"
+  | "synthesis";
 
 export type WeeklyAnalysisEvidenceTarget =
   | "activity-category"
+  | "account-candidate"
+  | "accounting-disposition"
   | "ai-role"
+  | "collaboration-behavior"
   | "initiative"
   | "reasoning"
   | "critical-judgment"
@@ -26,7 +46,15 @@ export type WeeklyAnalysisEvidenceV1 = Readonly<{
 
 export type WeeklyAnalysisPayloadV1 = Readonly<{
   activityCategory: AnalysisActivityCategory;
+  /** Advisory only. It never changes a saved journal or settlement. */
+  accountCandidate?: WeeklyAnalysisAccountCandidate;
+  /** Advisory only. It never changes the user's accounting disposition. */
+  accountingDispositionCandidate?: WeeklyAnalysisDispositionCandidate;
   aiRole: string | null;
+  collaborationBehaviors?: readonly Readonly<{
+    kind: WeeklyAnalysisCollaborationKind;
+    description: string;
+  }>[];
   /** Research-specific indicator. It is not an official AIAS score. */
   initiative: AnalysisScore;
   /** Research-specific indicator. It is not an official AIAS score. */
@@ -87,6 +115,12 @@ export type WeeklyAnalysisResponseV1 = Readonly<{
   origin: WeeklyAnalysisOrigin;
   analysisStatus: WeeklyAnalysisResponseStatus;
   receivedAt: string;
+  /** Required for new API responses; omitted only by legacy stored responses. */
+  model?: string;
+  /** Required for new API responses; omitted only by legacy stored responses. */
+  rubricVersion?: string;
+  /** Required for new API responses; omitted only by legacy stored responses. */
+  analyzedAt?: string;
   analysis: WeeklyAnalysisPayloadV1 | null;
   error: Readonly<{
     code: WeeklyAnalysisErrorCode;
@@ -147,14 +181,27 @@ export function parseWeeklyAnalysisRequestV1(value: unknown): WeeklyAnalysisRequ
 
 export function parseWeeklyAnalysisResponseV1(value: unknown): WeeklyAnalysisResponseV1 {
   const root = object(value, "Analysis response must be an object.");
-  exactKeys(root, [
+  allowedKeys(root, [
+    "schemaVersion", "analysisId", "requestId", "recordId", "conversationId", "thoughtReceiptId",
+    "conversationFingerprint", "origin", "analysisStatus", "receivedAt", "model", "rubricVersion",
+    "analyzedAt", "analysis", "error",
+  ], [
     "schemaVersion", "analysisId", "requestId", "recordId", "conversationId", "thoughtReceiptId",
     "conversationFingerprint", "origin", "analysisStatus", "receivedAt", "analysis", "error",
   ]);
   if (root.schemaVersion !== WEEKLY_ANALYSIS_SCHEMA_VERSION) invalid("Unsupported analysis response schema.");
   if (!oneOf(root.origin, ["gemini-api", "test-fixture"])) invalid("Analysis origin is invalid.");
   if (!oneOf(root.analysisStatus, ["complete", "failed"])) invalid("Analysis status is invalid.");
-  const analysis = root.analysis === null ? null : parsePayload(root.analysis);
+  const realResponse = root.origin === "gemini-api";
+  const model = root.model === undefined ? undefined : requiredText(root.model, "model is invalid.", 128);
+  const rubricVersion = root.rubricVersion === undefined ? undefined : identifier(root.rubricVersion, "rubricVersion");
+  const analyzedAt = root.analyzedAt === undefined ? undefined : timestamp(root.analyzedAt, "analyzedAt");
+  const metadataCount = [model, rubricVersion, analyzedAt].filter(Boolean).length;
+  if (metadataCount !== 0 && metadataCount !== 3) {
+    invalid("Analysis metadata must be complete.");
+  }
+  const structuredRealResponse = realResponse && metadataCount === 3;
+  const analysis = root.analysis === null ? null : parsePayload(root.analysis, structuredRealResponse);
   const error = root.error === null ? null : parseError(root.error);
   if (root.analysisStatus === "complete" && (analysis === null || error !== null)) {
     invalid("A completed response requires analysis and no error.");
@@ -162,6 +209,7 @@ export function parseWeeklyAnalysisResponseV1(value: unknown): WeeklyAnalysisRes
   if (root.analysisStatus === "failed" && (analysis !== null || error === null)) {
     invalid("A failed response requires an error and no analysis.");
   }
+  if (structuredRealResponse && analysis) assertEvidenceCoverage(analysis);
   return Object.freeze({
     schemaVersion: 1,
     analysisId: identifier(root.analysisId, "analysisId"),
@@ -173,22 +221,38 @@ export function parseWeeklyAnalysisResponseV1(value: unknown): WeeklyAnalysisRes
     origin: root.origin,
     analysisStatus: root.analysisStatus,
     receivedAt: timestamp(root.receivedAt, "receivedAt"),
+    ...(model ? { model } : {}),
+    ...(rubricVersion ? { rubricVersion } : {}),
+    ...(analyzedAt ? { analyzedAt } : {}),
     analysis,
     error,
   });
 }
 
-function parsePayload(value: unknown): WeeklyAnalysisPayloadV1 {
+function parsePayload(value: unknown, requireResearchFields: boolean): WeeklyAnalysisPayloadV1 {
   const payload = object(value, "Analysis payload is invalid.");
-  exactKeys(payload, [
+  allowedKeys(payload, [
     "activityCategory", "aiRole", "initiative", "reasoning", "criticalJudgment",
-    "thinkingChange", "discovery", "evidence",
-  ]);
+    "thinkingChange", "discovery", "evidence", "accountCandidate",
+    "accountingDispositionCandidate", "collaborationBehaviors",
+  ], ["activityCategory", "aiRole", "initiative", "reasoning", "criticalJudgment", "thinkingChange", "discovery", "evidence"]);
+  if (requireResearchFields && (!hasOwn(payload, "accountCandidate")
+    || !hasOwn(payload, "accountingDispositionCandidate")
+    || !hasOwn(payload, "collaborationBehaviors"))) {
+    invalid("A Gemini analysis is missing research fields.");
+  }
   const evidence = array(payload.evidence, "Analysis evidence is invalid.");
   if (evidence.length > 100) invalid("Analysis evidence is too large.");
+  const collaborationBehaviors = payload.collaborationBehaviors === undefined
+    ? undefined
+    : parseCollaborationBehaviors(payload.collaborationBehaviors);
   return Object.freeze({
     activityCategory: activityCategory(payload.activityCategory),
+    ...(payload.accountCandidate !== undefined ? { accountCandidate: accountCandidate(payload.accountCandidate) } : {}),
+    ...(payload.accountingDispositionCandidate !== undefined
+      ? { accountingDispositionCandidate: dispositionCandidate(payload.accountingDispositionCandidate) } : {}),
     aiRole: nullableText(payload.aiRole, "analysis.aiRole", 2_000),
+    ...(collaborationBehaviors ? { collaborationBehaviors } : {}),
     initiative: score(payload.initiative, "analysis.initiative"),
     reasoning: score(payload.reasoning, "analysis.reasoning"),
     criticalJudgment: score(payload.criticalJudgment, "analysis.criticalJudgment"),
@@ -198,8 +262,8 @@ function parsePayload(value: unknown): WeeklyAnalysisPayloadV1 {
       const row = object(item, "Analysis evidence is invalid.");
       exactKeys(row, ["target", "conversationId", "messageIndex", "quote"]);
       if (!oneOf(row.target, [
-        "activity-category", "ai-role", "initiative", "reasoning", "critical-judgment",
-        "thinking-change", "discovery",
+        "activity-category", "account-candidate", "accounting-disposition", "ai-role",
+        "collaboration-behavior", "initiative", "reasoning", "critical-judgment", "thinking-change", "discovery",
       ])) invalid("Analysis evidence target is invalid.");
       if (!Number.isSafeInteger(row.messageIndex) || (row.messageIndex as number) < 0) {
         invalid("Analysis evidence messageIndex is invalid.");
@@ -212,6 +276,48 @@ function parsePayload(value: unknown): WeeklyAnalysisPayloadV1 {
       });
     })),
   });
+}
+
+function parseCollaborationBehaviors(value: unknown): readonly Readonly<{ kind: WeeklyAnalysisCollaborationKind; description: string }>[] {
+  const rows = array(value, "Collaboration behaviors are invalid.");
+  if (rows.length > 20) invalid("Collaboration behaviors are too large.");
+  return Object.freeze(rows.map((item) => {
+    const row = object(item, "Collaboration behavior is invalid.");
+    exactKeys(row, ["kind", "description"]);
+    if (!oneOf(row.kind, ["goal-setting", "comparison", "verification", "revision", "own-decision", "delegation", "synthesis"])) {
+      invalid("Collaboration behavior kind is invalid.");
+    }
+    return Object.freeze({ kind: row.kind, description: requiredText(row.description, "Collaboration behavior description is invalid.", 2_000) });
+  }));
+}
+
+function accountCandidate(value: unknown): WeeklyAnalysisAccountCandidate {
+  if (value === null || oneOf(value, ["相談活動費", "思考探究費", "成果物利用費", "情報収集費", "学習活動費", "その他AI利用費"])) return value;
+  return invalid("accountCandidate is invalid.");
+}
+
+function dispositionCandidate(value: unknown): WeeklyAnalysisDispositionCandidate {
+  if (value === null || oneOf(value, ["expense", "asset", "work-in-progress", "unclassified"])) return value;
+  return invalid("accountingDispositionCandidate is invalid.");
+}
+
+function assertEvidenceCoverage(payload: WeeklyAnalysisPayloadV1) {
+  const targets = new Set(payload.evidence.map((item) => item.target));
+  const required: Array<[boolean, WeeklyAnalysisEvidenceTarget]> = [
+    [payload.activityCategory !== null, "activity-category"],
+    [payload.accountCandidate !== undefined && payload.accountCandidate !== null, "account-candidate"],
+    [payload.accountingDispositionCandidate !== undefined && payload.accountingDispositionCandidate !== null, "accounting-disposition"],
+    [payload.aiRole !== null, "ai-role"],
+    [(payload.collaborationBehaviors?.length ?? 0) > 0, "collaboration-behavior"],
+    [payload.initiative !== null, "initiative"],
+    [payload.reasoning !== null, "reasoning"],
+    [payload.criticalJudgment !== null, "critical-judgment"],
+    [payload.thinkingChange !== null, "thinking-change"],
+    [payload.discovery !== null, "discovery"],
+  ];
+  if (required.some(([needed, target]) => needed && !targets.has(target))) {
+    invalid("A non-null analysis value requires conversation evidence.");
+  }
 }
 
 function parseError(value: unknown): NonNullable<WeeklyAnalysisResponseV1["error"]> {
@@ -269,6 +375,17 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]) {
   if (Object.keys(value).length !== keys.length || Object.keys(value).some((key) => !expected.has(key))) {
     invalid("Unexpected or missing fields.");
   }
+}
+
+function allowedKeys(value: Record<string, unknown>, allowed: readonly string[], required: readonly string[]) {
+  const allowedSet = new Set(allowed);
+  if (Object.keys(value).some((key) => !allowedSet.has(key)) || required.some((key) => !hasOwn(value, key))) {
+    invalid("Unexpected or missing fields.");
+  }
+}
+
+function hasOwn(value: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key);
 }
 
 function object(value: unknown, message: string): Record<string, unknown> {
