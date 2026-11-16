@@ -3,9 +3,9 @@
   gap: 14px;
 }
 
-.weekly-workspace-tabs {
+.weekly-context-tabs {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
   padding: 5px;
   border: 1px solid #dbeafe;
@@ -14,18 +14,18 @@
 }
 
 @media (max-width: 720px) {
-  .weekly-workspace-tabs {
+  .weekly-context-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 390px) {
-  .weekly-workspace-tabs {
+  .weekly-context-tabs {
     grid-template-columns: 1fr;
   }
 }
 
-.weekly-workspace-tabs button {
+.weekly-context-tabs button {
   min-width: 0;
   padding: 10px 7px;
   border: 0;
@@ -38,8 +38,30 @@
   cursor: pointer;
 }
 
-.weekly-workspace-tabs button[aria-pressed="true"] {
+.weekly-context-tabs button[aria-pressed="true"] {
   color: #fff;
   background: #2563eb;
   box-shadow: 0 6px 15px rgba(37, 99, 235, 0.18);
 }
+
+.weekly-flow-guide {
+  padding: 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #eff6ff, #f0f9ff);
+}
+
+.weekly-flow-guide ol {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weekly-flow-guide li { display: grid; gap: 4px; padding: 11px; border-radius: 12px; background: rgba(255, 255, 255, 0.85); }
+.weekly-flow-guide b { color: #1e40af; font-size: 0.78rem; }
+.weekly-flow-guide span { color: #64748b; font-size: 0.68rem; line-height: 1.5; }
+
+@media (max-width: 600px) { .weekly-flow-guide ol { grid-template-columns: 1fr; } }

@@ -35,7 +35,7 @@ import {
   updateThinkingLedgerRecord,
 } from "./thinkingLedgerStore";
 import { saveThoughtJournalRecord } from "./thoughtJournalStore";
-import { WeeklyWorkspaceScreen } from "./weekly/WeeklyWorkspaceScreen";
+import { WeeklyWorkspaceScreen, type WeeklyPrimaryView } from "./weekly/WeeklyWorkspaceScreen";
 import {
   buildTimeAccountingView,
   buildTimeImportHistory,
@@ -64,12 +64,13 @@ import {
   NotebookTabs,
   ReceiptText,
   ScanLine,
+  Settings,
   Sparkles,
   WalletCards,
   X,
 } from "lucide-react";
 
-type TabKey = "home" | "weekly" | "journal" | "receipts" | "analysis" | "tax";
+type TabKey = "home" | "weekly" | "journal" | "receipts" | "analysis" | "tax" | "settings";
 type SettlementView = LedgerPeriod;
 
 type JournalUnit = {
@@ -138,6 +139,7 @@ type IssuedThinkingReceipt = ThoughtReceiptCandidate & {
 
 // 応募用プロトタイプなので、外部DBではなく画面確認用のサンプルデータを置いています。
 const IS_PREVIEW = window.location.pathname.startsWith("/accounting-of-AI/preview/");
+const RESEARCH_WEEKLY_MODE = true;
 const SHOW_DEMO_TOOLS = IS_PREVIEW
   || window.location.hostname === "localhost"
   || window.location.hostname === "127.0.0.1";
@@ -502,6 +504,7 @@ const tabLabels: Record<TabKey, string> = {
   receipts: "帳簿",
   analysis: "月次",
   tax: "決算",
+  settings: "設定",
 };
 
 type ReaderStep = "closed" | "scan" | "confirm";
@@ -542,7 +545,7 @@ function resetPageScroll(behavior: ScrollBehavior = "auto", extraElement?: HTMLE
 
 function App() {
   const screenRef = useRef<HTMLDivElement | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>(IS_PREVIEW ? "tax" : "home");
+  const [activeTab, setActiveTab] = useState<TabKey>(RESEARCH_WEEKLY_MODE ? "home" : IS_PREVIEW ? "tax" : "home");
   const [receiptData, setReceiptData] = useState<ThoughtReceipt[]>(loadReceipts);
   const [readerStep, setReaderStep] = useState<ReaderStep>("closed");
   const [scannedReceipt, setScannedReceipt] = useState<ThoughtReceipt | null>(null);
@@ -786,6 +789,7 @@ function App() {
       } else {
         showToast(`${result.skippedCount}件は取り込み済みでした。完了通知を更新しました。`);
       }
+      if (RESEARCH_WEEKLY_MODE) setActiveTab("weekly");
     } catch (error) {
       setTimeImportMessage(
         error instanceof Error ? error.message : "利用時間を会計へ取り込めませんでした。",
@@ -893,6 +897,19 @@ function App() {
       localStorage.setItem(RAW_CONVERSATION_KEY, JSON.stringify(draftConversation));
     } catch {
       // URLからの取り込み自体は続けます。localStorage保存は再読み込み用の補助です。
+    }
+
+    if (RESEARCH_WEEKLY_MODE) {
+      setConversationCandidate(null);
+      setConversationMessage("");
+      setCandidateIssueMessage("");
+      setIssuedReceipt(null);
+      setLedgerMessage("");
+      setIsSettlementOpen(false);
+      setActiveTab("weekly");
+      scrollScreenToTop("auto");
+      clearDraftQueryParam();
+      return;
     }
 
     setConversationCandidate(classifyConversation(draftConversation));
@@ -1327,10 +1344,12 @@ function App() {
     }
   }
 
+  const weeklyPrimaryView = toWeeklyPrimaryView(activeTab);
+
   return (
     <div className="app-shell">
-      <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
-        <Header onOpenSettlement={openSettlement} />
+      <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}${RESEARCH_WEEKLY_MODE ? " research-frame" : ""}`}>
+        <Header onOpenSettlement={openSettlement} onOpenSettings={() => handleTabChange("settings")} researchMode={RESEARCH_WEEKLY_MODE} />
         <div className="screen" ref={screenRef}>
           {!isSettlementOpen && activeTab === "home" && timeRecordPreview.length > 0 && (
             <section className="extension-import-card time-record-preview" aria-label="利用時間の連携内容">
@@ -1353,7 +1372,10 @@ function App() {
               {timeImportMessage && <p className="candidate-message" role="status">{timeImportMessage}</p>}
             </section>
           )}
-          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
+          {!isSettlementOpen && RESEARCH_WEEKLY_MODE && (
+            <WeeklyWorkspaceScreen view={weeklyPrimaryView} onNavigate={(view) => handleTabChange(fromWeeklyPrimaryView(view))} />
+          )}
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
             <HomeScreen
               stats={stats}
               receipts={currentReceiptData}
@@ -1370,7 +1392,7 @@ function App() {
               onOpenReceipt={setSelectedReceipt}
             />
           )}
-          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && !issuedReceipt && (
             <section className="extension-import-card extension-import-card-top" aria-label="Chrome拡張機能との連携">
               <div className="import-card-heading">
                 <strong>{conversationCandidate ? "取り込んだ会話を確認" : "Chrome拡張機能から取り込む"}</strong>
@@ -1396,7 +1418,7 @@ function App() {
               </>}
             </section>
           )}
-          {!isSettlementOpen && activeTab === "home" && issuedReceipt && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && issuedReceipt && (
             <section className="extension-import-card extension-import-card-top print-receipt-host">
               <IssuedReceiptPanel
                 receipt={issuedReceipt}
@@ -1412,7 +1434,7 @@ function App() {
                 />
             </section>
           )}
-          {!isSettlementOpen && activeTab === "tax" && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "tax" && (
             <div className="stack">
               <SettlementPeriodNavigation
                 value={settlementView}
@@ -1446,8 +1468,8 @@ function App() {
               )}
             </div>
           )}
-          {!isSettlementOpen && activeTab === "weekly" && <WeeklyWorkspaceScreen />}
-          {!isSettlementOpen && activeTab === "journal" && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "weekly" && <WeeklyWorkspaceScreen />}
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "journal" && (
             <JournalScreen
               receipts={currentReceiptData}
               monthLabel={currentMonthLabel}
@@ -1459,7 +1481,7 @@ function App() {
               onCorrectTimeRecord={correctTimeRecord}
             />
           )}
-          {!isSettlementOpen && activeTab === "receipts" && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "receipts" && (
             ledgerStatus !== "ready" ? <LedgerLoadState status={ledgerStatus} onRetry={refreshLedger} /> : <ReceiptsScreen
               receipts={receiptData}
               thinkingLedger={thinkingLedger}
@@ -1505,7 +1527,7 @@ function App() {
   );
 }
 
-function Header({ onOpenSettlement }: { onOpenSettlement: () => void }) {
+function Header({ onOpenSettlement, onOpenSettings, researchMode }: { onOpenSettlement: () => void; onOpenSettings: () => void; researchMode: boolean }) {
   return (
     <header className="top-header">
       <div>
@@ -1513,14 +1535,14 @@ function Header({ onOpenSettlement }: { onOpenSettlement: () => void }) {
         <h1>私とAIの確定申告</h1>
         {IS_PREVIEW && <p className="preview-notice">確認用プレビュー · 本番の記録には影響しません</p>}
       </div>
-      <AiSettingsButton />
+      {!researchMode && <AiSettingsButton />}
       <button
         className="icon-button"
         type="button"
-        aria-label="決算を開く"
-        onClick={onOpenSettlement}
+        aria-label={researchMode ? "設定を開く" : "決算を開く"}
+        onClick={researchMode ? onOpenSettings : onOpenSettlement}
       >
-        <BookOpenText size={20} />
+        {researchMode ? <Settings size={20} /> : <BookOpenText size={20} />}
       </button>
     </header>
   );
@@ -3607,11 +3629,11 @@ function BottomNav({
   onChange: (tab: TabKey) => void;
 }) {
   const tabs: Array<{ key: TabKey; icon: ReactNode }> = [
-    { key: "home", icon: <ReceiptText size={20} /> },
-    { key: "weekly", icon: <Sparkles size={20} /> },
+    { key: "home", icon: <Home size={20} /> },
+    { key: "weekly", icon: <ReceiptText size={20} /> },
     { key: "journal", icon: <BookOpenText size={20} /> },
-    { key: "receipts", icon: <NotebookTabs size={20} /> },
     { key: "tax", icon: <CalendarDays size={20} /> },
+    { key: "settings", icon: <Settings size={20} /> },
   ];
 
   return (
@@ -3629,6 +3651,22 @@ function BottomNav({
       ))}
     </nav>
   );
+}
+
+function toWeeklyPrimaryView(tab: TabKey): WeeklyPrimaryView {
+  if (tab === "weekly") return "records";
+  if (tab === "journal") return "journal";
+  if (tab === "tax") return "settlement";
+  if (tab === "settings") return "settings";
+  return "home";
+}
+
+function fromWeeklyPrimaryView(view: WeeklyPrimaryView): TabKey {
+  if (view === "records") return "weekly";
+  if (view === "journal") return "journal";
+  if (view === "settlement") return "tax";
+  if (view === "settings") return "settings";
+  return "home";
 }
 
 function MetricCard({

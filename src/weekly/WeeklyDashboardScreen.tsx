@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatPeriod, periodBounds, shiftPeriod } from "../ledgerPeriods.ts";
 import { buildWeeklyDashboardData } from "../weeklyDashboard.ts";
-import { loadWeeklyRecordStore, WEEKLY_RECORDS_STORAGE_KEY, type WeeklyRecordStoreV1 } from "../weeklyStore.ts";
+import { loadWeeklyAnalysisStore, resolveWeeklyAnalysisState, WEEKLY_ANALYSES_STORAGE_KEY, type WeeklyAnalysisStoreV1 } from "../weeklyAnalysisStore.ts";
+import { loadWeeklyConversationStore, loadWeeklyRecordStore, WEEKLY_CONVERSATIONS_STORAGE_KEY, WEEKLY_RECORDS_STORAGE_KEY, type WeeklyConversationStoreV1, type WeeklyRecordStoreV1 } from "../weeklyStore.ts";
 import type { AccountingDisposition, WeeklyTimeSource } from "../weeklyData.ts";
 import "./weeklyDashboardScreen.css";
 
@@ -14,6 +15,8 @@ export function WeeklyDashboardScreen({
 }) {
   const [anchor, setAnchor] = useState(() => new Date());
   const [store, setStore] = useState<WeeklyRecordStoreV1>(() => emptyOrLoadedStore());
+  const [conversations, setConversations] = useState<WeeklyConversationStoreV1>(() => emptyOrLoadedConversations());
+  const [analyses, setAnalyses] = useState<WeeklyAnalysisStoreV1>(() => emptyOrLoadedAnalyses());
   const [loadError, setLoadError] = useState("");
   const dashboard = useMemo(
     () => buildWeeklyDashboardData(store.records, store.tasks, anchor),
@@ -21,10 +24,18 @@ export function WeeklyDashboardScreen({
   );
   const currentWeekStart = periodBounds(new Date(), "weekly").start;
   const isCurrentWeek = dashboard.weekStart.getTime() === currentWeekStart.getTime();
+  const conversationByRecord = useMemo(() => new Map(conversations.conversations.map((item) => [item.recordId, item])), [conversations.conversations]);
+  const analysisCounts = useMemo(() => dashboard.records.reduce((counts, item) => {
+    const status = resolveWeeklyAnalysisState(item.record, analyses, conversationByRecord.get(item.record.id) ?? null).analysisStatus;
+    counts[status] += 1;
+    return counts;
+  }, { "not-connected": 0, pending: 0, complete: 0, failed: 0, "not-applicable": 0 }), [dashboard.records, analyses, conversationByRecord]);
 
   const refresh = useCallback(() => {
     try {
       setStore(loadWeeklyRecordStore());
+      setConversations(loadWeeklyConversationStore());
+      setAnalyses(loadWeeklyAnalysisStore());
       setLoadError("");
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : "週次データを読み込めませんでした。");
@@ -33,7 +44,7 @@ export function WeeklyDashboardScreen({
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === null) refresh();
+      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_CONVERSATIONS_STORAGE_KEY || event.key === WEEKLY_ANALYSES_STORAGE_KEY || event.key === null) refresh();
     };
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("storage", onStorage);
@@ -101,8 +112,8 @@ export function WeeklyDashboardScreen({
         </article>
         <article className="weekly-dashboard-status-card analysis">
           <span>AI分析</span>
-          <strong>{dashboard.notConnectedCount > 0 ? "未接続・未評価" : dashboard.recordCount === 0 ? "記録なし" : "対象外"}</strong>
-          <small>未評価 {dashboard.notEvaluatedCount}件 / 対象外 {dashboard.notApplicableCount}件</small>
+          <strong>{dashboard.recordCount === 0 ? "記録なし" : analysisCounts.complete > 0 ? `分析完了 ${analysisCounts.complete}件` : analysisCounts.pending > 0 ? `分析待ち ${analysisCounts.pending}件` : analysisCounts.failed > 0 ? `分析失敗 ${analysisCounts.failed}件` : analysisCounts["not-connected"] > 0 ? "未接続・未評価" : "対象外"}</strong>
+          <small>未評価 {analysisCounts["not-connected"]}件 / 失敗 {analysisCounts.failed}件 / 対象外 {analysisCounts["not-applicable"]}件</small>
         </article>
       </section>
 
@@ -124,11 +135,12 @@ export function WeeklyDashboardScreen({
           {dashboard.records.map(({ record, allocatedSeconds }) => {
             const task = record.taskId ? store.tasks.find((item) => item.id === record.taskId) : undefined;
             const noAi = record.analysisStatus === "not-applicable" || task?.plannedAiasLevel === 1;
+            const actualAnalysis = resolveWeeklyAnalysisState(record, analyses, conversationByRecord.get(record.id) ?? null);
             return <article key={record.id}>
               <div className="weekly-history-top"><div><time>{formatDateTime(record.recordedAt)}</time><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong></div><span>{noAi ? "AI不使用" : formatDuration(allocatedSeconds)}</span></div>
               <div className="weekly-history-tags"><span>{record.activityCategory ?? "未分類"}</span><span>{sourceLabel(record.timeSource)}</span><span>{dispositionLabel(record.accountingDisposition)}</span>{task && <span>Level {task.plannedAiasLevel ?? "未設定"}</span>}</div>
               <p>{record.manualNotes?.discovery ?? record.manualNotes?.ownThoughts ?? (record.privacy === "time-only" ? "本文を保存しない記録" : "本人メモなし")}</p>
-              <small>{noAi ? "AI分析対象外" : "AI分析：未接続・未評価（スコアはnull）"}</small>
+              <small>{noAi ? "AI分析対象外" : `AI分析：${analysisStatusLabel(actualAnalysis.analysisStatus)}`}</small>
             </article>;
           })}
         </div>}
@@ -148,6 +160,18 @@ function EmptyMessage() {
 
 function emptyOrLoadedStore(): WeeklyRecordStoreV1 {
   try { return loadWeeklyRecordStore(); } catch { return Object.freeze({ schemaVersion: 1, records: Object.freeze([]), tasks: Object.freeze([]) }); }
+}
+
+function emptyOrLoadedConversations(): WeeklyConversationStoreV1 {
+  try { return loadWeeklyConversationStore(); } catch { return Object.freeze({ schemaVersion: 1, conversations: Object.freeze([]) }); }
+}
+
+function emptyOrLoadedAnalyses(): WeeklyAnalysisStoreV1 {
+  try { return loadWeeklyAnalysisStore(); } catch { return Object.freeze({ schemaVersion: 1, entries: Object.freeze([]) }); }
+}
+
+function analysisStatusLabel(value: "not-connected" | "pending" | "complete" | "failed" | "not-applicable") {
+  return { "not-connected": "未接続・未評価（スコアはnull）", pending: "分析待ち", complete: "分析完了", failed: "分析失敗", "not-applicable": "対象外" }[value];
 }
 
 function sourceLabel(source: WeeklyTimeSource) {

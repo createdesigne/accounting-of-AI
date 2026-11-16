@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatPeriod, periodBounds, shiftPeriod } from "../ledgerPeriods.ts";
 import { WEEKLY_ACCOUNTS, type WeeklyAccount } from "../weeklyAccounting.ts";
+import { buildWeeklyDashboardData } from "../weeklyDashboard.ts";
+import {
+  loadWeeklyReflectionStore,
+  reflectionForWeek,
+  WEEKLY_REFLECTIONS_STORAGE_KEY,
+  type WeeklyReflectionStoreV1,
+} from "../weeklyReflectionStore.ts";
 import {
   confirmWeeklySettlement,
   loadWeeklySettlementStore,
@@ -16,10 +23,11 @@ import {
 import type { WeeklyTimeSource } from "../weeklyData.ts";
 import "./weeklySettlementScreen.css";
 
-export function WeeklySettlementScreen({ onOpenRecords }: { onOpenRecords: () => void }) {
+export function WeeklySettlementScreen({ onOpenRecords, onOpenReflection }: { onOpenRecords: () => void; onOpenReflection?: (anchor: Date) => void }) {
   const [anchor, setAnchor] = useState(() => new Date());
   const [records, setRecords] = useState<WeeklyRecordStoreV1>(() => loadRecordsSafely());
   const [history, setHistory] = useState<WeeklySettlementStoreV1>(() => loadHistorySafely());
+  const [reflections, setReflections] = useState<WeeklyReflectionStoreV1>(() => loadReflectionsSafely());
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -27,6 +35,9 @@ export function WeeklySettlementScreen({ onOpenRecords }: { onOpenRecords: () =>
     () => previewWeeklySettlement(records.records, records.tasks, anchor, history),
     [records.records, records.tasks, anchor, history],
   );
+  const dashboard = useMemo(() => buildWeeklyDashboardData(records.records, records.tasks, anchor), [records.records, records.tasks, anchor]);
+  const reflection = useMemo(() => reflectionForWeek(reflections, anchor), [reflections, anchor]);
+  const largestCategorySeconds = Math.max(1, ...dashboard.categories.map((item) => item.seconds));
   const currentWeekStart = periodBounds(new Date(), "weekly").start;
   const isCurrentWeek = periodBounds(anchor, "weekly").start.getTime() === currentWeekStart.getTime();
 
@@ -34,6 +45,7 @@ export function WeeklySettlementScreen({ onOpenRecords }: { onOpenRecords: () =>
     try {
       setRecords(loadWeeklyRecordStore());
       setHistory(loadWeeklySettlementStore());
+      setReflections(loadWeeklyReflectionStore());
       setError("");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "週次決算データを読み込めませんでした。");
@@ -43,7 +55,7 @@ export function WeeklySettlementScreen({ onOpenRecords }: { onOpenRecords: () =>
   useEffect(() => {
     refresh();
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_SETTLEMENTS_STORAGE_KEY || event.key === null) refresh();
+      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_SETTLEMENTS_STORAGE_KEY || event.key === WEEKLY_REFLECTIONS_STORAGE_KEY || event.key === null) refresh();
     };
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("storage", onStorage);
@@ -118,6 +130,7 @@ export function WeeklySettlementScreen({ onOpenRecords }: { onOpenRecords: () =>
         <p className="weekly-settlement-note">
           未分類の記録は費用化せず、AI仮受品に残します。費用・資産・仕掛は、活動登録時に本人が選択した会計区分です。
         </p>
+        <p className="weekly-accounting-meaning"><strong>費用は、思考の悪さやAI依存度ではありません。</strong> 相談・学習・情報収集など、その週の活動に使った時間を研究上の区分で整理したものです。</p>
         {preview.confirmationStatus === "needs-reconfirmation" && (
           <p className="weekly-settlement-change-note">確定後に記録が編集または削除されています。最新内容を確認して再確定してください。</p>
         )}
@@ -145,6 +158,27 @@ export function WeeklySettlementScreen({ onOpenRecords }: { onOpenRecords: () =>
         <div className="weekly-pl-list">
           {preview.settlement.profitAndLoss.expenses.map((line) => <div key={line.account}><span>{line.account}</span><strong>{formatDuration(line.seconds)}</strong></div>)}
         </div>
+      </section>
+
+      <section className="weekly-settlement-panel" aria-labelledby="weekly-category-chart-heading">
+        <div className="weekly-settlement-heading"><div><p className="eyebrow">今週の活動構成</p><h3 id="weekly-category-chart-heading">活動テーマ別グラフ</h3></div><span>{dashboard.recordCount}件</span></div>
+        {dashboard.categories.length === 0 ? <p className="weekly-settlement-empty">この週の活動記録はありません。</p> : <div className="weekly-category-chart">
+          {dashboard.categories.map((item) => <div key={item.category ?? "unclassified"}>
+            <div><span>{item.category ?? "未分類"}</span><strong>{formatDuration(item.seconds)}・{item.count}件</strong></div>
+            <i><b style={{ width: `${Math.max(3, Math.round((item.seconds / largestCategorySeconds) * 100))}%` }} /></i>
+          </div>)}
+        </div>}
+      </section>
+
+      <section className="weekly-settlement-panel" aria-labelledby="weekly-settlement-reflection-heading">
+        <div className="weekly-settlement-heading"><div><p className="eyebrow">本人による記録</p><h3 id="weekly-settlement-reflection-heading">この週の振り返り</h3></div></div>
+        {reflection ? <dl className="weekly-settlement-reflection">
+          <div><dt>発見・学び</dt><dd>{reflection.discoveryLearning || "記入なし"}</dd></div>
+          <div><dt>本人が判断・修正したこと</dt><dd>{reflection.humanJudgment || "記入なし"}</dd></div>
+          <div><dt>AIとの関わり方</dt><dd>{reflection.relationshipReflection || "記入なし"}</dd></div>
+          <div><dt>来週の小さな挑戦</dt><dd>{reflection.nextWeekChallenge || "記入なし"}</dd></div>
+        </dl> : <p className="weekly-settlement-empty">この週の振り返りはまだありません。</p>}
+        {onOpenReflection && <button className="weekly-settlement-edit" type="button" onClick={() => onOpenReflection(anchor)}>{reflection ? "振り返りを編集" : "本人の振り返りを記録"}</button>}
       </section>
 
       <section className="weekly-settlement-panel" aria-labelledby="weekly-journal-heading">
@@ -195,6 +229,10 @@ function loadRecordsSafely(): WeeklyRecordStoreV1 {
 
 function loadHistorySafely(): WeeklySettlementStoreV1 {
   try { return loadWeeklySettlementStore(); } catch { return Object.freeze({ schemaVersion: 1, weeks: Object.freeze([]) }); }
+}
+
+function loadReflectionsSafely(): WeeklyReflectionStoreV1 {
+  try { return loadWeeklyReflectionStore(); } catch { return Object.freeze({ schemaVersion: 1, reflections: Object.freeze([]) }); }
 }
 
 function settlementStatus(value: "unconfirmed" | "confirmed" | "needs-reconfirmation") {

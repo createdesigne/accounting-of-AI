@@ -5,6 +5,7 @@ import type { AnalysisActivityCategory, AnalysisScore } from "../integrations/an
 import type {
   WeeklyAnalysisAccountCandidate,
   WeeklyAnalysisDispositionCandidate,
+  WeeklyAnalysisEvidenceV1,
 } from "../integrations/weeklyAnalysisContract.ts";
 import { WEEKLY_ANALYSIS_RUBRIC_VERSION } from "../integrations/weeklyAnalysisRubric.ts";
 import type { TaskV1, WeeklyConversationContentV1, WeeklyRecordV1 } from "../weeklyData.ts";
@@ -157,10 +158,14 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
         <Row label="会計区分候補" value={dispositionLabel(analysis.accountingDispositionCandidate)} />
         <Row label="実際のAIの役割" value={analysis.aiRole ?? "判定不可"} />
         <Row label="協働行動" value={analysis.collaborationBehaviors?.map((item) => item.description).join("／") || "判定不可"} />
-        <Row label="研究指標" value={`自発性 ${scoreLabel(analysis.initiative)}／論理性 ${scoreLabel(analysis.reasoning)}／批判的判断 ${scoreLabel(analysis.criticalJudgment)}`} />
         <Row label="思考の変化" value={analysis.thinkingChange ?? "判定不可"} />
         <Row label="発見・学び" value={analysis.discovery ?? "判定不可"} />
       </dl>
+      <div className="weekly-analysis-metrics" aria-label="研究指標と評価根拠">
+        <MetricEvidence label="自発性" score={analysis.initiative} target="initiative" evidence={analysis.evidence} />
+        <MetricEvidence label="論理性" score={analysis.reasoning} target="reasoning" evidence={analysis.evidence} />
+        <MetricEvidence label="批判的判断" score={analysis.criticalJudgment} target="critical-judgment" evidence={analysis.evidence} />
+      </div>
       <p className="weekly-analysis-advisory">活動テーマ・勘定科目・会計区分は候補です。保存済み活動、利用時間、仕訳、週次決算には自動反映しません。</p>
       {analysis.evidence.length > 0 && <div className="weekly-analysis-evidence"><b>分析根拠となる会話箇所</b><ul>{analysis.evidence.map((evidence, index) => <li key={`${evidence.target}:${evidence.messageIndex}:${index}`}>会話 {evidence.messageIndex + 1}：「{evidence.quote}」</li>)}</ul></div>}
 
@@ -192,6 +197,12 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
 }
 
 function Row({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
+function MetricEvidence({ label, score, target, evidence }: { label: string; score: AnalysisScore; target: WeeklyAnalysisEvidenceV1["target"]; evidence: readonly WeeklyAnalysisEvidenceV1[] }) {
+  const matches = evidence.filter((item) => item.target === target);
+  return <article><div><strong>{label}</strong><b>{scoreLabel(score)}</b></div>{matches.length > 0
+    ? matches.map((item, index) => <p key={`${item.messageIndex}:${index}`}>根拠：会話{item.messageIndex + 1}「{item.quote}」</p>)
+    : <p>{score === null ? "根拠：不足（評価値はnull／評価不可）" : "対応する根拠引用なし（旧形式の分析結果）"}</p>}</article>;
+}
 function ScoreSelect({ label, value, onChange }: { label: string; value: AnalysisScore; onChange: (value: AnalysisScore) => void }) {
   return <label>{label}<select value={value ?? ""} onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value) as Exclude<AnalysisScore, null>)}><option value="">根拠不足（null）</option>{[0, 25, 50, 75, 100].map((score) => <option key={score} value={score}>{score}</option>)}</select></label>;
 }

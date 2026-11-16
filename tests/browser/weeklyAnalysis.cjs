@@ -47,7 +47,8 @@ const model = 'gemini-browser-weekly-test';
     page.setDefaultTimeout(15000);
     await page.goto(base);
 
-    await page.getByRole('button', { name: 'AI設定を開く', exact: true }).click();
+    await page.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '設定', exact: true }).click();
+    await page.getByRole('button', { name: 'Gemini APIを設定', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'AI設定', exact: true });
     await settings.getByLabel('Gemini APIキー', { exact: true }).fill(fakeKey);
     await settings.getByLabel('Geminiモデル', { exact: true }).fill(model);
@@ -55,7 +56,7 @@ const model = 'gemini-browser-weekly-test';
     await settings.getByRole('button', { name: '閉じる', exact: true }).click();
 
     await page.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '記録', exact: true }).click();
-    await page.getByRole('navigation', { name: '週次画面の切り替え' }).getByRole('button', { name: '課題設定・手入力', exact: true }).click();
+    await page.getByRole('navigation', { name: '記録方法の切り替え' }).getByRole('button', { name: '保存済み記録・手入力', exact: true }).click();
     const forms = page.locator('form.weekly-form');
     const taskForm = forms.nth(0);
     await taskForm.getByLabel('課題名', { exact: true }).fill('研究用分析テスト');
@@ -104,7 +105,7 @@ const model = 'gemini-browser-weekly-test';
 
     await page.reload();
     await page.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '記録', exact: true }).click();
-    await page.getByRole('navigation', { name: '週次画面の切り替え' }).getByRole('button', { name: '課題設定・手入力', exact: true }).click();
+    await page.getByRole('navigation', { name: '記録方法の切り替え' }).getByRole('button', { name: '保存済み記録・手入力', exact: true }).click();
     const restored = page.locator('.weekly-record-card').filter({ hasText: '研究用分析テスト' });
     await restored.getByText('本人確認済み：', { exact: false }).waitFor();
     assert.equal(await restored.getByLabel('批判的判断').inputValue(), '75');

@@ -1,0 +1,78 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatPeriod, periodBounds, shiftPeriod } from "../ledgerPeriods.ts";
+import { previewWeeklySettlement, loadWeeklySettlementStore, WEEKLY_SETTLEMENTS_STORAGE_KEY } from "../weeklySettlementStore.ts";
+import { loadWeeklyRecordStore, WEEKLY_RECORDS_STORAGE_KEY, type WeeklyRecordStoreV1 } from "../weeklyStore.ts";
+import type { WeeklyTimeSource } from "../weeklyData.ts";
+import "./weeklySettlementScreen.css";
+
+export function WeeklyJournalScreen({ onOpenRecords }: { onOpenRecords: () => void }) {
+  const [anchor, setAnchor] = useState(() => new Date());
+  const [records, setRecords] = useState<WeeklyRecordStoreV1>(() => loadRecordsSafely());
+  const [revision, setRevision] = useState(0);
+  const preview = useMemo(() => previewWeeklySettlement(
+    records.records,
+    records.tasks,
+    anchor,
+    loadHistorySafely(),
+  ), [records.records, records.tasks, anchor, revision]);
+  const isCurrentWeek = periodBounds(anchor, "weekly").start.getTime() === periodBounds(new Date(), "weekly").start.getTime();
+
+  const refresh = useCallback(() => {
+    setRecords(loadRecordsSafely());
+    setRevision((value) => value + 1);
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_SETTLEMENTS_STORAGE_KEY || event.key === null) refresh();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refresh]);
+
+  return <div className="weekly-settlement stack">
+    <section className="weekly-settlement-hero">
+      <div><p className="eyebrow light">週次仕訳</p><h2>活動時間の仕訳を確認</h2><p>{formatPeriod(anchor, "weekly")}</p></div>
+      <span className="weekly-settlement-status">{preview.journalEntries.length}仕訳</span>
+    </section>
+    <nav className="weekly-week-navigation" aria-label="仕訳対象の週">
+      <button type="button" onClick={() => setAnchor((value) => shiftPeriod(value, "weekly", -1))}>← 前の週</button>
+      <button type="button" className="current-week-button" disabled={isCurrentWeek} onClick={() => setAnchor(new Date())}>今週</button>
+      <button type="button" disabled={isCurrentWeek} onClick={() => setAnchor((value) => shiftPeriod(value, "weekly", 1))}>次の週 →</button>
+    </nav>
+    <section className="weekly-settlement-panel weekly-accounting-explanation">
+      <strong>「費用」は思考の悪さやAI依存を表しません</strong>
+      <p>この研究の費用は、その週の相談・学習・情報収集などに使った時間の分類です。AIAS Levelや研究指標を金額・資産価値へ換算していません。</p>
+    </section>
+    <section className="weekly-settlement-panel" aria-labelledby="weekly-journal-only-heading">
+      <div className="weekly-settlement-heading"><div><p className="eyebrow">借方＝貸方</p><h3 id="weekly-journal-only-heading">週次仕訳一覧</h3></div><span>{preview.journalEntries.length}仕訳</span></div>
+      {preview.journalEntries.length === 0 ? <p className="weekly-settlement-empty">この週のAI利用仕訳はありません。</p> : <div className="weekly-journal-list">
+        {preview.journalEntries.map((entry) => <article key={entry.id}>
+          <div className="weekly-journal-meta"><span>{entry.kind === "usage-recognition" ? "仮仕訳" : "決算振替"}</span><span>{sourceLabel(entry.timeSource)}</span></div>
+          <div className="weekly-journal-lines">
+            <div><small>借方</small><strong>{entry.lines[0].account}</strong><span>{formatDuration(entry.lines[0].seconds)}</span></div>
+            <div><small>貸方</small><strong>{entry.lines[1].account}</strong><span>{formatDuration(entry.lines[1].seconds)}</span></div>
+          </div>
+          <small className="weekly-journal-id">記録ID: {entry.recordId}</small>
+        </article>)}
+      </div>}
+    </section>
+    <button className="weekly-settlement-edit" type="button" onClick={onOpenRecords}>活動・分析・会計区分を確認</button>
+  </div>;
+}
+
+function loadRecordsSafely(): WeeklyRecordStoreV1 {
+  try { return loadWeeklyRecordStore(); } catch { return Object.freeze({ schemaVersion: 1, records: Object.freeze([]), tasks: Object.freeze([]) }); }
+}
+function loadHistorySafely() {
+  try { return loadWeeklySettlementStore(); } catch { return Object.freeze({ schemaVersion: 1 as const, weeks: Object.freeze([]) }); }
+}
+function sourceLabel(value: WeeklyTimeSource) { return { manual: "手入力", measured: "自動計測", adjusted: "補正", unknown: "取得方法不明" }[value]; }
+function formatDuration(seconds: number) {
+  const hours = Math.floor(seconds / 3600); const minutes = Math.floor((seconds % 3600) / 60); const rest = seconds % 60;
+  return `${hours > 0 ? `${hours}時間` : ""}${minutes}分${String(rest).padStart(2, "0")}秒`;
+}

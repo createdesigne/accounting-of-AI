@@ -1,0 +1,49 @@
+.weekly-settings-api > p {
+  margin: 0 0 14px;
+  color: #475569;
+  font-size: 0.86rem;
+  line-height: 1.7;
+}
+
+.ai-settings-launch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.weekly-privacy-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.weekly-privacy-options article {
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 15px;
+  background: #f8fbff;
+}
+
+.weekly-privacy-options strong {
+  color: #1d4ed8;
+}
+
+.weekly-privacy-options p {
+  margin: 7px 0 0;
+  color: #475569;
+  font-size: 0.76rem;
+  line-height: 1.65;
+}
+
+.weekly-settings-records {
+  width: 100%;
+  margin-top: 12px;
+}
+
+@media (max-width: 720px) {
+  .weekly-privacy-options {
+    grid-template-columns: 1fr;
+  }
+}

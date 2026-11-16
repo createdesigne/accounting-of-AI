@@ -4,9 +4,11 @@ import test from "node:test";
 
 const screen = readFileSync(new URL("../src/weekly/WeeklyResearchExportScreen.tsx", import.meta.url), "utf8");
 const workspace = readFileSync(new URL("../src/weekly/WeeklyWorkspaceScreen.tsx", import.meta.url), "utf8");
+const settings = readFileSync(new URL("../src/weekly/WeeklySettingsScreen.tsx", import.meta.url), "utf8");
 
 test("weekly workspace exposes explicit week/all CSV and JSON research exports", () => {
-  assert.match(workspace, /研究データ出力/);
+  assert.match(workspace, /WeeklySettingsScreen/);
+  assert.match(settings, /WeeklyResearchExportScreen/);
   assert.match(screen, /選択した週/);
   assert.match(screen, /全期間/);
   assert.match(screen, /活動データCSV/);

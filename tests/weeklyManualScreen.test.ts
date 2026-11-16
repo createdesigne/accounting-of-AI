@@ -8,9 +8,10 @@ const analysisPanel = readFileSync(new URL("../src/weekly/WeeklyAnalysisPanel.ts
 const analysisClient = readFileSync(new URL("../src/weeklyAnalysisClient.ts", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/weekly/weeklyManualScreen.css", import.meta.url), "utf8");
 
-test("the existing app adds only a separated weekly record screen entry point", () => {
-  assert.match(app, /import \{ WeeklyWorkspaceScreen \} from "\.\/weekly\/WeeklyWorkspaceScreen"/);
-  assert.match(app, /activeTab === "weekly" && <WeeklyWorkspaceScreen \/>/);
+test("the research mode uses the weekly workspace while retaining legacy code behind a display guard", () => {
+  assert.match(app, /WeeklyWorkspaceScreen, type WeeklyPrimaryView/);
+  assert.match(app, /RESEARCH_WEEKLY_MODE && \(\s*<WeeklyWorkspaceScreen/);
+  assert.match(app, /!RESEARCH_WEEKLY_MODE && activeTab === "tax"/);
   assert.match(app, /weekly: "記録"/);
 });
 
@@ -26,6 +27,8 @@ test("the manual screen exposes required advance task and activity fields", () =
   assert.match(analysisPanel, /テスト用分析（実際のGemini分析ではありません）/);
   assert.match(analysisPanel, /本人の確認・修正内容をAI分析とは別に保存/);
   assert.match(analysisPanel, /分析根拠となる会話箇所/);
+  assert.match(analysisPanel, /研究指標と評価根拠/);
+  assert.match(screen, /AIAS Levelの名称・説明・具体例/);
 });
 
 test("the analysis UI requires explicit consent, reuses in-memory AI settings, and keeps the transport separated", () => {

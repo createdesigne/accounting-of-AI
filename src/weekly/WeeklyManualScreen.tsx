@@ -30,12 +30,12 @@ import { WeeklyAnalysisPanel } from "./WeeklyAnalysisPanel.tsx";
 import "./weeklyManualScreen.css";
 
 const categories = ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"] as const;
-const levelDescriptions: Record<1 | 2 | 3 | 4 | 5, string> = {
-  1: "AIを使わない課題として記録します。利用時間には加算しません。",
-  2: "限定した部分だけAIの支援を使う課題設定です。",
-  3: "一部の工程をAIと協働する課題設定です。",
-  4: "広い範囲でAIと協働し、人が重要な判断を行う課題設定です。",
-  5: "AIに広い実行範囲を任せ、人が目的設定と監督を行う課題設定です。",
+const levelGuides: Record<1 | 2 | 3 | 4 | 5, { name: string; description: string; example: string }> = {
+  1: { name: "AI不使用", description: "AIを使わない課題として記録し、AI利用時間には加算しません。", example: "例：自力で小論文の構成を考える" },
+  2: { name: "部分的な補助", description: "限定した部分だけAIの支援を使う課題設定です。", example: "例：誤字確認だけAIに頼む" },
+  3: { name: "工程の協働", description: "一部の工程をAIと協働し、本人が内容を組み立てます。", example: "例：比較軸をAIと出し、本人が案を選ぶ" },
+  4: { name: "広範な協働", description: "広い範囲でAIと協働し、人が重要な判断を行います。", example: "例：下書きをAIと作り、本人が検証・修正する" },
+  5: { name: "AI実行・人が監督", description: "AIに広い実行範囲を任せ、人が目的設定・監督・最終判断を行います。", example: "例：複数資料の整理を任せ、本人が採否を決める" },
 };
 
 type TaskDraft = {
@@ -329,8 +329,8 @@ export function WeeklyManualScreen() {
     <div className="weekly-manual-screen stack">
       <section className="weekly-intro-card">
         <p className="eyebrow">週次プロトタイプ</p>
-        <h2>課題設定と手入力</h2>
-        <p>AIAS Levelは能力の採点ではなく、この課題でAIに任せる範囲を活動前に決めるための設定です。</p>
+        <h2>保存済み記録と補助入力</h2>
+        <p>日常利用は拡張機能からの取り込みが基本です。手入力とAIAS課題設定は必要なときだけ使えます。AIAS Levelは能力の採点ではありません。</p>
       </section>
 
       {loadError && <p className="weekly-form-message error" role="alert">{loadError}</p>}
@@ -338,7 +338,7 @@ export function WeeklyManualScreen() {
       <section className="weekly-panel" aria-labelledby="weekly-task-heading">
         <div className="weekly-section-heading">
           <span>1</span>
-          <div><p className="eyebrow">活動前に設定</p><h3 id="weekly-task-heading">AIAS課題設定</h3></div>
+          <div><p className="eyebrow">任意・活動前に設定</p><h3 id="weekly-task-heading">AIAS課題設定</h3></div>
         </div>
         <form className="weekly-form" onSubmit={submitTask}>
           <label>課題名<input required value={taskDraft.title} onChange={(event) => setTaskDraft({ ...taskDraft, title: event.target.value })} placeholder="例：研究発表の構成を考える" /></label>
@@ -347,8 +347,11 @@ export function WeeklyManualScreen() {
           <fieldset className="aias-levels">
             <legend>課題に設定するAIAS Level</legend>
             <div>{([1, 2, 3, 4, 5] as const).map((level) => <label key={level} className={taskDraft.level === level ? "selected" : ""}><input type="radio" name="aias-level" value={level} checked={taskDraft.level === level} onChange={() => setTaskDraft({ ...taskDraft, level })} /><strong>Level {level}</strong></label>)}</div>
-            <p>{levelDescriptions[taskDraft.level]}</p>
+            <p><strong>{levelGuides[taskDraft.level].name}</strong>：{levelGuides[taskDraft.level].description}<br />{levelGuides[taskDraft.level].example}</p>
           </fieldset>
+          <div className="aias-guide" aria-label="AIAS Levelの名称・説明・具体例">
+            {([1, 2, 3, 4, 5] as const).map((level) => <article key={level}><strong>Level {level}｜{levelGuides[level].name}</strong><span>{levelGuides[level].description}</span><small>{levelGuides[level].example}</small></article>)}
+          </div>
           <label>期待するAIの役割<input disabled={taskDraft.level === 1} value={taskDraft.level === 1 ? "AIを使用しない" : taskDraft.expectedAiRole} onChange={(event) => setTaskDraft({ ...taskDraft, expectedAiRole: event.target.value })} placeholder="例：論点を整理する壁打ち相手" /></label>
           <div className="weekly-form-actions">
             <button className="primary-action" type="submit" disabled={busy}>{editingTaskId ? "課題設定を更新" : "課題設定を保存"}</button>
@@ -370,7 +373,7 @@ export function WeeklyManualScreen() {
       <section className="weekly-panel" aria-labelledby="weekly-activity-heading">
         <div className="weekly-section-heading">
           <span>2</span>
-          <div><p className="eyebrow">活動後に記録</p><h3 id="weekly-activity-heading">活動を手入力</h3></div>
+          <div><p className="eyebrow">補助機能</p><h3 id="weekly-activity-heading">活動を手入力</h3></div>
         </div>
         <form className="weekly-form" onSubmit={submitActivity}>
           <label>関連する課題<select value={activityDraft.taskId} onChange={(event) => selectTask(event.target.value)}><option value="">課題を指定しない</option>{store.tasks.map((task) => <option key={task.id} value={task.id}>{task.title}（Level {task.plannedAiasLevel ?? "未設定"}）</option>)}</select></label>

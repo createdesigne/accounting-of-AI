@@ -93,7 +93,8 @@ const timeRecord = {
     await page.getByRole('button', { name: '会計に取り込む', exact: true }).click();
     await page.getByText('1件・合計12分0秒を時間会計へ取り込みました。', { exact: true }).waitFor();
 
-    await page.getByRole('button', { name: 'AI設定を開く', exact: true }).click();
+    await page.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '設定', exact: true }).click();
+    await page.getByRole('button', { name: 'Gemini APIを設定', exact: true }).click();
     const settings = page.getByRole('dialog', { name: 'AI設定', exact: true });
     await settings.getByLabel('Gemini APIキー', { exact: true }).fill(fakeKey);
     await settings.getByLabel('Geminiモデル', { exact: true }).fill(model);
@@ -101,8 +102,6 @@ const timeRecord = {
     await settings.getByRole('button', { name: '閉じる', exact: true }).click();
 
     await page.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '記録', exact: true }).click();
-    const weeklyNav = page.getByRole('navigation', { name: '週次画面の切り替え' });
-    await weeklyNav.getByRole('button', { name: '拡張連携', exact: true }).click();
     await page.getByText('研究設計の壁打ち', { exact: true }).waitFor();
     assert.equal(await page.getByLabel('対応する実測時間').inputValue(), timeRecord.recordId);
     await page.getByLabel('本人確認後の会計区分').selectOption('expense');
@@ -126,14 +125,15 @@ const timeRecord = {
     await review.getByRole('button', { name: '本人の確認内容を別保存', exact: true }).click();
     await record.getByText('本人の確認・修正内容をAI分析とは別に保存しました。', { exact: true }).waitFor();
 
-    await weeklyNav.getByRole('button', { name: '週次仕訳・決算', exact: true }).click();
+    const primaryNav = page.getByRole('navigation', { name: '画面切り替え' });
+    await primaryNav.getByRole('button', { name: '決算', exact: true }).click();
     const preview = page.getByRole('heading', { name: '週次決算プレビュー', exact: true }).locator('..').locator('..');
     assert.match(await preview.textContent(), /12分00秒/);
     assert.match(await preview.textContent(), /仕訳貸借一致/);
     await page.getByRole('button', { name: 'プレビューを確認して確定する', exact: true }).click();
     await page.getByText(/週次決算を改訂1として確定しました。/).waitFor();
 
-    await weeklyNav.getByRole('button', { name: '今週の振り返り', exact: true }).click();
+    await page.getByRole('navigation', { name: '週次決算の切り替え' }).getByRole('button', { name: '本人の振り返り', exact: true }).click();
     await page.getByLabel('今週の大きな発見・学び').fill('比較軸の明示が研究判断に有効だった');
     await page.getByLabel('AIの提案に対して自分が判断・修正したこと').fill('案Bの採用は本人が決めた');
     await page.getByLabel('今週のAIとの関わり方についての振り返り').fill('整理はAI、採否は本人が担った');
@@ -142,8 +142,8 @@ const timeRecord = {
     await page.getByRole('button', { name: '振り返りを保存する', exact: true }).click();
     await page.getByText('本人による週次の振り返りを端末内に保存しました。', { exact: true }).waitFor();
 
-    await weeklyNav.getByRole('button', { name: '週次ダッシュボード', exact: true }).click();
-    assert.match(await page.locator('.weekly-dashboard-screen').textContent(), /12分00秒/);
+    await primaryNav.getByRole('button', { name: 'ホーム', exact: true }).click();
+    assert.match(await page.locator('.weekly-dashboard').textContent(), /12分00秒/);
     const saved = await page.evaluate(() => ({
       weekly: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-records:v1')),
       conversations: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-conversations:v1')),
@@ -161,7 +161,7 @@ const timeRecord = {
     assert.equal(saved.settlements.weeks[0].revisions.length, 1);
     assert.equal(saved.reflections.reflections[0].selectedActivities.length, 1);
 
-    await weeklyNav.getByRole('button', { name: '研究データ出力', exact: true }).click();
+    await primaryNav.getByRole('button', { name: '設定', exact: true }).click();
     const [jsonDownload] = await Promise.all([
       page.waitForEvent('download'),
       page.getByRole('button', { name: '研究データJSON', exact: true }).click(),

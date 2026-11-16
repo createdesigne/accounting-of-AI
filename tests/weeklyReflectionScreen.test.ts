@@ -9,7 +9,7 @@ const css = readFileSync(new URL("../src/weekly/weeklyReflectionScreen.css", imp
 
 test("dashboard and workspace expose the weekly reflection route", () => {
   assert.match(workspace, /WeeklyReflectionScreen/);
-  assert.match(workspace, /今週の振り返り/);
+  assert.match(workspace, /本人の振り返り/);
   assert.match(dashboard, /この週の振り返りを開く/);
   assert.match(dashboard, /onOpenReflection\(anchor\)/);
 });

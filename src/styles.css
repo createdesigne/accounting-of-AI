@@ -3568,6 +3568,22 @@ button {
   }
 }
 
+@media (min-width: 900px) {
+  .phone-frame.research-frame {
+    width: min(96vw, 1080px);
+    min-height: min(900px, calc(100vh - 56px));
+    max-height: calc(100vh - 56px);
+  }
+
+  .research-frame .screen {
+    padding: 24px 28px 112px;
+  }
+
+  .research-frame .top-header {
+    padding-inline: 28px;
+  }
+}
+
 @media (max-width: 370px) {
   .screen {
     padding-inline: 12px;

@@ -101,6 +101,20 @@
   line-height: 1.7;
 }
 
+.weekly-accounting-meaning,
+.weekly-accounting-explanation p {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border-radius: 13px;
+  color: #475569;
+  background: #f0f9ff;
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+
+.weekly-accounting-explanation strong { color: #0c4a6e; }
+.weekly-accounting-explanation p { margin-bottom: 0; padding: 0; background: transparent; }
+
 .weekly-settlement-change-note {
   margin: 14px 0 0;
   padding: 11px 13px;
@@ -188,6 +202,20 @@
   border-bottom: 1px solid #f1f5f9;
 }
 
+.weekly-statement-columns p span,
+.weekly-pl-list > div span,
+.weekly-journal-lines strong {
+  min-width: 0;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+
+.weekly-statement-columns p strong,
+.weekly-pl-list > div strong,
+.weekly-journal-lines > div > span {
+  white-space: nowrap;
+}
+
 .weekly-statement-columns p:last-child,
 .weekly-pl-list > div:last-child {
   border-bottom: 0;
@@ -248,6 +276,17 @@
   border-radius: 12px;
   background: #f8fafc;
 }
+
+.weekly-category-chart { display: grid; gap: 13px; }
+.weekly-category-chart > div > div { display: flex; justify-content: space-between; gap: 12px; font-size: 0.8rem; }
+.weekly-category-chart > div > div strong { white-space: nowrap; }
+.weekly-category-chart i { display: block; height: 9px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+.weekly-category-chart b { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #38bdf8); }
+
+.weekly-settlement-reflection { display: grid; gap: 10px; margin: 0; }
+.weekly-settlement-reflection div { padding: 12px; border-radius: 13px; background: #f8fafc; }
+.weekly-settlement-reflection dt { color: #475569; font-size: 0.72rem; font-weight: 850; }
+.weekly-settlement-reflection dd { margin: 5px 0 0; color: #0f172a; font-size: 0.84rem; line-height: 1.65; white-space: pre-wrap; }
 
 .weekly-journal-lines small {
   color: #64748b;

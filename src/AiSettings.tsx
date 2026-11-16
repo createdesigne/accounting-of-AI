@@ -16,7 +16,7 @@ export function useAiSettings() {
   if (!settings) throw new Error('AI settings provider missing');
   return settings;
 }
-export function AiSettingsButton() {
+export function AiSettingsButton({ label }: { label?: string } = {}) {
   const { credentials, setCredentials } = useAiSettings();
   const titleId = useId();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -25,9 +25,9 @@ export function AiSettingsButton() {
   const [error, setError] = useState('');
   const [status, setStatus] = useState('');
   return <>
-    <button className="icon-button" type="button" aria-label="AI設定を開く" onClick={() => {
+    <button className={label ? "secondary-action ai-settings-launch" : "icon-button"} type="button" aria-label={label ?? "AI設定を開く"} onClick={() => {
       setDraftKey(''); setModel(credentials.model); setError(''); setStatus(''); dialog.current?.showModal();
-    }}><Settings size={20} /></button>
+    }}><Settings size={20} />{label && <span>{label}</span>}</button>
     <dialog ref={dialog} className="ai-settings-dialog" aria-labelledby={titleId} onClose={() => { setDraftKey(''); setError(''); }}>
       <form onSubmit={event => {
         event.preventDefault();
