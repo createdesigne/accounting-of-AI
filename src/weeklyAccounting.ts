@@ -251,7 +251,7 @@ export function buildJournalEntries(
     ],
   });
   if (record.accountingDisposition === "unclassified") return Object.freeze([recognition]);
-  const debitAccount = dispositionAccount(record);
+  const debitAccount = confirmedAccountForWeeklyRecord(record);
   const classification = freezeEntry({
     id: `${record.id}:${weekKey}:classification`,
     recordId: record.id,
@@ -282,7 +282,8 @@ export function isBalancedWeeklyEntry(entry: WeeklyJournalEntry): boolean {
     === sum(entry.lines.filter((line) => line.side === "credit").map((line) => line.seconds));
 }
 
-function dispositionAccount(record: WeeklyRecordV1): WeeklyAccount {
+export function confirmedAccountForWeeklyRecord(record: WeeklyRecordV1): WeeklyAccount {
+  if (record.accountingDisposition === "unclassified") return WEEKLY_ACCOUNTS.aiClearing;
   if (record.accountingDisposition === "asset") return WEEKLY_ACCOUNTS.deliverableAsset;
   if (record.accountingDisposition === "work-in-progress") return WEEKLY_ACCOUNTS.workInProgress;
   const accounts = {

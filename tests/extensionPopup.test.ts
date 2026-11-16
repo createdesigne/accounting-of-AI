@@ -6,14 +6,14 @@ import vm from 'node:vm';
 const script = readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
 const protocolScript = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const conversation = { aiService: 'ChatGPT', conversationTitle: '相談 + 100% & 日本語', messages: [{ role: 'user', text: '実際の会話本文' }] };
-function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', failure = '' } = {}) {
+function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', failure = '', trackingSession = '' } = {}) {
   let click: () => Promise<void>;
   const created: string[] = [];
   let injected = 0;
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
-    chrome: { runtime: { getManifest: () => ({ version: '0.5.0' }) }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; return [{ result }]; } } },
+    chrome: { runtime: { getManifest: () => ({ version: '0.5.1' }), sendMessage: async () => ({ ok: true, currentSessionId: trackingSession }) }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; return [{ result }]; } } },
     URL, URLSearchParams, Date, Error, console: { error() {} },
   });
   return { run: () => click(), created, elements, injections: () => injected };
@@ -28,6 +28,11 @@ test('extension defaults to production and sends actual text in a fragment, not 
   assert.deepEqual(raw.messages, conversation.messages);
   assert.equal(raw.conversationTitle, conversation.conversationTitle);
   assert.equal(page.elements.createReceipt.disabled, false);
+});
+test('an active tracker session is attached as an exact linking hint without changing conversation identity fields', async () => {
+  const page = popup({ trackingSession: 'session-exact-1' }); await page.run();
+  const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
+  assert.equal(raw.measurementSessionId, 'session-exact-1');
 });
 test('legacy/preview/local/research destinations preserve the application base path', async () => {
   for (const [destination, expected] of [['legacy', 'https://createdesigne.github.io/accounting-of-AI/'], ['preview', 'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/'], ['local', 'http://localhost:5173/accounting-of-AI/'], ['research', 'http://localhost:5174/accounting-of-AI/']]) {
@@ -53,7 +58,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
   assert.equal(page.elements.createReceipt.disabled, false);
-  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.0/);
+  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.1/);
   assert.match(page.elements.status.textContent, /回答の生成が終わってから/);
 });
 test('unsupported or lookalike domains are not read', async () => {

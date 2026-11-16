@@ -3,6 +3,8 @@ export type RawConversation = {
   url?: string;
   capturedAt?: string;
   conversationTitle?: string;
+  /** Active-time tracker session captured by the extension, when one is running. */
+  measurementSessionId?: string;
   messages?: { role?: string; text?: string }[];
 };
 
@@ -26,7 +28,8 @@ export function parseDraftConversation(draft: string): RawConversation | null {
 function isRawConversation(value: unknown): value is RawConversation {
   if (!value || typeof value !== "object") return false;
   const raw = value as RawConversation;
-  return [raw.aiService, raw.url, raw.capturedAt, raw.conversationTitle].every(v => v === undefined || typeof v === "string")
+  return [raw.aiService, raw.url, raw.capturedAt, raw.conversationTitle, raw.measurementSessionId]
+    .every(v => v === undefined || typeof v === "string")
     && Array.isArray(raw.messages) && raw.messages.length > 0
     && raw.messages.every(message => message !== null && typeof message === "object"
       && typeof message.text === "string" && (message.role === undefined || typeof message.role === "string"))

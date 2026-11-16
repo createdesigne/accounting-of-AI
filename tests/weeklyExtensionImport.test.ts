@@ -171,6 +171,10 @@ test("conversation identity ignores transfer time but includes URL and message c
     extensionConversationFingerprint(conversation),
     extensionConversationFingerprint({ ...conversation, capturedAt: "2026/11/17 09:00" }),
   );
+  assert.equal(
+    extensionConversationFingerprint(conversation),
+    extensionConversationFingerprint({ ...conversation, measurementSessionId: "research-session" }),
+  );
   assert.notEqual(
     extensionConversationFingerprint(conversation),
     extensionConversationFingerprint({ ...conversation, messages: [...conversation.messages, { role: "user", text: "追記" }] }),

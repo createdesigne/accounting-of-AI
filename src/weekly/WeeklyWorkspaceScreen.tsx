@@ -4,9 +4,10 @@ import { WeeklyManualScreen } from "./WeeklyManualScreen.tsx";
 import { WeeklyReflectionScreen } from "./WeeklyReflectionScreen.tsx";
 import { WeeklySettlementScreen } from "./WeeklySettlementScreen.tsx";
 import { WeeklyExtensionImportScreen } from "./WeeklyExtensionImportScreen.tsx";
+import { WeeklyResearchExportScreen } from "./WeeklyResearchExportScreen.tsx";
 import "./weeklyWorkspaceScreen.css";
 
-type WeeklyWorkspaceView = "dashboard" | "import" | "records" | "settlement" | "reflection";
+type WeeklyWorkspaceView = "dashboard" | "import" | "records" | "settlement" | "reflection" | "export";
 
 export function WeeklyWorkspaceScreen() {
   const [view, setView] = useState<WeeklyWorkspaceView>("dashboard");
@@ -25,12 +26,14 @@ export function WeeklyWorkspaceScreen() {
         <button type="button" aria-pressed={view === "records"} onClick={() => setView("records")}>課題設定・手入力</button>
         <button type="button" aria-pressed={view === "settlement"} onClick={() => setView("settlement")}>週次仕訳・決算</button>
         <button type="button" aria-pressed={view === "reflection"} onClick={() => openReflection()}>今週の振り返り</button>
+        <button type="button" aria-pressed={view === "export"} onClick={() => setView("export")}>研究データ出力</button>
       </nav>
       {view === "dashboard" && <WeeklyDashboardScreen onOpenRecords={() => setView("records")} onOpenReflection={openReflection} />}
       {view === "import" && <WeeklyExtensionImportScreen onOpenRecords={() => setView("records")} />}
       {view === "records" && <WeeklyManualScreen />}
       {view === "settlement" && <WeeklySettlementScreen onOpenRecords={() => setView("records")} />}
       {view === "reflection" && <WeeklyReflectionScreen initialAnchor={reflectionAnchor} onOpenRecords={() => setView("records")} />}
+      {view === "export" && <WeeklyResearchExportScreen />}
     </div>
   );
 }

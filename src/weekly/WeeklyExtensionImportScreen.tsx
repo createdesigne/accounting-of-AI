@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AnalysisActivityCategory } from "../integrations/analysisContract.ts";
 import { TIME_ACCOUNTING_STORAGE_BASE_KEY, loadTimeAccountingStore } from "../timeAccountingStore.ts";
 import type { AccountingDisposition, WeeklyPrivacyChoice } from "../weeklyData.ts";
@@ -46,8 +46,18 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
     .map((record) => record.sessionId as string)), [store.records]);
   const measurements = snapshot.measurements.filter((item) => !linkedMeasurements.has(item.measurementRecordId)
     || item.measurementRecordId === existing?.sessionId);
+  const exactSessionMatches = rawConversation?.measurementSessionId
+    ? measurements.filter((item) => item.sessionId === rawConversation.measurementSessionId)
+    : [];
+  const exactMeasurementId = exactSessionMatches.length === 1
+    ? exactSessionMatches[0].measurementRecordId
+    : "";
   const selectedMeasurement = measurements.find((item) => item.measurementRecordId === measurementId) ?? null;
   const selectedTask = taskId ? store.tasks.find((task) => task.id === taskId) ?? null : null;
+
+  useEffect(() => {
+    setMeasurementId(exactMeasurementId);
+  }, [fingerprint, exactMeasurementId]);
 
   function refresh() {
     try {
@@ -108,7 +118,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
     <section className="weekly-intro-card">
       <p className="eyebrow">研究用ローカル連携</p>
       <h2>Chrome拡張の会話と実測時間を関連付ける</h2>
-      <p>拡張機能には会話と時間を結ぶ共通IDがないため、自動推測はしません。本人が内容と実測時間を確認してから週次活動にします。</p>
+      <p>計測中に会話を取り込んだ場合は共通セッションIDで候補を絞ります。日付や題名では推測せず、本人が実測時間を確認してから週次活動にします。</p>
       <button type="button" className="secondary-action" onClick={refresh}>連携データを再読み込み</button>
     </section>
 
@@ -121,6 +131,9 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
         <p>{rawConversation.aiService || "AIサービス不明"}／取得日時 {rawConversation.capturedAt || "不明"}／{rawConversation.messages?.length ?? 0}メッセージ</p>
         <p className="weekly-muted">会話本文は端末内にあります。ここでは本人がfullを選んで保存し、分析時に別途同意するまでGeminiへ送信しません。</p>
         {existing && <p className="weekly-import-linked">取り込み済み：{existing.activeSeconds}秒（{existing.links.thoughtReceiptId}）</p>}
+        {rawConversation.measurementSessionId && exactSessionMatches.length === 1 && <p className="weekly-import-linked">同じ計測セッションの時間候補を選択しました。保存前に日時と秒数を確認してください。</p>}
+        {rawConversation.measurementSessionId && exactSessionMatches.length > 1 && <p className="weekly-no-ai-notice">同じセッションIDの時間候補が複数あります。推測で割り振らず、本人が対応する時間を選択してください。</p>}
+        {rawConversation.measurementSessionId && exactSessionMatches.length === 0 && <p className="weekly-no-ai-notice">この会話の計測セッションはまだ時間台帳へ取り込まれていません。先に拡張機能から確定済み時間を連携してください。</p>}
       </article>}
     </section>
 
@@ -128,7 +141,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
       <div className="weekly-section-heading"><span>2</span><div><p className="eyebrow">本人による対応確認</p><h3 id="extension-link-heading">実測時間と活動を確定</h3></div></div>
       <form className="weekly-form" onSubmit={submit}>
         <label>対応する実測時間<select required value={measurementId} onChange={(event) => { setMeasurementId(event.target.value); setMessage(""); }}>
-          <option value="">本人が選択してください</option>
+          <option value="">本人が選択してください（推測しません）</option>
           {measurements.map((item) => <option key={item.measurementRecordId} value={item.measurementRecordId}>{measurementLabel(item)}</option>)}
         </select><small>ここで選んだ確定済み時間だけを「実測」として関連付けます。同じ時間記録は別の活動に使えません。</small></label>
         {snapshot.measurements.length === 0 && <p className="weekly-no-ai-notice">先に拡張機能の「帳簿へ連携」で確定済み時間を取り込み、画面上部の確認操作で時間台帳へ保存してください。</p>}

@@ -370,5 +370,10 @@ test('marks records imported only after a matching acknowledgement and per desti
   assert.equal(acknowledged.acknowledgedCount, 1);
   assert.equal((await app.finalizedRecords('production')).payload.records.length, 0);
   assert.equal((await app.finalizedRecords('preview')).payload.records.length, 1);
+  assert.equal((await app.finalizedRecords('research')).payload.records.length, 1);
+  const researchPayload = await app.finalizedRecords('research');
+  assert.equal((await app.acknowledge(researchPayload.payload, 'research')).ok, true);
+  assert.equal((await app.finalizedRecords('research')).payload.records.length, 0);
   assert.ok(app.importStatus().destinations.production[pending.payload.records[0].recordId]);
+  assert.ok(app.importStatus().destinations.research[pending.payload.records[0].recordId]);
 });

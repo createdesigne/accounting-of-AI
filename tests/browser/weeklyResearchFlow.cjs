@@ -1,6 +1,7 @@
 // Isolated browser + mocked Gemini provider. No real key, billable request, or user data.
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const assert = require('node:assert/strict');
+const { readFileSync } = require('node:fs');
 
 const base = process.env.APP_URL || 'http://127.0.0.1:5174/accounting-of-AI/';
 const fakeKey = 'research-flow-browser-key-not-real';
@@ -10,6 +11,7 @@ const rawConversation = {
   url: 'https://chatgpt.com/c/browser-research-flow',
   capturedAt: '2026/11/16 10:15',
   conversationTitle: '研究設計の壁打ち',
+  measurementSessionId: 'browser-research-session',
   messages: [
     { role: 'user', text: '案Aと案Bの違いを整理してください。' },
     { role: 'assistant', text: '案Aは速さ、案Bは検証可能性を重視します。' },
@@ -102,7 +104,7 @@ const timeRecord = {
     const weeklyNav = page.getByRole('navigation', { name: '週次画面の切り替え' });
     await weeklyNav.getByRole('button', { name: '拡張連携', exact: true }).click();
     await page.getByText('研究設計の壁打ち', { exact: true }).waitFor();
-    await page.getByLabel('対応する実測時間').selectOption(timeRecord.recordId);
+    assert.equal(await page.getByLabel('対応する実測時間').inputValue(), timeRecord.recordId);
     await page.getByLabel('本人確認後の会計区分').selectOption('expense');
     await page.getByLabel('自分が考えたこと・判断したこと（本人入力）').fill('比較軸を確認して自分で案Bを選んだ');
     await page.getByLabel('発見・学び（本人入力）').fill('比較軸を先に決めると判断しやすい');
@@ -158,8 +160,32 @@ const timeRecord = {
     assert.equal(saved.reviews.reviews.length, 1);
     assert.equal(saved.settlements.weeks[0].revisions.length, 1);
     assert.equal(saved.reflections.reflections[0].selectedActivities.length, 1);
+
+    await weeklyNav.getByRole('button', { name: '研究データ出力', exact: true }).click();
+    const [jsonDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: '研究データJSON', exact: true }).click(),
+    ]);
+    const exported = JSON.parse(readFileSync(await jsonDownload.path(), 'utf8'));
+    assert.equal(exported.activities.length, 1);
+    assert.equal(exported.activities[0].activeSeconds, 720);
+    assert.equal(exported.activities[0].timeSource, 'measured');
+    assert.equal(exported.activities[0].analysis.origin, 'gemini-api');
+    assert.equal(exported.activities[0].humanReview.criticalJudgment, 75);
+    assert.equal(JSON.stringify(exported).includes(rawConversation.messages[0].text), false);
+    assert.equal(exported.sensitiveTextIncluded, false);
+
+    await page.getByLabel('評価根拠の引用・自由記述・週次振り返り本文も含める').check();
+    await page.getByLabel('出力対象に個人情報が含まれ得ることを確認し、この端末へ保存します。').check();
+    const [reflectionDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.getByRole('button', { name: '週次振り返りCSV', exact: true }).click(),
+    ]);
+    const reflectionCsv = readFileSync(await reflectionDownload.path(), 'utf8');
+    assert.equal(reflectionCsv.charCodeAt(0), 0xFEFF);
+    assert.match(reflectionCsv, /比較軸の明示が研究判断に有効だった/);
     assert.deepEqual(errors, []);
-    console.log('PASS: extension conversation + measured time confirmation + mocked Gemini + human review + balanced weekly settlement + reflection, with separate persisted sources.');
+    console.log('PASS: extension session link + measured time + mocked Gemini + human review + balanced settlement + reflection + consented research export.');
   } finally {
     await browser.close();
     await new Promise(resolve => { api.close(resolve); api.closeAllConnections(); });

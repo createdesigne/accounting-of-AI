@@ -48,6 +48,12 @@ button.addEventListener("click", async () => {
     });
 
     const rawConversation = normalizeConversation(extracted?.result, tab);
+    const tracking = await chrome.runtime?.sendMessage?.({ type: "tracking:get" }).catch(() => null);
+    // This is an exact tracker identifier, not a date/title-based guess. The app still asks
+    // the person to confirm the matching finalized measurement before saving an activity.
+    if (tracking?.ok && typeof tracking.currentSessionId === "string" && tracking.currentSessionId) {
+      rawConversation.measurementSessionId = tracking.currentSessionId;
+    }
     const url = new URL(WEB_APP_URLS[destination.value] || WEB_APP_URLS.production);
     // A fragment is read by the app; conversation text is not sent to the server in the HTTP URL.
     url.hash = new URLSearchParams({ draft: JSON.stringify(rawConversation) }).toString();
