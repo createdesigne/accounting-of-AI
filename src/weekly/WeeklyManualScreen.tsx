@@ -404,7 +404,7 @@ export function WeeklyManualScreen() {
           const analysisState = resolveWeeklyAnalysisState(record, analysisStore, conversationsByRecord.get(record.id) ?? null);
           return <article className="weekly-record-card" key={record.id}>
             <div className="weekly-record-top"><div><time>{formatDateTime(record.recordedAt)}</time><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong></div><span>{noAi ? "AI不使用" : `${record.activeSeconds}秒`}</span></div>
-            <div className="weekly-tags"><span>{record.activityCategory ?? "未分類"}</span><span>{dispositionLabel(record.accountingDisposition)}</span><span>{record.timeSource === "manual" ? "手入力" : record.timeSource}</span>{task && <span>Level {task.plannedAiasLevel ?? "未設定"}</span>}</div>
+            <div className="weekly-tags"><span>{record.activityCategory ?? "未分類"}</span><span>{dispositionLabel(record.accountingDisposition)}</span><span>{record.timeSource === "manual" ? "手入力" : record.timeSource === "measured" ? "拡張機能の実測" : record.timeSource}</span>{task && <span>Level {task.plannedAiasLevel ?? "未設定"}</span>}</div>
             {record.manualNotes?.interactionSummary && <p><b>概要：</b>{record.manualNotes.interactionSummary}</p>}
             {record.manualNotes?.ownThoughts && <p><b>自分の判断：</b>{record.manualNotes.ownThoughts}</p>}
             {record.manualNotes?.discovery && <p><b>発見・学び：</b>{record.manualNotes.discovery}</p>}
@@ -417,7 +417,10 @@ export function WeeklyManualScreen() {
               review={findWeeklyAnalysisReview(analysisReviewStore, analysisState.response?.analysisId)}
               onChanged={refreshAnalysis}
             />
-            <div className="weekly-item-actions"><button type="button" onClick={() => editRecord(record)}>編集</button><button type="button" className="danger" onClick={() => void removeRecord(record)}>削除</button></div>
+            <div className="weekly-item-actions">{record.origin === "user-input"
+              ? <button type="button" onClick={() => editRecord(record)}>編集</button>
+              : <span className="weekly-muted">実測時間との対応は拡張連携で本人確認済みです。</span>}
+              <button type="button" className="danger" onClick={() => void removeRecord(record)}>削除</button></div>
           </article>;
         })}</div>}
       </section>

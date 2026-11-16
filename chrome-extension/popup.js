@@ -3,6 +3,7 @@ const WEB_APP_URLS = {
   legacy: "https://createdesigne.github.io/accounting-of-AI/",
   preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
   local: "http://localhost:5173/accounting-of-AI/",
+  research: "http://localhost:5174/accounting-of-AI/",
 };
 const timeRecordProtocol = globalThis.TimeRecordProtocol;
 

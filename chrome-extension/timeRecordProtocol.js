@@ -31,6 +31,7 @@
     legacy: "https://createdesigne.github.io/accounting-of-AI/",
     preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
     local: "http://localhost:5173/accounting-of-AI/",
+    research: "http://localhost:5174/accounting-of-AI/",
   });
 
   function isAllowedAppUrl(value) {
@@ -43,7 +44,7 @@
       if (url.origin === "https://createdesigne.github.io") {
         return url.pathname.startsWith("/accounting-of-AI/");
       }
-      return url.origin === "http://localhost:5173"
+      return (url.origin === "http://localhost:5173" || url.origin === "http://localhost:5174")
         && url.pathname.startsWith("/accounting-of-AI/");
     } catch {
       return false;
@@ -66,6 +67,7 @@
 
   function destinationForUrl(value) {
     if (isDestinationUrl(value, "preview")) return "preview";
+    if (isDestinationUrl(value, "research")) return "research";
     if (isDestinationUrl(value, "local")) return "local";
     if (isDestinationUrl(value, "legacy")) return "legacy";
     if (isDestinationUrl(value, "production")) return "production";

@@ -24,9 +24,12 @@ ChatGPT / Claude / Gemini の会話ページ
   → 生成候補を確認 → 利用者が反映
 
 週次会話を研究用に分析するときだけ:
-  fullで保存した会話ごとに本人が外部送信へ明示同意
+  Chrome拡張の会話と確定済み実測時間を本人が対応確認
+  → 週次活動・思考レシートとして保存（AIAS課題設定は任意）
+  → fullで保存した会話ごとに本人が外部送信へ明示同意
   → `/api/ai/analyze-weekly` → Google Gemini
   → 根拠付き構造化候補を確認 → 本人の修正値を別保存
+  → 週次仕訳・決算・本人の振り返り
 ```
 
 画面は `src/App.tsx`、会話取り込みは `chrome-extension/`、キー設定は `src/AiSettings.tsx`、文章編集は `src/AiWritingPanel.tsx`、通信は `src/aiClient.ts` と `server/` が担当します。Viteは開発・ビルドに使い、公開時は生成された `dist/` を配信します。
@@ -48,5 +51,7 @@ pnpm start
 `http://127.0.0.1:8787/accounting-of-AI/` を開き、AI設定で自分のキーと利用可能なモデルを入力します。キーはブラウザのメモリにだけ置き、再読み込み・タブを閉じる操作で消えます。削除ボタンでも消せます。帳簿の保存内容は削除しません。
 
 開発時は別々のターミナルで `pnpm ai:server` と `pnpm dev` を実行します。
+
+研究用worktreeでは、既存の5173番と競合しないよう `pnpm dev -- --port 5174` で起動します。Chrome拡張v0.5.0の送信先「研究用ローカル（5174）」を選び、会話と確定済み利用時間を送った後、週次画面の「拡張連携」で対応を本人が確定します。拡張機能は会話と日次実測時間の共通IDを持たないため、アプリは対応関係を自動推測しません。
 
 [キー設定とデプロイの詳細](docs/ai-server-setup.md) / [Chrome拡張の使い方](chrome-extension/README.md)

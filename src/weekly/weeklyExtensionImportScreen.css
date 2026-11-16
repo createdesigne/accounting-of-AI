@@ -1,0 +1,15 @@
+.weekly-import-summary {
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 13px;
+  background: #f8fbff;
+}
+
+.weekly-import-summary p {
+  margin: 6px 0 0;
+}
+
+.weekly-import-linked {
+  color: #166534;
+  font-weight: 800;
+}

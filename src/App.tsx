@@ -6,6 +6,7 @@ import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, par
 import { buildReportSummary } from "./reportSummary";
 import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
 import { type RawConversation, parseDraftConversation } from "./conversationDraft";
+import { extensionConversationStorageKey } from "./weeklyExtensionImport";
 import {
   TIME_RECORD_READY_SOURCE,
   TIME_RECORD_READY_TYPE,
@@ -142,7 +143,7 @@ const SHOW_DEMO_TOOLS = IS_PREVIEW
   || window.location.hostname === "127.0.0.1";
 const STORAGE_PREFIX = IS_PREVIEW ? "preview-month-ledger:" : "";
 const STORAGE_KEY = `${STORAGE_PREFIX}watashi-to-ai-thought-receipts`;
-const RAW_CONVERSATION_KEY = `${STORAGE_PREFIX}aiConversationRaw`;
+const RAW_CONVERSATION_KEY = extensionConversationStorageKey(window.location.pathname);
 const THINKING_LEDGER_KEY = `${STORAGE_PREFIX}thinkingLedger`;
 const TIME_ACCOUNTING_STORAGE_KEY = `${STORAGE_PREFIX}${TIME_ACCOUNTING_STORAGE_BASE_KEY}`;
 const TIME_AUTO_IMPORT_SETTINGS_KEY = `${STORAGE_PREFIX}${TIME_AUTO_IMPORT_SETTINGS_BASE_KEY}`;

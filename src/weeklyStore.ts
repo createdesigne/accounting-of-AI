@@ -1,9 +1,12 @@
 import {
   buildManualWeeklyRecord,
+  buildExtensionWeeklyRecord,
   buildWeeklyTask,
   parseConversationContent,
   parseWeeklyRecord,
   type ManualWeeklyRecordInput,
+  type ExtensionWeeklyRecordInput,
+  type BuiltManualWeeklyRecord,
   type TaskV1,
   type WeeklyTaskInput,
   type WeeklyConversationContentV1,
@@ -44,7 +47,7 @@ export type SaveManualWeeklyRecordResult = Readonly<{
 }>;
 
 export class WeeklyStoreError extends Error {
-  readonly code: "STORE_INVALID" | "LOCK_UNAVAILABLE" | "SAVE_FAILED" | "UNKNOWN_RECORD" | "UNKNOWN_TASK" | "TASK_IN_USE";
+  readonly code: "STORE_INVALID" | "LOCK_UNAVAILABLE" | "SAVE_FAILED" | "UNKNOWN_RECORD" | "UNKNOWN_TASK" | "TASK_IN_USE" | "USAGE_ALREADY_LINKED" | "DUPLICATE_CONFLICT";
 
   constructor(code: WeeklyStoreError["code"], message: string) {
     super(message);
@@ -117,18 +120,57 @@ export async function saveManualWeeklyRecord(
     });
   }
   const built = buildManualWeeklyRecord(input);
+  return saveBuiltWeeklyRecord(built, options, false);
+}
+
+export async function saveExtensionWeeklyRecord(
+  input: ExtensionWeeklyRecordInput,
+  options: WeeklyStoreOptions = {},
+): Promise<SaveManualWeeklyRecordResult> {
+  const built = buildExtensionWeeklyRecord(input);
+  return saveBuiltWeeklyRecord(built, options, true);
+}
+
+function saveBuiltWeeklyRecord(
+  built: BuiltManualWeeklyRecord,
+  options: WeeklyStoreOptions,
+  immutableImport: boolean,
+): Promise<SaveManualWeeklyRecordResult> {
   return withMutation<SaveManualWeeklyRecordResult>(options, (store, contents) => {
-    const duplicateSource = built.record.sourceEventId === null ? undefined : store.records.find(
-      (record) => record.sourceEventId === built.record.sourceEventId && record.id !== built.record.id,
+    const existingBySource = built.record.sourceEventId === null ? undefined : store.records.find(
+      (record) => record.sourceEventId === built.record.sourceEventId,
     );
-    if (duplicateSource) {
+    if (existingBySource && existingBySource.id !== built.record.id) {
+      const existingConversation = contents.conversations.find((item) => item.recordId === existingBySource.id) ?? null;
+      if (!sameImportedContent(existingBySource, existingConversation, built)) {
+        throw new WeeklyStoreError("DUPLICATE_CONFLICT", "同じ会話取込IDに異なる内容が指定されています。既存記録は変更していません。");
+      }
       return {
         nextStore: store,
         nextContents: contents,
-        result: Object.freeze({ persisted: true, inserted: false, deduplicated: true, record: duplicateSource, store }),
+        result: Object.freeze({ persisted: true, inserted: false, deduplicated: true, record: existingBySource, store }),
       };
     }
+    const linkedUsage = immutableImport ? store.records.find(
+      (record) => record.id !== built.record.id
+        && record.timeSource === "measured"
+        && record.sessionId === built.record.sessionId,
+    ) : undefined;
+    if (linkedUsage) {
+      throw new WeeklyStoreError("USAGE_ALREADY_LINKED", "選択した実測時間は別の週次活動に関連付け済みです。");
+    }
     const existing = store.records.find((record) => record.id === built.record.id);
+    if (immutableImport && existing) {
+      const existingConversation = contents.conversations.find((item) => item.recordId === existing.id) ?? null;
+      if (!sameImportedContent(existing, existingConversation, built)) {
+        throw new WeeklyStoreError("DUPLICATE_CONFLICT", "取り込み済みの会話または時間と内容が一致しません。既存記録は変更していません。");
+      }
+      return {
+        nextStore: store,
+        nextContents: contents,
+        result: Object.freeze({ persisted: true, inserted: false, deduplicated: true, record: existing, store }),
+      };
+    }
     const records = existing
       ? store.records.map((record) => record.id === built.record.id ? built.record : record)
       : [...store.records, built.record];
@@ -148,6 +190,37 @@ export async function saveManualWeeklyRecord(
       }),
     };
   });
+}
+
+function sameImportedContent(
+  existing: WeeklyRecordV1,
+  existingConversation: WeeklyConversationContentV1 | null,
+  built: BuiltManualWeeklyRecord,
+) {
+  const comparableRecord = (record: WeeklyRecordV1) => ({
+    sourceEventId: record.sourceEventId,
+    origin: record.origin,
+    sessionId: record.sessionId,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    activeSeconds: record.activeSeconds,
+    timeSource: record.timeSource,
+    aiService: record.aiService,
+    privacy: record.privacy,
+    taskId: record.taskId,
+    activityCategory: record.activityCategory,
+    accountingDisposition: record.accountingDisposition,
+    selfReflection: record.selfReflection,
+    manualNotes: record.manualNotes,
+  });
+  const comparableConversation = (conversation: WeeklyConversationContentV1 | null) => conversation === null ? null : ({
+    title: conversation.title,
+    captureScope: conversation.captureScope,
+    messages: conversation.messages,
+    source: conversation.source,
+  });
+  return JSON.stringify(comparableRecord(existing)) === JSON.stringify(comparableRecord(built.record))
+    && JSON.stringify(comparableConversation(existingConversation)) === JSON.stringify(comparableConversation(built.conversation));
 }
 
 export async function deleteWeeklyRecord(

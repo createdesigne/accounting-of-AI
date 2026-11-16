@@ -26,20 +26,23 @@ test('allows only the configured Web app origins and paths', () => {
     'https://createdesigne.github.io/accounting-of-AI/',
     'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/',
     'http://localhost:5173/accounting-of-AI/',
+    'http://localhost:5174/accounting-of-AI/',
   ]) assert.equal(protocol.isAllowedAppUrl(url), true);
 
   for (const url of [
     'https://example.com/accounting-of-AI/',
     'https://createdesigne.github.io/another-app/',
     'https://createdesigne.github.io.evil.example/accounting-of-AI/',
-    'http://localhost:5174/accounting-of-AI/',
+    'http://localhost:5175/accounting-of-AI/',
     'javascript:alert(1)',
   ]) assert.equal(protocol.isAllowedAppUrl(url), false);
 
   assert.equal(protocol.DESTINATIONS.production, 'https://accounting-of-ai.vercel.app/accounting-of-AI/');
   assert.equal(protocol.DESTINATIONS.legacy, 'https://createdesigne.github.io/accounting-of-AI/');
+  assert.equal(protocol.DESTINATIONS.research, 'http://localhost:5174/accounting-of-AI/');
   assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.production), 'production');
   assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.legacy), 'legacy');
+  assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.research), 'research');
 });
 
 test('projects only the minimum time fields and never sends page or secret data', () => {

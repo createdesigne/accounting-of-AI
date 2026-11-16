@@ -123,6 +123,27 @@ export type ManualWeeklyRecordInput = Readonly<{
   }> | null;
 }>;
 
+/** A measured activity confirmed by the person after an extension import. */
+export type ExtensionWeeklyRecordInput = Readonly<{
+  id: string;
+  sourceEventId: string;
+  /** The finalized Chrome time-record id selected by the person. */
+  measurementRecordId: string;
+  usageId: string;
+  recordedAt: string;
+  startedAt: string;
+  endedAt: string;
+  activeSeconds: number;
+  aiService: WeeklyAiService;
+  privacy: WeeklyPrivacy;
+  taskId?: string | null;
+  activityCategory: AnalysisActivityCategory;
+  accountingDisposition: AccountingDisposition;
+  selfReflection?: string | null;
+  manualNotes?: ManualWeeklyRecordInput["manualNotes"];
+  conversation?: NonNullable<ManualWeeklyRecordInput["conversation"]> | null;
+}>;
+
 export type BuiltManualWeeklyRecord = Readonly<{
   record: WeeklyRecordV1;
   conversation: WeeklyConversationContentV1 | null;
@@ -209,6 +230,83 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
       captureScope: input.conversation.captureScope ?? "unknown",
       messages: input.conversation.messages,
       source: "user-input",
+    })
+    : null;
+  return Object.freeze({ record, conversation });
+}
+
+export function buildExtensionWeeklyRecord(input: ExtensionWeeklyRecordInput): BuiltManualWeeklyRecord {
+  requireIdentifier(input.id, "id");
+  requireIdentifier(input.sourceEventId, "sourceEventId");
+  requireIdentifier(input.measurementRecordId, "measurementRecordId");
+  requireIdentifier(input.usageId, "usageId");
+  requireOptionalIdentifier(input.taskId, "taskId");
+  requireTimestamp(input.recordedAt, "recordedAt");
+  requireTimestamp(input.startedAt, "startedAt");
+  requireTimestamp(input.endedAt, "endedAt");
+  requireSeconds(input.activeSeconds);
+  if (input.activeSeconds === 0) invalid("A measured extension activity requires positive seconds.");
+  if (new Date(input.endedAt).getTime() <= new Date(input.startedAt).getTime()) {
+    invalid("endedAt must be after startedAt.");
+  }
+  if (!isOneOf(input.aiService, ["chatgpt", "claude", "gemini", "other"])) invalid("aiService is invalid.");
+  if (!isOneOf(input.privacy, ["full", "time-only"])) invalid("privacy is invalid.");
+  if (!isActivityCategory(input.activityCategory)) invalid("activityCategory is invalid.");
+  if (!isOneOf(input.accountingDisposition, ["expense", "asset", "work-in-progress", "unclassified"])) {
+    invalid("accountingDisposition is invalid.");
+  }
+  if (input.accountingDisposition === "expense" && input.activityCategory === null) {
+    invalid("An expense record requires an activity category.");
+  }
+  if (input.privacy === "full" && !input.conversation) {
+    invalid("A full extension import requires conversation content.");
+  }
+  requireNullableText(input.selfReflection, "selfReflection");
+
+  const conversationId = input.privacy === "full" && input.conversation
+    ? requireIdentifier(input.conversation.id, "conversation.id")
+    : null;
+  const analysis = createNotConnectedAnalysis(input.id);
+  const record: WeeklyRecordV1 = Object.freeze({
+    schemaVersion: WEEKLY_RECORD_SCHEMA_VERSION,
+    id: input.id,
+    sourceEventId: input.sourceEventId,
+    origin: "extension-import",
+    sessionId: input.measurementRecordId,
+    recordedAt: new Date(input.recordedAt).toISOString(),
+    startedAt: new Date(input.startedAt).toISOString(),
+    endedAt: new Date(input.endedAt).toISOString(),
+    activeSeconds: input.activeSeconds,
+    timeSource: "measured",
+    aiService: input.aiService,
+    privacy: input.privacy,
+    taskId: input.taskId ?? null,
+    activityCategory: input.activityCategory,
+    activityCategorySource: input.activityCategory === null ? "unclassified" : "user-input",
+    accountingDisposition: input.accountingDisposition,
+    analysisStatus: analysis.analysisStatus,
+    analysis,
+    selfReflection: normalizeNullableText(input.selfReflection),
+    manualNotes: input.manualNotes ? Object.freeze({
+      interactionSummary: normalizeNullableText(input.manualNotes.interactionSummary),
+      ownThoughts: normalizeNullableText(input.manualNotes.ownThoughts),
+      discovery: normalizeNullableText(input.manualNotes.discovery),
+    }) : null,
+    links: Object.freeze({
+      conversationId,
+      usageId: input.usageId,
+      thoughtReceiptId: `${input.id}:receipt`,
+    }),
+  });
+  const conversation = conversationId && input.conversation
+    ? freezeConversation({
+      schemaVersion: WEEKLY_RECORD_SCHEMA_VERSION,
+      id: conversationId,
+      recordId: input.id,
+      title: normalizeNullableText(input.conversation.title),
+      captureScope: input.conversation.captureScope ?? "unknown",
+      messages: input.conversation.messages,
+      source: "extension-import",
     })
     : null;
   return Object.freeze({ record, conversation });
