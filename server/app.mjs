@@ -15,7 +15,7 @@ const ERROR_STATUS = {
   NOT_AUTHENTICATED: 401, NOT_AUTHORIZED: 403,
 };
 
-export function createAiHandler({ provider = null, providerFactory = null, staticHandler = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
+export function createAiHandler({ provider = null, providerFactory = null, staticHandler = null, allowedOrigins = ['http://127.0.0.1:5173', 'http://localhost:5173', 'http://127.0.0.1:5174', 'http://localhost:5174'], timeoutMs = 15000, maxConcurrent = 2 } = {}) {
   if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60000 || !Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 10) throw new AiError('INVALID_CONFIG');
   if (provider !== null && typeof provider?.rewrite !== 'function' && typeof provider?.analyzeWeekly !== 'function') throw new AiError('INVALID_CONFIG');
   if (!Array.isArray(allowedOrigins) || allowedOrigins.some(origin => {

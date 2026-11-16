@@ -42,8 +42,11 @@ test('missing/invalid credentials never send; failed provider setup never reflec
     const response = await post({ Authorization: 'Bearer test', 'X-Gemini-Model': 'gemini-test' });
     assert.equal(response.status, 400); assert.equal(await response.text(), '{"error":{"code":"INVALID_CREDENTIALS"}}');
     assert.equal(calls, 1);
-    const options = await fetch(app.baseUrl + '/rewrite', { method: 'OPTIONS', headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,x-gemini-model' } });
-    assert.equal(options.status, 204);
+    for (const origin of ['http://localhost:5173', 'http://localhost:5174']) {
+      const options = await fetch(app.baseUrl + '/rewrite', { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,x-gemini-model' } });
+      assert.equal(options.status, 204);
+      assert.equal(options.headers.get('access-control-allow-origin'), origin);
+    }
     assert.equal((await post({ Origin: 'https://evil.invalid', Authorization: 'Bearer test', 'X-Gemini-Model': 'gemini-test' })).status, 403);
     assert.equal(calls, 1);
   } finally { await app.close(); }
