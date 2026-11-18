@@ -43,6 +43,7 @@ def build_archive(root: Path) -> bytes:
 
 def validate_extracted_extension(extension_root: Path) -> None:
     """Validate the same folder shape that Chrome receives via Load unpacked."""
+    extension_root = extension_root.resolve()
     manifest_path = extension_root / "manifest.json"
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

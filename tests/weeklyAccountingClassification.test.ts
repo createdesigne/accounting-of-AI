@@ -34,7 +34,7 @@ class SerialLocks {
 }
 
 function measured(id: string, date: string, seconds: number) {
-  const startedAt = `${date}T10:00:00+09:00`;
+  const startedAt = `${date}T10:00:00`;
   const endedAt = new Date(new Date(startedAt).getTime() + seconds * 1_000).toISOString();
   return buildExtensionWeeklyRecord({
     id,
@@ -83,10 +83,11 @@ test("person-confirmed accounting updates only the 109-second activity and recal
   const targetBefore = beforeStore.records.find((record) => record.id === targetActivity.record.id)!;
   const conversationSnapshot = storage.getItem(WEEKLY_CONVERSATIONS_STORAGE_KEY);
   const analysisSnapshot = storage.getItem("watashi-to-ai-weekly-analyses:v1");
-  const anchor = new Date("2026-11-17T12:00:00+09:00");
+  const anchor = new Date(2026, 10, 17, 12);
+  const firstChangedAt = new Date(2026, 10, 18, 9).toISOString();
 
   const confirmed = await confirmWeeklySettlement(beforeStore.records, beforeStore.tasks, anchor, {
-    storage, locks, now: () => new Date("2026-11-17T15:00:00+09:00"),
+    storage, locks, now: () => new Date(2026, 10, 17, 15),
   });
   assert.equal(confirmed.revision.settlement.totals.unclassifiedSeconds, 137);
 
@@ -94,7 +95,7 @@ test("person-confirmed accounting updates only the 109-second activity and recal
     targetBefore.id,
     "expense",
     "思考探究費",
-    { storage, locks, now: () => new Date("2026-11-18T09:00:00+09:00") },
+    { storage, locks, now: () => new Date(2026, 10, 18, 9) },
   );
   assert.equal(updated.changed, true);
   assert.equal(updated.recordStore.records.length, 2);
@@ -134,10 +135,10 @@ test("person-confirmed accounting updates only the 109-second activity and recal
   assert.equal(revisions.revisions.length, 1);
   assert.deepEqual(revisions.revisions[0].before, { disposition: "unclassified", account: null });
   assert.deepEqual(revisions.revisions[0].after, { disposition: "expense", account: "思考探究費" });
-  assert.equal(revisions.revisions[0].changedAt, "2026-11-18T00:00:00.000Z");
+  assert.equal(revisions.revisions[0].changedAt, firstChangedAt);
 
   const reconfirmed = await confirmWeeklySettlement(reloaded.records, reloaded.tasks, anchor, {
-    storage, locks, now: () => new Date("2026-11-18T09:30:00+09:00"),
+    storage, locks, now: () => new Date(2026, 10, 18, 9, 30),
   });
   assert.equal(reconfirmed.revision.id, "2026-11-16:revision:2");
   const researchBundle = buildResearchExportBundle({
@@ -158,7 +159,7 @@ test("person-confirmed accounting updates only the 109-second activity and recal
   assert.deepEqual(oldExport.accountingRevisionHistory, []);
   assert.deepEqual(targetExport.accountingRevisionHistory, [{
     revisionId: `${target.id}:accounting-revision:1`,
-    changedAt: "2026-11-18T00:00:00.000Z",
+    changedAt: firstChangedAt,
     changedBy: "person",
     before: { accountingDisposition: "unclassified", accountingAccount: null },
     after: { accountingDisposition: "expense", accountingAccount: "思考探究費" },
@@ -182,7 +183,7 @@ test("person-confirmed accounting updates only the 109-second activity and recal
   assert.equal(loadWeeklyRecordStore(storage).records.reduce((sum, record) => sum + record.activeSeconds, 0), 137);
 
   const reclassified = await updateWeeklyRecordAccounting(target.id, "asset", null, {
-    storage, locks, now: () => new Date("2026-11-18T10:00:00+09:00"),
+    storage, locks, now: () => new Date(2026, 10, 18, 10),
   });
   assert.equal(reclassified.changed, true);
   const afterReclassification = loadWeeklyAccountingRevisionStore(storage);
