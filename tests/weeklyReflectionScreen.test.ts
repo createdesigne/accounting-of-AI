@@ -25,7 +25,12 @@ test("reflection UI exposes four manual fields, week navigation and activity lin
   assert.match(screen, /最大3件/);
   assert.match(screen, /能力や成長の点数ではありません/);
   assert.match(screen, /本人の入力内容は将来の分析結果で上書きしません/);
+  assert.match(screen, /resolveWeeklyAnalysisState/);
+  assert.match(screen, /一部未評価.*分析失敗/s);
+  assert.doesNotMatch(screen, /思考レシート \{record\.links\.thoughtReceiptId\}/);
+  assert.match(screen, /formatActivityDate\(record\.recordedAt\)/);
   assert.match(css, /max-width: 390px/);
+  assert.match(css, /weekly-reflection-fields[\s\S]*grid-template-columns: 1fr/);
 });
 
 test("next week is preparation-only and the week after next is blocked", () => {

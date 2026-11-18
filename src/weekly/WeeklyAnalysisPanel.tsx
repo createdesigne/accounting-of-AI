@@ -2,10 +2,14 @@ import { useEffect, useState, type FormEvent } from "react";
 import { useAiSettings } from "../AiSettings.tsx";
 import { buildWeeklyAnalysisRequest } from "../integrations/weeklyAnalysisAdapter.ts";
 import type { AnalysisActivityCategory, AnalysisScore } from "../integrations/analysisContract.ts";
-import type {
+import {
   WeeklyAnalysisAccountCandidate,
+  WeeklyAnalysisDiagnosticStage,
   WeeklyAnalysisDispositionCandidate,
   WeeklyAnalysisEvidenceV1,
+  WeeklyAnalysisMetricAssessmentV2,
+  WeeklyAnalysisValidationRule,
+  isWeeklyAnalysisPayloadV2,
 } from "../integrations/weeklyAnalysisContract.ts";
 import { WEEKLY_ANALYSIS_RUBRIC_VERSION } from "../integrations/weeklyAnalysisRubric.ts";
 import type { TaskV1, WeeklyConversationContentV1, WeeklyRecordV1 } from "../weeklyData.ts";
@@ -24,6 +28,11 @@ import {
   type WeeklyAnalysisReviewFieldsV1,
   type WeeklyAnalysisReviewV1,
 } from "../weeklyAnalysisReviewStore.ts";
+import {
+  appendWeeklyAnalysisReviewRevisionV2,
+  loadWeeklyAnalysisReviewHistoryV2,
+  revisionsForAnalysis,
+} from "../weeklyAnalysisReviewV2Store.ts";
 
 const categories = ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"] as const;
 const accounts = ["相談活動費", "思考探究費", "成果物利用費", "情報収集費", "学習活動費", "その他AI利用費"] as const;
@@ -45,6 +54,13 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
   const [message, setMessage] = useState("");
   const response = state.response;
   const analysis = response?.analysis ?? null;
+  const analysisV2 = analysis && isWeeklyAnalysisPayloadV2(analysis) ? analysis : null;
+  const legacyAnalysis = analysis && !isWeeklyAnalysisPayloadV2(analysis) ? analysis : null;
+  const [reviewHistoryVersion, setReviewHistoryVersion] = useState(0);
+  const v2Revisions = (() => {
+    void reviewHistoryVersion;
+    try { return revisionsForAnalysis(loadWeeklyAnalysisReviewHistoryV2(), response?.analysisId); } catch { return []; }
+  })();
   const [draft, setDraft] = useState<WeeklyAnalysisReviewFieldsV1>(() => reviewFields(review, analysis));
 
   useEffect(() => {
@@ -87,13 +103,17 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
       const result = await createWeeklyAnalysisClient({ baseUrl, ...credentials }).analyze(request);
       await acceptWeeklyAnalysisResponse(result);
       setConsented(false);
-      setMessage(result.analysisStatus === "complete" ? "分析結果を受信しました。本人入力と会計データは変更していません。" : "分析に失敗しました。手入力と週次決算はそのまま利用できます。");
+      setMessage(result.analysisStatus === "complete"
+        ? "分析結果を受信しました。本人入力と会計データは変更していません。"
+        : result.analysisStatus === "partial"
+          ? "分析結果を一部受信しました。根拠不足の項目は点数なしで保留しています。本人入力と会計データは変更していません。"
+          : "分析に失敗しました。手入力と週次決算はそのまま利用できます。");
     } catch (error) {
       if (request && queued) {
         const clientError = error instanceof WeeklyAnalysisClientError
           ? error
           : new WeeklyAnalysisClientError("INVALID_OUTPUT");
-        try { await acceptWeeklyAnalysisResponse(createClientFailureResponse(request, clientError, credentials.model)); }
+        try { await acceptWeeklyAnalysisResponse(createClientFailureResponse(request, clientError, credentials.model, new Date(), credentials.apiMethod)); }
         catch { /* Keep the original error and never mutate the weekly record. */ }
       }
       setMessage(error instanceof Error ? error.message : "分析を実行できませんでした。本人入力と会計データは変更していません。");
@@ -105,7 +125,7 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
 
   async function saveReview(event: FormEvent) {
     event.preventDefault();
-    if (!response?.analysis || response.analysisStatus !== "complete") return;
+    if (!response?.analysis || !["complete", "partial"].includes(response.analysisStatus)) return;
     setBusy(true);
     setMessage("");
     try {
@@ -126,32 +146,57 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
     }
   }
 
-  return <div className={`weekly-analysis-state compact${state.analysisStatus === "complete" ? " complete" : state.analysisStatus === "failed" ? " failed" : ""}${response?.origin === "test-fixture" ? " fixture" : ""}`}>
+  return <div className={`weekly-analysis-state compact${state.analysisStatus === "complete" ? " complete" : state.analysisStatus === "partial" ? " partial" : state.analysisStatus === "failed" ? " failed" : ""}${response?.origin === "test-fixture" ? " fixture" : ""}`}>
     <strong>思考レシート分析：{statusLabel(state.analysisStatus)}</strong>
-    <span>思考レシートID：{record.links.thoughtReceiptId}</span>
     <span>AIAS Levelは活動前の役割設定です。以下はAIAS公式評価ではなく、会話内の行動を対象にした研究独自分析です。</span>
-    <span>適用する評価基準：{WEEKLY_ANALYSIS_RUBRIC_VERSION}</span>
+    <details className="weekly-analysis-technical">
+      <summary>分析の技術情報</summary>
+      <span>思考レシートID：{record.links.thoughtReceiptId}</span>
+      <span>適用する評価基準：{WEEKLY_ANALYSIS_RUBRIC_VERSION}</span>
+    </details>
 
-    {state.analysisStatus === "not-connected" && <span>評価値：— / — / —（根拠不足はnullであり、0点ではありません）</span>}
+    {state.analysisStatus === "not-connected" && <span>評価値：— / — / —（根拠不足は点数なしであり、0点ではありません）</span>}
     {pending && <span>分析待ちです。本人入力と会計データは変更しません。</span>}
     {unavailable ? <p className="weekly-analysis-warning">保存範囲がfullの会話本文がないため、外部分析は実行できません。</p> : <>
       <label className="weekly-analysis-consent"><input type="checkbox" checked={consented} disabled={busy || pending} onChange={(event) => setConsented(event.target.checked)} />
-        <span>この活動の保存済み会話本文を、設定中のGeminiモデルへ今回だけ送信することに同意します。</span>
+        <span>この活動の保存済み会話本文を、設定中のGeminiモデルへ今回だけ送信することに同意します。API方式：{apiMethodLabel(credentials.apiMethod)}</span>
       </label>
       <button className="secondary-action weekly-analysis-run" type="button" disabled={busy || pending || !consented || !credentials.apiKey} onClick={() => void analyze()}>
-        {busy ? "処理中…" : state.analysisStatus === "complete" ? "Geminiで再分析" : "Geminiで構造化分析"}
+        {busy ? "処理中…" : state.analysisStatus === "failed" && response?.error?.retryable ? "同じ方式で明示的に再試行" : ["complete", "partial"].includes(state.analysisStatus) ? "Geminiで再分析" : "Geminiで構造化分析"}
       </button>
       {!credentials.apiKey && <span>実行前に画面上部のAI設定でAPIキーを設定してください。キーは保存されません。</span>}
     </>}
 
-    {state.analysisStatus === "failed" && <span>{sourceLabel}：{response?.error?.code ?? "INVALID_OUTPUT"}。手入力の記録・仕訳・決算は利用できます。</span>}
+    {state.analysisStatus === "failed" && <>
+      <span>{sourceLabel}に失敗しました。手入力の記録・仕訳・決算は引き続き利用できます。</span>
+      <details className="weekly-analysis-technical error-details">
+        <summary>通信エラーの詳細と再確認情報</summary>
+        <span>アプリ内エラー種別：{response?.error?.code ?? "INVALID_OUTPUT"}</span>
+        {response?.error?.diagnosticStage && <span>失敗した段階：{diagnosticStageLabel(response.error.diagnosticStage)}（APIキー・会話本文は含みません）</span>}
+        {response?.error?.providerHttpStatus && <span>Gemini HTTPステータス：{response.error.providerHttpStatus}</span>}
+        {response?.error?.providerErrorCode && <span>Geminiエラー種別：{response.error.providerErrorCode}</span>}
+        {typeof response?.error?.timedOut === "boolean" && <span>タイムアウト：{response.error.timedOut ? "発生" : "未発生"}</span>}
+        {response?.apiMethod && <span>API方式：{apiMethodLabel(response.apiMethod)}</span>}
+        {response?.error?.providerApiVersion && <span>APIバージョン：{response.error.providerApiVersion}</span>}
+        {response?.error?.providerSdkVersion && <span>SDK：{response.error.providerSdkVersion}</span>}
+        {response?.model && <span>使用モデル：{response.model}</span>}
+        {response?.error?.validationField && <span>検証フィールド：{response.error.validationField}</span>}
+        {response?.error?.validationRule && <span>違反条件：{validationRuleLabel(response.error.validationRule)}</span>}
+      </details>
+    </>}
+    {state.analysisStatus === "partial" && response && <div className="weekly-analysis-partial" role="status">
+      <strong>一部未評価</strong>
+      <span>根拠を確認できた項目だけを保存しました。次の項目は点数なしで保留し、本人による分類・会計処理には影響しません。</span>
+      <ul>{(response.unresolvedFields ?? []).map(item => <li key={item.field}>{unresolvedFieldLabel(item.field)}：{partialReasonLabel(item.reason)}</li>)}</ul>
+    </div>}
     {analysis && response && <>
-      <div className="weekly-analysis-metadata">
-        <b>{sourceLabel}</b>
+      <details className="weekly-analysis-metadata weekly-analysis-technical">
+        <summary>{sourceLabel}の実行情報</summary>
         <span>モデル：{response.model ?? "旧テスト形式"}</span>
+        <span>API方式：{response.apiMethod ? apiMethodLabel(response.apiMethod) : "旧形式（未記録）"}</span>
         <span>基準版：{response.rubricVersion ?? "legacy-v1"}</span>
         <span>分析日時：{formatDateTime(response.analyzedAt ?? response.receivedAt)}</span>
-      </div>
+      </details>
       <dl className="weekly-analysis-details">
         <Row label="活動テーマ候補" value={analysis.activityCategory ?? "判定不可"} />
         <Row label="勘定科目候補" value={analysis.accountCandidate ?? "判定不可"} />
@@ -162,14 +207,30 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
         <Row label="発見・学び" value={analysis.discovery ?? "判定不可"} />
       </dl>
       <div className="weekly-analysis-metrics" aria-label="研究指標と評価根拠">
-        <MetricEvidence label="自発性" score={analysis.initiative} target="initiative" evidence={analysis.evidence} />
-        <MetricEvidence label="論理性" score={analysis.reasoning} target="reasoning" evidence={analysis.evidence} />
-        <MetricEvidence label="批判的判断" score={analysis.criticalJudgment} target="critical-judgment" evidence={analysis.evidence} />
+        {analysisV2 ? <>
+          <MetricEvidenceV2 label="自発性" assessment={analysisV2.metricAssessments.initiative} />
+          <MetricEvidenceV2 label="論理性" assessment={analysisV2.metricAssessments.reasoning} />
+          <MetricEvidenceV2 label="独立性" assessment={analysisV2.metricAssessments.independence} />
+          <MetricEvidenceV2 label="独立性（検討過程）" assessment={analysisV2.metricAssessments.independence.deliberation} compact />
+          <MetricEvidenceV2 label="独立性（最終判断・意図的保留）" assessment={analysisV2.metricAssessments.independence.finalDecision} compact />
+        </> : <>
+          <MetricEvidence label="自発性" score={legacyAnalysis?.initiative ?? null} target="initiative" evidence={legacyAnalysis?.evidence ?? []} />
+          <MetricEvidence label="論理性" score={legacyAnalysis?.reasoning ?? null} target="reasoning" evidence={legacyAnalysis?.evidence ?? []} />
+          <MetricEvidence label="批判的判断（旧v1。独立性へ変換しません）" score={legacyAnalysis?.criticalJudgment ?? null} target="critical-judgment" evidence={legacyAnalysis?.evidence ?? []} />
+        </>}
       </div>
+      {analysisV2 && <dl className="weekly-analysis-details">
+        <Row label="課題の複雑さ" value={complexityLabel(analysisV2.taskComplexity.level)} />
+        <Row label="複雑さの理由" value={analysisV2.taskComplexity.reason} />
+        <Row label="検討要素と相互関係" value={analysisV2.taskComplexity.considerationFactors} />
+        <Row label="不確実性" value={analysisV2.taskComplexity.uncertainty} />
+        <Row label="必要な思考過程" value={analysisV2.taskComplexity.reasoningProcess} />
+        <Row label="本人の主観的難しさ" value="未提供（AIは推測しません）" />
+      </dl>}
       <p className="weekly-analysis-advisory">活動テーマ・勘定科目・会計区分は候補です。保存済み活動、利用時間、仕訳、週次決算には自動反映しません。</p>
       {analysis.evidence.length > 0 && <div className="weekly-analysis-evidence"><b>分析根拠となる会話箇所</b><ul>{analysis.evidence.map((evidence, index) => <li key={`${evidence.target}:${evidence.messageIndex}:${index}`}>会話 {evidence.messageIndex + 1}：「{evidence.quote}」</li>)}</ul></div>}
 
-      <details className="weekly-analysis-review" open={!!review}>
+      {!analysisV2 && <details className="weekly-analysis-review" open={!!review}>
         <summary>本人が確認・修正する</summary>
         <form onSubmit={saveReview}>
           <div className="weekly-form-grid">
@@ -189,25 +250,100 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
           <label>本人確認メモ<textarea value={draft.reviewerNote ?? ""} onChange={(event) => setDraft({ ...draft, reviewerNote: event.target.value || null })} placeholder="AI分析を修正した理由や、確認した根拠" /></label>
           <button className="secondary-action" type="submit" disabled={busy}>本人の確認内容を別保存</button>
         </form>
-      </details>
-      {review && <p className="weekly-analysis-reviewed">本人確認済み：{formatDateTime(review.reviewedAt)}。AIの元結果は上に保持されています。</p>}
+      </details>}
+      {!analysisV2 && review && <p className="weekly-analysis-reviewed">本人確認済み：{formatDateTime(review.reviewedAt)}。AIの元結果は上に保持されています。</p>}
+      {analysisV2 && <V2ReviewForm key={response.analysisId} analysisId={response.analysisId} record={record} analysis={analysisV2} revisions={v2Revisions} busy={busy} setBusy={setBusy} setMessage={setMessage} onSaved={() => { setReviewHistoryVersion(value => value + 1); onChanged(); }} />}
     </>}
     {message && <p className="weekly-form-message" role="status">{message}</p>}
   </div>;
 }
 
+function MetricEvidenceV2({ label, assessment, compact = false }: { label: string; assessment: WeeklyAnalysisMetricAssessmentV2; compact?: boolean }) {
+  return <article className={compact ? "compact" : ""}>
+    <div><strong>{label}</strong><b>{scoreLabel(assessment.score)} · {metricStatusLabel(assessment.status)}</b></div>
+    <p>評価理由：{assessment.reason}</p>
+    <p>該当ルーブリック：{assessment.rubricLevel === null ? "なし" : `${assessment.rubricLevel}点基準`} ／ 証拠充足度：{sufficiencyLabel(assessment.evidenceSufficiency)}</p>
+    {assessment.evidence.map((item, index) => <p key={`${item.utteranceId}:${index}`}>根拠：{speakerLabel(item.speaker)}「{item.quote}」<br />観察特徴：{item.observedFeature}（{item.source === "self_report" ? "自己申告" : "会話から観察"}）</p>)}
+    {assessment.unconfirmed.length > 0 && <p>確認できない点：{assessment.unconfirmed.join("／")}</p>}
+  </article>;
+}
+
+function V2ReviewForm({ analysisId, record, analysis, revisions, busy, setBusy, setMessage, onSaved }: {
+  analysisId: string;
+  record: WeeklyRecordV1;
+  analysis: Extract<NonNullable<WeeklyAnalysisDisplayState["response"]>["analysis"], { independence: AnalysisScore }>;
+  revisions: readonly import("../weeklyAnalysisReviewV2Store.ts").WeeklyAnalysisReviewRevisionV2[];
+  busy: boolean;
+  setBusy: (value: boolean) => void;
+  setMessage: (value: string) => void;
+  onSaved: () => void;
+}) {
+  const latest = revisions[revisions.length - 1];
+  const [action, setAction] = useState<"supplement" | "objection" | "exclusion" | "reassessment">(latest?.action ?? "supplement");
+  const [supplement, setSupplement] = useState(latest?.supplement ?? "");
+  const [objection, setObjection] = useState(latest?.objection ?? "");
+  const [excluded, setExcluded] = useState(latest?.excluded ?? false);
+  const [exclusionReason, setExclusionReason] = useState(latest?.exclusionReason ?? "");
+  const [difficulty, setDifficulty] = useState<"low" | "medium" | "high" | "not_provided">(latest?.subjectiveDifficulty ?? "not_provided");
+  const initial = latest?.metrics ?? {
+    initiative: pickReviewMetric(analysis.metricAssessments.initiative),
+    reasoning: pickReviewMetric(analysis.metricAssessments.reasoning),
+    independence: pickReviewMetric(analysis.metricAssessments.independence),
+  };
+  const [metrics, setMetrics] = useState(initial);
+  async function save(event: FormEvent) {
+    event.preventDefault(); setBusy(true); setMessage("");
+    try {
+      await appendWeeklyAnalysisReviewRevisionV2({
+        schemaVersion: 2, revisionId: createId("analysis-review-v2"), analysisId, recordId: record.id,
+        thoughtReceiptId: record.links.thoughtReceiptId, rubricVersion: WEEKLY_ANALYSIS_RUBRIC_VERSION,
+        reviewedAt: new Date().toISOString(), action, supplement: supplement || null, objection: objection || null,
+        excluded, exclusionReason: exclusionReason || null, subjectiveDifficulty: difficulty, metrics,
+      });
+      setMessage("本人の補足・異議・除外・再評価を変更履歴として追記しました。AIの元結果は変更していません。"); onSaved();
+    } catch (error) { setMessage(error instanceof Error ? error.message : "本人確認履歴を保存できませんでした。"); }
+    finally { setBusy(false); }
+  }
+  return <details className="weekly-analysis-review" open={revisions.length > 0}>
+    <summary>本人による補足・異議・除外・再評価</summary>
+    <form onSubmit={save}>
+      <div className="weekly-form-grid">
+        <label>操作<select value={action} onChange={event => setAction(event.target.value as typeof action)}><option value="supplement">補足</option><option value="objection">異議申し立て</option><option value="exclusion">除外</option><option value="reassessment">再評価</option></select></label>
+        <label>本人の主観的な難しさ<select value={difficulty} onChange={event => setDifficulty(event.target.value as typeof difficulty)}><option value="not_provided">未提供</option><option value="low">低い</option><option value="medium">中程度</option><option value="high">高い</option></select></label>
+      </div>
+      <label>本人による補足（self_report）<textarea value={supplement} onChange={event => setSupplement(event.target.value)} /></label>
+      <label>異議申し立て<textarea value={objection} onChange={event => setObjection(event.target.value)} /></label>
+      <label className="weekly-analysis-consent"><input type="checkbox" checked={excluded} onChange={event => setExcluded(event.target.checked)} /><span>この分析を長期比較から除外する</span></label>
+      {excluded && <label>除外理由<textarea required value={exclusionReason} onChange={event => setExclusionReason(event.target.value)} /></label>}
+      {(["initiative", "reasoning", "independence"] as const).map(metric => <ReviewMetricEditor key={metric} label={{ initiative: "自発性", reasoning: "論理性", independence: "独立性" }[metric]} value={metrics[metric]} onChange={value => setMetrics((current: typeof metrics) => ({ ...current, [metric]: value }))} />)}
+      <button className="secondary-action" type="submit" disabled={busy}>変更履歴へ追記</button>
+    </form>
+    {revisions.length > 0 && <ol className="weekly-analysis-review-history">{revisions.map(row => <li key={row.revisionId}>{formatDateTime(row.reviewedAt)}：{reviewActionLabel(row.action)}（基準 {row.rubricVersion}）</li>)}</ol>}
+  </details>;
+}
+
+type ReviewMetricValue = { score: AnalysisScore; status: "confirmed" | "provisional" | "hold" | "not_applicable"; reason: string };
+function ReviewMetricEditor({ label, value, onChange }: { label: string; value: ReviewMetricValue; onChange: (next: ReviewMetricValue) => void }) {
+  return <fieldset className="weekly-analysis-review-metric"><legend>{label}</legend><div className="weekly-form-grid">
+    <label>状態<select value={value.status} onChange={event => { const status = event.target.value as typeof value.status; onChange({ ...value, status, score: status === "hold" || status === "not_applicable" ? null : value.score ?? 50 }); }}><option value="confirmed">確定（根拠十分）</option><option value="provisional">暫定</option><option value="hold">評価保留</option><option value="not_applicable">評価対象外</option></select></label>
+    <ScoreSelect label="本人確認後の点数" value={value.score} onChange={score => onChange({ ...value, score, status: score === null ? "hold" : value.status === "hold" || value.status === "not_applicable" ? "provisional" : value.status })} />
+  </div><label>変更理由<textarea required value={value.reason} onChange={event => onChange({ ...value, reason: event.target.value })} /></label></fieldset>;
+}
+
+function pickReviewMetric(value: WeeklyAnalysisMetricAssessmentV2) { return { score: value.score, status: value.status, reason: value.reason }; }
 function Row({ label, value }: { label: string; value: string }) { return <div><dt>{label}</dt><dd>{value}</dd></div>; }
 function MetricEvidence({ label, score, target, evidence }: { label: string; score: AnalysisScore; target: WeeklyAnalysisEvidenceV1["target"]; evidence: readonly WeeklyAnalysisEvidenceV1[] }) {
   const matches = evidence.filter((item) => item.target === target);
   return <article><div><strong>{label}</strong><b>{scoreLabel(score)}</b></div>{matches.length > 0
     ? matches.map((item, index) => <p key={`${item.messageIndex}:${index}`}>根拠：会話{item.messageIndex + 1}「{item.quote}」</p>)
-    : <p>{score === null ? "根拠：不足（評価値はnull／評価不可）" : "対応する根拠引用なし（旧形式の分析結果）"}</p>}</article>;
+    : <p>{score === null ? "根拠不足のため評価できません" : "対応する根拠引用なし（旧形式の分析結果）"}</p>}</article>;
 }
 function ScoreSelect({ label, value, onChange }: { label: string; value: AnalysisScore; onChange: (value: AnalysisScore) => void }) {
-  return <label>{label}<select value={value ?? ""} onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value) as Exclude<AnalysisScore, null>)}><option value="">根拠不足（null）</option>{[0, 25, 50, 75, 100].map((score) => <option key={score} value={score}>{score}</option>)}</select></label>;
+  return <label>{label}<select value={value ?? ""} onChange={(event) => onChange(event.target.value === "" ? null : Number(event.target.value) as Exclude<AnalysisScore, null>)}><option value="">根拠不足（点数なし）</option>{[0, 25, 50, 75, 100].map((score) => <option key={score} value={score}>{score}</option>)}</select></label>;
 }
 function reviewFields(review: WeeklyAnalysisReviewV1 | null, analysis: NonNullable<WeeklyAnalysisDisplayState["response"]>["analysis"]): WeeklyAnalysisReviewFieldsV1 {
   if (review) return review.fields;
+  const legacyCriticalJudgment = analysis && !isWeeklyAnalysisPayloadV2(analysis) ? analysis.criticalJudgment : null;
   return Object.freeze({
     activityCategory: analysis?.activityCategory ?? null,
     accountCandidate: analysis?.accountCandidate ?? null,
@@ -216,17 +352,52 @@ function reviewFields(review: WeeklyAnalysisReviewV1 | null, analysis: NonNullab
     collaborationSummary: analysis?.collaborationBehaviors?.map((item) => item.description).join("\n") || null,
     initiative: analysis?.initiative ?? null,
     reasoning: analysis?.reasoning ?? null,
-    criticalJudgment: analysis?.criticalJudgment ?? null,
+    criticalJudgment: legacyCriticalJudgment,
     thinkingChange: analysis?.thinkingChange ?? null,
     discovery: analysis?.discovery ?? null,
     reviewerNote: null,
   });
 }
-function statusLabel(value: WeeklyAnalysisDisplayState["analysisStatus"]) { return ({ "not-connected": "未接続・未評価", pending: "分析待ち", complete: "分析完了", failed: "分析失敗", "not-applicable": "対象外" } as const)[value]; }
+function statusLabel(value: WeeklyAnalysisDisplayState["analysisStatus"]) { return ({ "not-connected": "未接続・未評価", pending: "分析待ち", complete: "分析完了", partial: "一部未評価", failed: "分析失敗", "not-applicable": "対象外" } as const)[value]; }
 function scoreLabel(value: AnalysisScore) { return value === null ? "評価不可" : String(value); }
+function metricStatusLabel(value: "confirmed" | "provisional" | "hold" | "not_applicable") { return ({ confirmed: "確定", provisional: "暫定", hold: "評価保留", not_applicable: "評価対象外" } as const)[value]; }
+function sufficiencyLabel(value: "high" | "medium" | "low") { return ({ high: "高", medium: "中", low: "低" } as const)[value]; }
+function speakerLabel(value: "user" | "assistant" | "system" | "unknown") { return ({ user: "本人", assistant: "AI", system: "システム", unknown: "不明" } as const)[value]; }
+function complexityLabel(value: "low" | "medium" | "high" | "unknown") { return ({ low: "低", medium: "中", high: "高", unknown: "不明" } as const)[value]; }
+function reviewActionLabel(value: "supplement" | "objection" | "exclusion" | "reassessment") { return ({ supplement: "補足", objection: "異議", exclusion: "除外", reassessment: "再評価" } as const)[value]; }
 function dispositionLabel(value: WeeklyAnalysisDispositionCandidate | undefined) { return value === null || value === undefined ? "判定不可" : ({ expense: "費用", asset: "成果物資産", "work-in-progress": "仕掛成果物", unclassified: "未分類" } as const)[value]; }
 function nullableCategory(value: string): AnalysisActivityCategory { return value === "" ? null : value as Exclude<AnalysisActivityCategory, null>; }
 function nullableAccount(value: string): WeeklyAnalysisAccountCandidate { return value === "" ? null : value as Exclude<WeeklyAnalysisAccountCandidate, null>; }
 function nullableDisposition(value: string): WeeklyAnalysisDispositionCandidate { return value === "" ? null : value as Exclude<WeeklyAnalysisDispositionCandidate, null>; }
 function createId(prefix: string) { return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`; }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
+function apiMethodLabel(value: "interactions" | "generate-content") { return value === "interactions" ? "Interactions API" : "GenerateContent API"; }
+function diagnosticStageLabel(value: WeeklyAnalysisDiagnosticStage) {
+  return ({
+    "provider-response": "Gemini応答の受信段階",
+    "output-truncated": "出力の途中終了",
+    "interaction-envelope": "API応答構造の読取段階",
+    "json-parse": "JSON解析段階",
+    "schema-validation": "必須項目・型・列挙値・null・根拠有無の検証段階",
+    "evidence-validation": "会話ID・発言位置・引用一致の検証段階",
+  } as const)[value];
+}
+function validationRuleLabel(value: WeeklyAnalysisValidationRule) {
+  return ({
+    required: "必須項目がない", "unexpected-fields": "許可されていない項目がある", type: "データ型が異なる",
+    enum: "許可された列挙値ではない", integer: "整数ではない", "non-empty": "空文字は許可されない",
+    "max-length": "文字数上限を超えている", "max-items": "件数上限を超えている",
+    "evidence-required": "非nullの分析値に対応する根拠がない", "message-index-range": "発言番号が範囲外",
+    "conversation-id-match": "会話IDが一致しない", "quote-match": "引用が指定発言に完全一致しない", "score-match": "指標点数と詳細評価が一致しない",
+  } as const)[value];
+}
+function unresolvedFieldLabel(value: string) {
+  return ({
+    "analysis.activityCategory": "活動テーマ", "analysis.accountCandidate": "勘定科目候補",
+    "analysis.accountingDispositionCandidate": "会計区分候補", "analysis.aiRole": "AIの役割",
+    "analysis.collaborationBehaviors": "協働行動", "analysis.initiative": "自発性",
+    "analysis.reasoning": "論理性", "analysis.independence": "独立性", "analysis.criticalJudgment": "批判的判断（旧v1）",
+    "analysis.thinkingChange": "思考の変化", "analysis.discovery": "発見・学び",
+  } as Record<string, string>)[value] ?? value;
+}
+function partialReasonLabel(value: "missing-evidence" | "invalid-evidence") { return value === "missing-evidence" ? "対応する根拠がない" : "根拠の発言位置または引用を確認できない"; }

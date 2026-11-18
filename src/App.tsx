@@ -10,13 +10,22 @@ import { extensionConversationStorageKey } from "./weeklyExtensionImport";
 import {
   TIME_RECORD_READY_SOURCE,
   TIME_RECORD_READY_TYPE,
+  TIME_RECORD_PENDING_ACK_BASE_KEY,
+  TIME_RECORD_PENDING_PREVIEW_BASE_KEY,
   TIME_RECORD_WINDOW_MESSAGE_TYPE,
   TIME_RECORD_WINDOW_SOURCE,
   formatTimeRecordDuration,
   acknowledgeImportedTimeRecords,
-  mergeTimeRecordPreviews,
+  clearPendingTimeRecordAcknowledgement,
+  clearPendingTimeRecordPreview,
+  loadPendingTimeRecordAcknowledgement,
+  loadPendingTimeRecordAutomaticIds,
+  loadPendingTimeRecordPreview,
+  parseManualTimeRecordTransfer,
   parseTimeRecordPayload,
   requestAutomaticTimeRecords,
+  savePendingTimeRecordAcknowledgement,
+  savePendingTimeRecordPreview,
   type TimeRecordPreview,
 } from "./timeRecordTransfer";
 import {
@@ -60,7 +69,6 @@ import {
   Clock3,
   Coins,
   Home,
-  LineChart,
   NotebookTabs,
   ReceiptText,
   ScanLine,
@@ -149,6 +157,8 @@ const RAW_CONVERSATION_KEY = extensionConversationStorageKey(window.location.pat
 const THINKING_LEDGER_KEY = `${STORAGE_PREFIX}thinkingLedger`;
 const TIME_ACCOUNTING_STORAGE_KEY = `${STORAGE_PREFIX}${TIME_ACCOUNTING_STORAGE_BASE_KEY}`;
 const TIME_AUTO_IMPORT_SETTINGS_KEY = `${STORAGE_PREFIX}${TIME_AUTO_IMPORT_SETTINGS_BASE_KEY}`;
+const TIME_RECORD_PENDING_ACK_KEY = `${STORAGE_PREFIX}${TIME_RECORD_PENDING_ACK_BASE_KEY}`;
+const TIME_RECORD_PENDING_PREVIEW_KEY = `${STORAGE_PREFIX}${TIME_RECORD_PENDING_PREVIEW_BASE_KEY}`;
 const RECEIPT_HASH_KEY = "receipt";
 const DRAFT_QUERY_KEY = "draft";
 
@@ -575,10 +585,20 @@ function App() {
   const [qrMessage, setQrMessage] = useState("");
   const [ledgerMessage, setLedgerMessage] = useState("");
   const [receiptActionMessage, setReceiptActionMessage] = useState("");
-  const [timeRecordPreview, setTimeRecordPreview] = useState<TimeRecordPreview[]>([]);
+  const [timeRecordPreview, setTimeRecordPreview] = useState<TimeRecordPreview[]>(() => (
+    [...loadPendingTimeRecordPreview(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY)]
+  ));
   const timeRecordPreviewRef = useRef<TimeRecordPreview[]>([]);
   const [timeImportBusy, setTimeImportBusy] = useState(false);
   const [timeImportMessage, setTimeImportMessage] = useState("");
+  const [manualTimeTransferText, setManualTimeTransferText] = useState("");
+  const [manualTimeTransferMessage, setManualTimeTransferMessage] = useState("");
+  const automaticTimeRecordIdsRef = useRef(new Set(
+    loadPendingTimeRecordAutomaticIds(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY),
+  ));
+  const [pendingTimeAcknowledgement, setPendingTimeAcknowledgement] = useState<readonly TimeRecordPreview[]>(() => (
+    loadPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY)
+  ));
   const [automaticTimeImportEnabled, setAutomaticTimeImportEnabled] = useState(() => (
     loadAutomaticTimeImportEnabled(localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY)
   ));
@@ -714,6 +734,17 @@ function App() {
   }, [automaticTimeImportEnabled]);
 
   useEffect(() => {
+    timeRecordPreviewRef.current = timeRecordPreview;
+    if (timeRecordPreview.length > 0) {
+      try {
+        savePendingTimeRecordPreview(timeRecordPreview, localStorage, TIME_RECORD_PENDING_PREVIEW_KEY);
+      } catch {
+        setTimeImportMessage("受信済みの実測記録を端末に保持できませんでした。再読み込みする前に再送してください。");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     const receiveTimeRecords = (event: MessageEvent) => {
       if (event.source !== window || event.origin !== window.location.origin) return;
       if (event.data?.source !== TIME_RECORD_WINDOW_SOURCE
@@ -721,13 +752,19 @@ function App() {
       const payload = parseTimeRecordPayload(event.data.payload);
       if (!payload) return;
       try {
-        const merged = mergeTimeRecordPreviews(timeRecordPreviewRef.current, payload.records);
+        const merged = [...savePendingTimeRecordPreview(
+          payload.records,
+          localStorage,
+          TIME_RECORD_PENDING_PREVIEW_KEY,
+          payload.records.map((record) => record.recordId),
+        )];
+        payload.records.forEach((record) => automaticTimeRecordIdsRef.current.add(record.recordId));
         timeRecordPreviewRef.current = merged;
         setTimeRecordPreview(merged);
         setTimeImportMessage("");
       } catch (error) {
         setTimeImportMessage(
-          error instanceof Error ? error.message : "同じ記録IDに異なる内容が届きました。",
+          error instanceof Error ? error.message : "受信した実測記録を端末に保持できませんでした。",
         );
       }
       setIsSettlementOpen(false);
@@ -740,6 +777,32 @@ function App() {
     }, window.location.origin);
     return () => window.removeEventListener("message", receiveTimeRecords);
   }, []);
+
+  function loadManualTimeRecords() {
+    const payload = parseManualTimeRecordTransfer(manualTimeTransferText.trim());
+    if (!payload) {
+      setManualTimeTransferMessage("手動連携データの形式が正しくありません。拡張機能からコピーし直してください。");
+      return;
+    }
+    try {
+      const merged = [...savePendingTimeRecordPreview(
+        payload.records,
+        localStorage,
+        TIME_RECORD_PENDING_PREVIEW_KEY,
+      )];
+      timeRecordPreviewRef.current = merged;
+      setTimeRecordPreview(merged);
+      setManualTimeTransferText("");
+      setManualTimeTransferMessage(`${payload.records.length}件を確認画面へ読み込みました。まだ会計には保存していません。`);
+      setTimeImportMessage("");
+      setIsSettlementOpen(false);
+      setActiveTab("home");
+    } catch (error) {
+      setManualTimeTransferMessage(
+        error instanceof Error ? error.message : "同じ記録IDに異なる内容があります。",
+      );
+    }
+  }
 
   function applyThinkingLedger(records: readonly IssuedThinkingReceipt[]) {
     setThinkingLedger([...records]);
@@ -771,16 +834,42 @@ function App() {
       // importTimeRecords が保存後の再読込まで検証した store を返すため、
       // 拡張機能への完了通知に失敗しても帳簿表示は安全に更新できます。
       setTimeAccountingStore(result.store);
+      try { clearPendingTimeRecordPreview(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY); } catch { /* 会計保存は完了済みです。 */ }
+      setTimeRecordPreview([]);
+      timeRecordPreviewRef.current = [];
+      const acknowledgementRecords = result.records.filter((record) => (
+        automaticTimeRecordIdsRef.current.has(record.recordId)
+      ));
+      if (acknowledgementRecords.length === 0) {
+        setTimeImportMessage("");
+        setManualTimeTransferMessage("");
+        if (result.importedCount > 0) {
+          showToast(`${result.importedCount}件・合計${formatTimeRecordDuration(result.importedSeconds)}を時間会計へ取り込みました。`);
+        } else {
+          showToast(`${result.skippedCount}件は取り込み済みでした。時間や仕訳は追加していません。`);
+        }
+        if (RESEARCH_WEEKLY_MODE) setActiveTab("weekly");
+        return;
+      }
+      let pendingStored = false;
       try {
-        await acknowledgeImportedTimeRecords([...result.records]);
+        savePendingTimeRecordAcknowledgement(acknowledgementRecords, localStorage, TIME_RECORD_PENDING_ACK_KEY);
+        pendingStored = true;
       } catch {
+        // 拡張機能側の元記録はACK成功まで保持されるため、保存失敗時も通知を試行できます。
+      }
+      setPendingTimeAcknowledgement(acknowledgementRecords);
+      try {
+        await acknowledgeImportedTimeRecords(acknowledgementRecords);
+      } catch (error) {
         setTimeImportMessage(
-          "会計への保存は完了しましたが、拡張機能へ完了を通知できませんでした。もう一度連携して同じボタンを押すと、仕訳を増やさず再通知できます。",
+          `会計への保存は完了しましたが、拡張機能への完了通知は未完了です。${error instanceof Error ? ` ${error.message}` : ""} ${pendingStored ? "下の「完了通知を再試行」から安全に再試行できます。" : "拡張機能の元記録は保持されています。再度「帳簿へ連携」してください。"}`,
         );
         return;
       }
-      setTimeRecordPreview([]);
-      timeRecordPreviewRef.current = [];
+      try { clearPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY); } catch { /* ACKは完了済みです。 */ }
+      setPendingTimeAcknowledgement([]);
+      acknowledgementRecords.forEach((record) => automaticTimeRecordIdsRef.current.delete(record.recordId));
       setTimeImportMessage("");
       if (result.importedCount > 0) {
         showToast(
@@ -793,6 +882,35 @@ function App() {
     } catch (error) {
       setTimeImportMessage(
         error instanceof Error ? error.message : "利用時間を会計へ取り込めませんでした。",
+      );
+    } finally {
+      setTimeImportBusy(false);
+    }
+  }
+
+  async function retryTimeRecordAcknowledgement() {
+    if (timeImportBusy || pendingTimeAcknowledgement.length === 0) return;
+    setTimeImportBusy(true);
+    setTimeImportMessage("保存済みの利用時間を確認し、拡張機能へ完了通知を再送しています…");
+    try {
+      // ACK前に会計保存済みであることを再検証します。同一IDの再取込は冪等で仕訳を増やしません。
+      const result = await importTimeRecords(pendingTimeAcknowledgement, {
+        storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      });
+      setTimeAccountingStore(result.store);
+      await acknowledgeImportedTimeRecords(result.records);
+      try { clearPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY); } catch { /* ACKは完了済みです。 */ }
+      setPendingTimeAcknowledgement([]);
+      const acknowledgedIds = new Set(result.records.map((record) => record.recordId));
+      acknowledgedIds.forEach((recordId) => automaticTimeRecordIdsRef.current.delete(recordId));
+      const remainingPreview = timeRecordPreviewRef.current.filter((record) => !acknowledgedIds.has(record.recordId));
+      timeRecordPreviewRef.current = remainingPreview;
+      setTimeRecordPreview(remainingPreview);
+      setTimeImportMessage("");
+      showToast(`${result.records.length}件の保存済み記録について、拡張機能への完了通知を更新しました。`);
+    } catch (error) {
+      setTimeImportMessage(
+        `完了通知を再試行できませんでした。保存済みの仕訳と拡張機能の元記録は保持されています。${error instanceof Error ? ` ${error.message}` : ""}`,
       );
     } finally {
       setTimeImportBusy(false);
@@ -1351,7 +1469,23 @@ function App() {
       <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}${RESEARCH_WEEKLY_MODE ? " research-frame" : ""}`}>
         <Header onOpenSettlement={openSettlement} onOpenSettings={() => handleTabChange("settings")} researchMode={RESEARCH_WEEKLY_MODE} />
         <div className="screen" ref={screenRef}>
-          {!isSettlementOpen && activeTab === "home" && timeRecordPreview.length > 0 && (
+          {!isSettlementOpen && activeTab === "home" && pendingTimeAcknowledgement.length > 0 && (
+            <section className="extension-import-card time-record-preview" aria-label="利用時間の完了通知待ち">
+              <div className="import-card-heading">
+                <strong>会計保存済み・拡張機能への完了通知待ち</strong>
+                <p>会計への保存は完了しています。保存済み記録を再検証してから通知だけを再試行するため、仕訳や利用時間は増えません。</p>
+              </div>
+              <p className="time-record-preview-total" role="status">
+                <strong>{pendingTimeAcknowledgement.length}件</strong>
+                <span>合計 {formatTimeRecordDuration(pendingTimeAcknowledgement.reduce((sum, record) => sum + record.durationSeconds, 0))}</span>
+              </p>
+              <button className="extension-import-button" type="button" disabled={timeImportBusy} onClick={retryTimeRecordAcknowledgement}>
+                完了通知を再試行
+              </button>
+              {timeImportMessage && <p className="candidate-message" role="status">{timeImportMessage}</p>}
+            </section>
+          )}
+          {!isSettlementOpen && activeTab === "home" && timeRecordPreview.length > 0 && pendingTimeAcknowledgement.length === 0 && (
             <section className="extension-import-card time-record-preview" aria-label="利用時間の連携内容">
               <div className="import-card-heading">
                 <strong>利用時間の連携内容を確認</strong>
@@ -1371,6 +1505,25 @@ function App() {
               </button>
               {timeImportMessage && <p className="candidate-message" role="status">{timeImportMessage}</p>}
             </section>
+          )}
+          {!isSettlementOpen && activeTab === "home" && (
+            <details className="extension-import-card manual-time-transfer" aria-label="実測記録の手動連携">
+              <summary>自動連携できない場合：実測記録を手動で読み込む</summary>
+              <p>拡張機能の「実測記録をコピー」でコピーしたデータを貼り付けます。ID・日時・秒数を検証し、既存IDは保存時に照合します。会話本文やAPIキーは受け付けません。</p>
+              <label>
+                手動連携用データ
+                <textarea
+                  value={manualTimeTransferText}
+                  onChange={(event) => setManualTimeTransferText(event.target.value)}
+                  placeholder="拡張機能からコピーしたデータを貼り付け"
+                  rows={4}
+                />
+              </label>
+              <button className="secondary-action" type="button" disabled={!manualTimeTransferText.trim()} onClick={loadManualTimeRecords}>
+                内容を確認する
+              </button>
+              {manualTimeTransferMessage && <p className="candidate-message" role="status">{manualTimeTransferMessage}</p>}
+            </details>
           )}
           {!isSettlementOpen && RESEARCH_WEEKLY_MODE && (
             <WeeklyWorkspaceScreen view={weeklyPrimaryView} onNavigate={(view) => handleTabChange(fromWeeklyPrimaryView(view))} />

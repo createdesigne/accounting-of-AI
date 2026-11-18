@@ -10,7 +10,9 @@ import {
   type ResearchExportSources,
 } from "../researchExport.ts";
 import { loadWeeklyAnalysisReviewStore } from "../weeklyAnalysisReviewStore.ts";
+import { loadWeeklyAnalysisReviewHistoryV2 } from "../weeklyAnalysisReviewV2Store.ts";
 import { loadWeeklyAnalysisStore } from "../weeklyAnalysisStore.ts";
+import { loadWeeklyAccountingRevisionStore } from "../weeklyAccountingClassificationStore.ts";
 import { loadWeeklyReflectionStore } from "../weeklyReflectionStore.ts";
 import { loadWeeklySettlementStore } from "../weeklySettlementStore.ts";
 import { loadWeeklyConversationStore, loadWeeklyRecordStore } from "../weeklyStore.ts";
@@ -155,6 +157,8 @@ function loadSnapshot(): { sources: ResearchExportSources | null; error: string 
         conversations: loadWeeklyConversationStore(),
         analyses: loadWeeklyAnalysisStore(),
         reviews: loadWeeklyAnalysisReviewStore(),
+        reviewHistoryV2: loadWeeklyAnalysisReviewHistoryV2(),
+        accountingRevisions: loadWeeklyAccountingRevisionStore(),
         reflections: loadWeeklyReflectionStore(),
         settlements: loadWeeklySettlementStore(),
       }),

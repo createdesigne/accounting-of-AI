@@ -5,6 +5,7 @@ import type {
   WeeklyRecordV1,
   WeeklyTimeSource,
 } from "./weeklyData.ts";
+import { WEEKLY_EXPENSE_ACCOUNT_NAMES, type WeeklyExpenseAccount } from "./weeklyAccountingTypes.ts";
 
 export const WEEKLY_ACCOUNTS = {
   aiClearing: "AI仮受品",
@@ -20,14 +21,8 @@ export const WEEKLY_ACCOUNTS = {
   accumulatedTimeLoss: "累積時間損失",
 } as const;
 
-export const WEEKLY_EXPENSE_ACCOUNTS = Object.freeze([
-  WEEKLY_ACCOUNTS.consultationExpense,
-  WEEKLY_ACCOUNTS.thoughtExplorationExpense,
-  WEEKLY_ACCOUNTS.deliverableExpense,
-  WEEKLY_ACCOUNTS.researchExpense,
-  WEEKLY_ACCOUNTS.learningExpense,
-  WEEKLY_ACCOUNTS.otherExpense,
-] as const);
+export const WEEKLY_EXPENSE_ACCOUNTS = WEEKLY_EXPENSE_ACCOUNT_NAMES;
+export type { WeeklyExpenseAccount };
 
 export type WeeklyAccount = typeof WEEKLY_ACCOUNTS[keyof typeof WEEKLY_ACCOUNTS];
 export type WeeklyJournalLine = Readonly<{
@@ -286,6 +281,7 @@ export function confirmedAccountForWeeklyRecord(record: WeeklyRecordV1): WeeklyA
   if (record.accountingDisposition === "unclassified") return WEEKLY_ACCOUNTS.aiClearing;
   if (record.accountingDisposition === "asset") return WEEKLY_ACCOUNTS.deliverableAsset;
   if (record.accountingDisposition === "work-in-progress") return WEEKLY_ACCOUNTS.workInProgress;
+  if (record.accountingAccount) return record.accountingAccount;
   const accounts = {
     "相談": WEEKLY_ACCOUNTS.consultationExpense,
     "壁打ち": WEEKLY_ACCOUNTS.thoughtExplorationExpense,

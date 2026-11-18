@@ -50,6 +50,7 @@ export function WeeklyJournalScreen({ onOpenRecords }: { onOpenRecords: () => vo
     </section>
     <section className="weekly-settlement-panel" aria-labelledby="weekly-journal-only-heading">
       <div className="weekly-settlement-heading"><div><p className="eyebrow">借方＝貸方</p><h3 id="weekly-journal-only-heading">週次仕訳一覧</h3></div><span>{preview.journalEntries.length}仕訳</span></div>
+      <p className="weekly-settlement-note"><strong>仮仕訳</strong>はAI利用時間の発生、<strong>決算振替</strong>は本人が確定した区分への移動です。同じ活動の秒数が両方に表示されても、利用時間を二重に加算しているわけではありません。</p>
       {preview.journalEntries.length === 0 ? <p className="weekly-settlement-empty">この週のAI利用仕訳はありません。</p> : <div className="weekly-journal-list">
         {preview.journalEntries.map((entry) => <article key={entry.id}>
           <div className="weekly-journal-meta"><span>{entry.kind === "usage-recognition" ? "仮仕訳" : "決算振替"}</span><span>{sourceLabel(entry.timeSource)}</span></div>
@@ -57,7 +58,6 @@ export function WeeklyJournalScreen({ onOpenRecords }: { onOpenRecords: () => vo
             <div><small>借方</small><strong>{entry.lines[0].account}</strong><span>{formatDuration(entry.lines[0].seconds)}</span></div>
             <div><small>貸方</small><strong>{entry.lines[1].account}</strong><span>{formatDuration(entry.lines[1].seconds)}</span></div>
           </div>
-          <small className="weekly-journal-id">記録ID: {entry.recordId}</small>
         </article>)}
       </div>}
     </section>

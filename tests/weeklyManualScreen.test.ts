@@ -6,6 +6,7 @@ const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
 const screen = readFileSync(new URL("../src/weekly/WeeklyManualScreen.tsx", import.meta.url), "utf8");
 const analysisPanel = readFileSync(new URL("../src/weekly/WeeklyAnalysisPanel.tsx", import.meta.url), "utf8");
 const analysisClient = readFileSync(new URL("../src/weeklyAnalysisClient.ts", import.meta.url), "utf8");
+const extensionImport = readFileSync(new URL("../src/weekly/WeeklyExtensionImportScreen.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("../src/weekly/weeklyManualScreen.css", import.meta.url), "utf8");
 
 test("the research mode uses the weekly workspace while retaining legacy code behind a display guard", () => {
@@ -23,12 +24,17 @@ test("the manual screen exposes required advance task and activity fields", () =
   ]) assert.ok(screen.includes(label), `missing field label: ${label}`);
   assert.match(screen, /Level 1の課題です。AI利用時間は0秒/);
   assert.match(screen, /AI分析：保存後に任意で実行/);
-  assert.match(screen, /未評価（null）/);
+  assert.match(screen, /評価前（点数なし）/);
   assert.match(analysisPanel, /テスト用分析（実際のGemini分析ではありません）/);
   assert.match(analysisPanel, /本人の確認・修正内容をAI分析とは別に保存/);
   assert.match(analysisPanel, /分析根拠となる会話箇所/);
   assert.match(analysisPanel, /研究指標と評価根拠/);
   assert.match(screen, /AIAS Levelの名称・説明・具体例/);
+  for (const label of ["確定（根拠十分）", "暫定", "評価保留", "評価対象外"]) {
+    assert.ok(analysisPanel.includes(label), `missing localized analysis status: ${label}`);
+  }
+  assert.match(analysisPanel, /分析の技術情報/);
+  assert.doesNotMatch(analysisPanel, /根拠：\{speakerLabel\(item\.speaker\)\}・\{item\.utteranceId\}/);
 });
 
 test("the analysis UI requires explicit consent, reuses in-memory AI settings, and keeps the transport separated", () => {
@@ -47,4 +53,27 @@ test("analysis candidates are advisory and never call accounting or settlement m
   assert.match(analysisPanel, /仕訳、週次決算には自動反映しません/);
   assert.doesNotMatch(analysisPanel, /saveManualWeeklyRecord|confirmWeeklySettlement|saveWeeklySettlement|activeSeconds\s*=/);
   assert.match(analysisPanel, /WEEKLY_ANALYSIS_RUBRIC_VERSION/);
+});
+
+test("saved activities expose person-confirmed accounting without auto-applying Gemini candidates", () => {
+  const source = readFileSync(new URL("../src/weekly/WeeklyManualScreen.tsx", import.meta.url), "utf8");
+  const editor = readFileSync(new URL("../src/weekly/WeeklyAccountingClassificationEditor.tsx", import.meta.url), "utf8");
+  const accounts = readFileSync(new URL("../src/weeklyAccountingTypes.ts", import.meta.url), "utf8");
+  assert.match(source, /WeeklyAccountingClassificationEditor/);
+  assert.match(editor, /会計区分を編集・確定/);
+  assert.match(editor, /Gemini候補（参考・自動確定しません）/);
+  for (const label of ["費用", "成果物資産", "仕掛成果物", "未分類"]) {
+    assert.ok(editor.includes(label), `missing accounting option: ${label}`);
+  }
+  assert.match(accounts, /思考探究費/);
+  assert.doesNotMatch(editor, /accountingDispositionCandidate\s*\?\?\s*record\.accountingDisposition/);
+});
+
+test("saved extension conversations hide the new-import form and separate used measurements", () => {
+  assert.match(extensionImport, /existing \? <section className="weekly-panel weekly-existing-import"/);
+  assert.match(extensionImport, /保存済み活動を確認する/);
+  assert.match(extensionImport, /未使用の実測時間/);
+  assert.match(extensionImport, /使用済みの実測時間/);
+  assert.match(extensionImport, /Chrome拡張機能との連携方法/);
+  assert.doesNotMatch(extensionImport, /existing\.links\.thoughtReceiptId/);
 });

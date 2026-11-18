@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AnalysisActivityCategory } from "../integrations/analysisContract.ts";
-import type { AccountingDisposition, TaskV1, WeeklyPrivacyChoice, WeeklyRecordV1 } from "../weeklyData.ts";
+import { defaultExpenseAccountForCategory, type AccountingDisposition, type TaskV1, type WeeklyPrivacyChoice, type WeeklyRecordV1 } from "../weeklyData.ts";
+import { WEEKLY_EXPENSE_ACCOUNT_NAMES, type WeeklyExpenseAccount } from "../weeklyAccountingTypes.ts";
+import {
+  loadWeeklyAccountingRevisionStore,
+  WEEKLY_ACCOUNTING_REVISIONS_STORAGE_KEY,
+  type WeeklyAccountingRevisionStoreV1,
+} from "../weeklyAccountingClassificationStore.ts";
 import {
   deleteWeeklyRecord,
   deleteWeeklyTask,
@@ -17,7 +23,6 @@ import {
   loadWeeklyAnalysisStore,
   resolveWeeklyAnalysisState,
   WEEKLY_ANALYSES_STORAGE_KEY,
-  type WeeklyAnalysisDisplayState,
   type WeeklyAnalysisStoreV1,
 } from "../weeklyAnalysisStore.ts";
 import {
@@ -27,6 +32,7 @@ import {
   type WeeklyAnalysisReviewStoreV1,
 } from "../weeklyAnalysisReviewStore.ts";
 import { WeeklyAnalysisPanel } from "./WeeklyAnalysisPanel.tsx";
+import { WeeklyAccountingClassificationEditor } from "./WeeklyAccountingClassificationEditor.tsx";
 import "./weeklyManualScreen.css";
 
 const categories = ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"] as const;
@@ -53,6 +59,7 @@ type ActivityDraft = {
   category: Exclude<AnalysisActivityCategory, null>;
   aiService: "chatgpt" | "claude" | "gemini" | "other";
   disposition: AccountingDisposition;
+  accountingAccount: WeeklyExpenseAccount;
   privacy: WeeklyPrivacyChoice;
   interactionSummary: string;
   ownThoughts: string;
@@ -74,6 +81,7 @@ const emptyActivity = (): ActivityDraft => ({
   category: "壁打ち",
   aiService: "chatgpt",
   disposition: "expense",
+  accountingAccount: "思考探究費",
   privacy: "full",
   interactionSummary: "",
   ownThoughts: "",
@@ -85,6 +93,7 @@ export function WeeklyManualScreen() {
   const [conversationStore, setConversationStore] = useState<WeeklyConversationStoreV1>(() => safeLoadConversationStore());
   const [analysisStore, setAnalysisStore] = useState<WeeklyAnalysisStoreV1>(() => safeLoadAnalysisStore());
   const [analysisReviewStore, setAnalysisReviewStore] = useState<WeeklyAnalysisReviewStoreV1>(() => safeLoadAnalysisReviewStore());
+  const [accountingRevisionStore, setAccountingRevisionStore] = useState<WeeklyAccountingRevisionStoreV1>(() => safeLoadAccountingRevisionStore());
   const [taskDraft, setTaskDraft] = useState<TaskDraft>(emptyTask);
   const [activityDraft, setActivityDraft] = useState<ActivityDraft>(emptyActivity);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
@@ -111,12 +120,14 @@ export function WeeklyManualScreen() {
       if (event && event.key !== WEEKLY_RECORDS_STORAGE_KEY
         && event.key !== WEEKLY_CONVERSATIONS_STORAGE_KEY
         && event.key !== WEEKLY_ANALYSES_STORAGE_KEY
-        && event.key !== WEEKLY_ANALYSIS_REVIEWS_STORAGE_KEY && event.key !== null) return;
+        && event.key !== WEEKLY_ANALYSIS_REVIEWS_STORAGE_KEY
+        && event.key !== WEEKLY_ACCOUNTING_REVISIONS_STORAGE_KEY && event.key !== null) return;
       try {
         setStore(loadWeeklyRecordStore());
         setConversationStore(loadWeeklyConversationStore());
         setAnalysisStore(loadWeeklyAnalysisStore());
         setAnalysisReviewStore(loadWeeklyAnalysisReviewStore());
+        setAccountingRevisionStore(loadWeeklyAccountingRevisionStore());
         setLoadError("");
       } catch (error) {
         setLoadError(messageOf(error, "週次記録を読み込めませんでした。保存値は変更していません。"));
@@ -213,6 +224,9 @@ export function WeeklyManualScreen() {
       ...current,
       taskId,
       category: task?.activityCategory ?? current.category,
+      accountingAccount: task?.activityCategory
+        ? defaultExpenseAccountForCategory(task.activityCategory) ?? current.accountingAccount
+        : current.accountingAccount,
       seconds: task?.plannedAiasLevel === 1 ? "0" : current.seconds,
       aiService: task?.plannedAiasLevel === 1 ? "other" : current.aiService,
       disposition: task?.plannedAiasLevel === 1 ? "unclassified" : current.disposition,
@@ -256,6 +270,7 @@ export function WeeklyManualScreen() {
         taskId: activityDraft.taskId || null,
         activityCategory: activityDraft.category,
         accountingDisposition: noAi ? "unclassified" : activityDraft.disposition,
+        accountingAccount: noAi || activityDraft.disposition !== "expense" ? null : activityDraft.accountingAccount,
         analysisApplicable: !noAi,
         selfReflection: full ? activityDraft.ownThoughts : null,
         manualNotes: full ? {
@@ -295,6 +310,9 @@ export function WeeklyManualScreen() {
       category: record.activityCategory ?? "その他",
       aiService: record.aiService,
       disposition: record.accountingDisposition,
+      accountingAccount: record.accountingAccount
+        ?? defaultExpenseAccountForCategory(record.activityCategory)
+        ?? "その他AI利用費",
       privacy: record.privacy,
       interactionSummary: record.manualNotes?.interactionSummary
         ?? contents?.messages.map((message) => message.text).join("\n") ?? "",
@@ -381,16 +399,17 @@ export function WeeklyManualScreen() {
           <label>活動日時<input required type="datetime-local" value={activityDraft.recordedAt} onChange={(event) => setActivityDraft({ ...activityDraft, recordedAt: event.target.value })} /></label>
           <label>利用時間（秒）<input required inputMode="numeric" type="number" min="0" step="1" disabled={selectedTaskIsNoAi} value={selectedTaskIsNoAi ? "0" : activityDraft.seconds} onChange={(event) => setActivityDraft({ ...activityDraft, seconds: event.target.value })} placeholder="例：720" /><small>手入力値として保存します。実測とは表示しません。</small></label>
           <div className="weekly-form-grid">
-            <label>活動テーマ<select value={activityDraft.category} onChange={(event) => setActivityDraft({ ...activityDraft, category: event.target.value as ActivityDraft["category"] })}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
+            <label>活動テーマ<select value={activityDraft.category} onChange={(event) => { const category = event.target.value as ActivityDraft["category"]; setActivityDraft({ ...activityDraft, category, accountingAccount: defaultExpenseAccountForCategory(category) ?? activityDraft.accountingAccount }); }}>{categories.map((category) => <option key={category}>{category}</option>)}</select></label>
             <label>AIサービス<select disabled={selectedTaskIsNoAi} value={selectedTaskIsNoAi ? "other" : activityDraft.aiService} onChange={(event) => setActivityDraft({ ...activityDraft, aiService: event.target.value as ActivityDraft["aiService"] })}><option value="chatgpt">ChatGPT</option><option value="claude">Claude</option><option value="gemini">Gemini</option><option value="other">その他</option></select></label>
             <label>会計区分<select disabled={selectedTaskIsNoAi} value={selectedTaskIsNoAi ? "unclassified" : activityDraft.disposition} onChange={(event) => setActivityDraft({ ...activityDraft, disposition: event.target.value as AccountingDisposition })}><option value="expense">費用</option><option value="asset">成果物資産</option><option value="work-in-progress">仕掛成果物</option><option value="unclassified">未分類</option></select></label>
-            <label>保存範囲<select value={activityDraft.privacy} onChange={(event) => setActivityDraft({ ...activityDraft, privacy: event.target.value as WeeklyPrivacyChoice })}><option value="full">full（時間と入力本文）</option><option value="time-only">time-only（時間のみ）</option><option value="off">off（保存しない）</option></select></label>
+            {activityDraft.disposition === "expense" && !selectedTaskIsNoAi && <label>費用の勘定科目<select value={activityDraft.accountingAccount} onChange={(event) => setActivityDraft({ ...activityDraft, accountingAccount: event.target.value as WeeklyExpenseAccount })}>{WEEKLY_EXPENSE_ACCOUNT_NAMES.map((account) => <option key={account}>{account}</option>)}</select></label>}
+            <label>保存範囲<select value={activityDraft.privacy} onChange={(event) => setActivityDraft({ ...activityDraft, privacy: event.target.value as WeeklyPrivacyChoice })}><option value="full">時間と入力本文を保存</option><option value="time-only">時間のみ保存</option><option value="off">保存しない</option></select></label>
           </div>
           {activityDraft.privacy !== "full" && <p className="weekly-privacy-notice">{activityDraft.privacy === "time-only" ? "本文3項目は保存せず、時間と分類だけを保存します。" : "時間・本文とも保存しません。編集中の記録は削除されます。"}</p>}
           <label>AIとのやり取りの概要<textarea disabled={activityDraft.privacy !== "full"} value={activityDraft.interactionSummary} onChange={(event) => setActivityDraft({ ...activityDraft, interactionSummary: event.target.value })} /></label>
           <label>自分が考えたこと・判断したこと<textarea disabled={activityDraft.privacy !== "full"} value={activityDraft.ownThoughts} onChange={(event) => setActivityDraft({ ...activityDraft, ownThoughts: event.target.value })} /></label>
           <label>発見・学び<textarea disabled={activityDraft.privacy !== "full"} value={activityDraft.discovery} onChange={(event) => setActivityDraft({ ...activityDraft, discovery: event.target.value })} /></label>
-          <div className="weekly-analysis-state"><strong>AI分析：保存後に任意で実行</strong><span>初期値は未評価（null）です。会話本文の外部送信に明示同意した場合だけ分析できます。</span></div>
+          <div className="weekly-analysis-state"><strong>AI分析：保存後に任意で実行</strong><span>初期状態は評価前（点数なし）です。会話本文の外部送信に明示同意した場合だけ分析できます。</span></div>
           <div className="weekly-form-actions">
             <button className="primary-action" type="submit" disabled={busy}>{editingRecordId ? "活動記録を更新" : "活動記録を保存"}</button>
             {editingRecordId && <button className="secondary-action" type="button" onClick={cancelRecordEdit}>編集をやめる</button>}
@@ -407,7 +426,7 @@ export function WeeklyManualScreen() {
           const analysisState = resolveWeeklyAnalysisState(record, analysisStore, conversationsByRecord.get(record.id) ?? null);
           return <article className="weekly-record-card" key={record.id}>
             <div className="weekly-record-top"><div><time>{formatDateTime(record.recordedAt)}</time><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong></div><span>{noAi ? "AI不使用" : `${record.activeSeconds}秒`}</span></div>
-            <div className="weekly-tags"><span>{record.activityCategory ?? "未分類"}</span><span>{dispositionLabel(record.accountingDisposition)}</span><span>{record.timeSource === "manual" ? "手入力" : record.timeSource === "measured" ? "拡張機能の実測" : record.timeSource}</span>{task && <span>Level {task.plannedAiasLevel ?? "未設定"}</span>}</div>
+            <div className="weekly-tags"><span>{record.activityCategory ?? "未分類"}</span><span>{dispositionLabel(record.accountingDisposition)}</span>{record.accountingDisposition === "expense" && <span>{record.accountingAccount ?? defaultExpenseAccountForCategory(record.activityCategory) ?? "勘定科目未確定"}</span>}<span>{record.timeSource === "manual" ? "手入力" : record.timeSource === "measured" ? "拡張機能の実測" : record.timeSource}</span>{task && <span>Level {task.plannedAiasLevel ?? "未設定"}</span>}</div>
             {record.manualNotes?.interactionSummary && <p><b>概要：</b>{record.manualNotes.interactionSummary}</p>}
             {record.manualNotes?.ownThoughts && <p><b>自分の判断：</b>{record.manualNotes.ownThoughts}</p>}
             {record.manualNotes?.discovery && <p><b>発見・学び：</b>{record.manualNotes.discovery}</p>}
@@ -419,6 +438,19 @@ export function WeeklyManualScreen() {
               noAi={noAi}
               review={findWeeklyAnalysisReview(analysisReviewStore, analysisState.response?.analysisId)}
               onChanged={refreshAnalysis}
+            />
+            <WeeklyAccountingClassificationEditor
+              record={record}
+              analysisState={analysisState}
+              revisionStore={accountingRevisionStore}
+              disabled={noAi}
+              onSaved={(result) => {
+                setStore(result.recordStore);
+                setAccountingRevisionStore(result.revisionStore);
+                setActivityMessage(result.changed
+                  ? "会計区分を更新しました。確定済み週次決算は必要に応じて再確定してください。"
+                  : "会計区分は変更されていません。");
+              }}
             />
             <div className="weekly-item-actions">{record.origin === "user-input"
               ? <button type="button" onClick={() => editRecord(record)}>編集</button>
@@ -444,6 +476,12 @@ function safeLoadAnalysisStore(): WeeklyAnalysisStoreV1 {
 function safeLoadAnalysisReviewStore(): WeeklyAnalysisReviewStoreV1 {
   try { return loadWeeklyAnalysisReviewStore(); } catch {
     return Object.freeze({ schemaVersion: 1, reviews: Object.freeze([]) });
+  }
+}
+
+function safeLoadAccountingRevisionStore(): WeeklyAccountingRevisionStoreV1 {
+  try { return loadWeeklyAccountingRevisionStore(); } catch {
+    return Object.freeze({ schemaVersion: 1, revisions: Object.freeze([]) });
   }
 }
 

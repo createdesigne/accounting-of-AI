@@ -7,11 +7,17 @@ const tracker = globalThis.ActivityTrackerCore;
 const timeRecordProtocol = globalThis.TimeRecordProtocol;
 let statePromise;
 let workQueue = Promise.resolve();
+let watcherIssue = null;
+let lastWatcherCheckAt = -Infinity;
 
 ensureAlarm();
 
 chrome.runtime.onInstalled.addListener(() => {
   ensureAlarm();
+  enqueue(async () => {
+    const state = await loadState();
+    if (state.enabled) await attachWatchersToOpenChatGptTabs();
+  });
 });
 
 chrome.runtime.onStartup.addListener(() => {
@@ -24,6 +30,7 @@ chrome.runtime.onStartup.addListener(() => {
     if (state.current) tracker.pause(state, state.current.accountedThrough);
     tracker.tick(state, Date.now());
     await saveState(state);
+    if (state.enabled) await attachWatchersToOpenChatGptTabs();
   });
 });
 
@@ -36,12 +43,27 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   });
 });
 
-chrome.tabs.onActivated.addListener(() => {
+chrome.tabs.onActivated.addListener(({ tabId }) => {
   const occurredAt = Date.now();
-  enqueue(() => pauseAndSave(occurredAt));
+  enqueue(async () => {
+    const state = await loadState();
+    tracker.pause(state, occurredAt);
+    tracker.tick(state, occurredAt);
+    await saveState(state);
+    if (!state.enabled) return;
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    if (tab?.id && isChatGptUrl(tab.url || "")) await ensureActivityWatcher(tab.id);
+  });
 });
 
 chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (tab.active && changeInfo.status === "complete" && tab.id && isChatGptUrl(tab.url || "")) {
+    enqueue(async () => {
+      const state = await loadState();
+      if (state.enabled) await ensureActivityWatcher(tab.id);
+    });
+    return;
+  }
   if (!tab.active || (!changeInfo.url && changeInfo.status !== "loading")) return;
   if (!isChatGptUrl(tab.url || changeInfo.url || "")) {
     const occurredAt = Date.now();
@@ -157,9 +179,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
       } else {
         await reconcileCurrentEnvironment(state, receivedAt);
+        await refreshActiveWatcher(state, receivedAt);
       }
       await saveState(state);
-      sendResponse({ ok: true, ...tracker.summary(state) });
+      sendResponse({ ok: true, ...tracker.summary(state), watcherIssue });
     }).catch((error) => {
       console.error("Active-time tracking failed", error);
       sendResponse({ ok: false, message: "計測状態を更新できませんでした。" });
@@ -203,6 +226,11 @@ async function startFromActiveChatGpt(state, occurredAt) {
   if (!lastFocused?.focused || !Number.isInteger(lastFocused.id)) return;
   const [tab] = await chrome.tabs.query({ active: true, windowId: lastFocused.id });
   if (!tab?.id || !isChatGptUrl(tab.url || "")) return;
+  const attached = await ensureActivityWatcher(tab.id);
+  if (!attached) {
+    if (state.current) tracker.pause(state, state.current.accountedThrough);
+    return;
+  }
   tracker.recordActivity(state, {
     now: occurredAt,
     tabId: tab.id,
@@ -210,6 +238,52 @@ async function startFromActiveChatGpt(state, occurredAt) {
     activityId: createActivityId(),
     timeZone: getLocalTimeZone(),
   });
+}
+
+async function ensureActivityWatcher(tabId) {
+  try {
+    const existing = await chrome.tabs.sendMessage(tabId, { type: "tracking:watcherPing" }).catch(() => null);
+    if (existing?.ok) {
+      watcherIssue = null;
+      return true;
+    }
+    await chrome.scripting.executeScript({ target: { tabId }, files: ["activity.js"] });
+    const attached = await chrome.tabs.sendMessage(tabId, { type: "tracking:watcherPing" });
+    if (!attached?.ok) throw new Error("The activity watcher did not acknowledge the connection.");
+    watcherIssue = null;
+    return true;
+  } catch (error) {
+    watcherIssue = createWatcherIssue(error);
+    return false;
+  }
+}
+
+async function attachWatchersToOpenChatGptTabs() {
+  const tabs = await chrome.tabs.query({});
+  for (const tab of tabs) {
+    if (tab.id && isChatGptUrl(tab.url || "")) await ensureActivityWatcher(tab.id);
+  }
+}
+
+async function refreshActiveWatcher(state, occurredAt) {
+  if (!state.enabled || occurredAt - lastWatcherCheckAt < 5000) return;
+  lastWatcherCheckAt = occurredAt;
+  const lastFocused = await chrome.windows.getLastFocused().catch(() => null);
+  if (!lastFocused?.focused || !Number.isInteger(lastFocused.id)) return;
+  const [tab] = await chrome.tabs.query({ active: true, windowId: lastFocused.id });
+  if (tab?.id && isChatGptUrl(tab.url || "")) await ensureActivityWatcher(tab.id);
+}
+
+function createWatcherIssue(error) {
+  const detail = error instanceof Error ? error.message : String(error || "");
+  const accessDenied = /cannot access contents|must request permission|cannot access a chrome|not allowed to access|missing host permission/i.test(detail);
+  return {
+    code: accessDenied ? "site-access-denied" : "watcher-unavailable",
+    occurredAt: Date.now(),
+    message: accessDenied
+      ? "現在、ChatGPTへのサイトアクセス権限がありません。Chromeの拡張機能管理画面で「AI Thought Receipt Bridge」→「詳細」→「サイトへのアクセス」を開き、chatgpt.com（またはchat.openai.com）で許可してから会話ページを再読み込みしてください。「すべてのサイト」の許可は不要です。"
+      : "現在、ChatGPTの計測処理と接続できません。拡張機能とChatGPTのタブを再読み込みしてください。保存済み時間は変更されていません。",
+  };
 }
 
 function isChatGptUrl(value) {

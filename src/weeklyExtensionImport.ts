@@ -4,6 +4,7 @@ import type { TimeAccountingStore } from "./timeAccountingStore.ts";
 import type {
   AccountingDisposition,
   ExtensionWeeklyRecordInput,
+  WeeklyRecordV1,
   WeeklyAiService,
   WeeklyPrivacy,
 } from "./weeklyData.ts";
@@ -77,6 +78,16 @@ export function buildMeasuredTimeCandidates(store: TimeAccountingStore): readonl
   candidates.sort((left, right) => right.endedAt.localeCompare(left.endedAt)
     || left.measurementRecordId.localeCompare(right.measurementRecordId));
   return Object.freeze(candidates);
+}
+
+export function selectUnlinkedMeasuredTimeCandidates(
+  measurements: readonly MeasuredTimeCandidate[],
+  records: readonly WeeklyRecordV1[],
+) {
+  const linkedMeasurementIds = new Set(records
+    .filter((record) => record.timeSource === "measured" && record.sessionId)
+    .map((record) => record.sessionId as string));
+  return Object.freeze(measurements.filter((item) => !linkedMeasurementIds.has(item.measurementRecordId)));
 }
 
 export function buildConfirmedExtensionRecord(input: ConfirmExtensionImportInput): ExtensionWeeklyRecordInput {

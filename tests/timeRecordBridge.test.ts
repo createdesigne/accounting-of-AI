@@ -33,7 +33,7 @@ function createBridge(
     },
   };
   const context = vm.createContext({
-    window: fakeWindow, chrome, URL, Intl, TextEncoder, encodeURIComponent, unescape,
+    window: fakeWindow, chrome, URL, Intl, TextEncoder, encodeURIComponent, unescape, setTimeout,
   });
   vm.runInContext(protocolSource, context);
   vm.runInContext(bridgeSource, context);
@@ -43,7 +43,7 @@ function createBridge(
     localDate: '2026-11-10', timeZone: 'Asia/Tokyo', startedAt: 1_000,
     endedAt: 61_000, durationSeconds: 60,
   }], 'request-1');
-  return { runtimeListeners, windowListeners, posted, runtimeSent, fakeWindow, protocol, payload };
+  return { runtimeListeners, windowListeners, posted, runtimeSent, fakeWindow, protocol, payload, context };
 }
 
 function sendToBridge(app: ReturnType<typeof createBridge>, message: any, senderId = 'extension-id') {
@@ -61,6 +61,13 @@ test('delivers a valid payload only to the exact current Web app origin', () => 
   assert.equal(app.posted.length, 1);
   assert.equal(app.posted[0].targetOrigin, 'https://accounting-of-ai.vercel.app');
   assert.equal(app.posted[0].message.payload.records[0].recordId, 'session-1:day:2026-11-10');
+});
+
+test('reinjection after an extension reload does not duplicate bridge listeners', () => {
+  const app = createBridge('http://localhost:5174/accounting-of-AI/');
+  vm.runInContext(bridgeSource, app.context);
+  assert.equal(app.runtimeListeners.length, 1);
+  assert.equal(app.windowListeners.length, 1);
 });
 
 test('does not install the bridge on an unapproved page', () => {
@@ -129,7 +136,30 @@ test('reports acknowledgement failure without changing the transferred records',
     },
   });
   assert.equal(app.posted.at(-1)?.message.ok, false);
-  assert.equal(app.posted.at(-1)?.message.message, 'simulated response failure');
+  assert.match(app.posted.at(-1)?.message.message, /Service Worker通信: simulated response failure/);
+});
+
+test('retries transient Service Worker acknowledgement failures before reporting success', async () => {
+  let attempts = 0;
+  const app = createBridge(
+    'http://localhost:5174/accounting-of-AI/',
+    () => {
+      attempts += 1;
+      if (attempts < 3) throw new Error('The message port closed before a response was received.');
+      return { ok: true, acknowledgedCount: 1 };
+    },
+  );
+  await app.windowListeners[0]({
+    source: app.fakeWindow,
+    origin: app.fakeWindow.location.origin,
+    data: {
+      source: app.protocol.WINDOW_ACK_SOURCE,
+      type: app.protocol.WINDOW_ACK_TYPE,
+      payload: app.payload,
+    },
+  });
+  assert.equal(attempts, 3);
+  assert.equal(app.posted.at(-1)?.message.ok, true);
 });
 
 test('requests pending finalized records for automatic import only through the approved bridge', async () => {

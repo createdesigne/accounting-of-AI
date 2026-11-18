@@ -1,5 +1,6 @@
 import {
   parseWeeklyAnalysisRequestV1,
+  isWeeklyAnalysisPayloadV2,
   type WeeklyAnalysisRequestV1,
   type WeeklyAnalysisResponseV1,
 } from "./weeklyAnalysisContract.ts";
@@ -98,6 +99,23 @@ export function assertWeeklyAnalysisResponseLinks(
     const message = conversation.messages[evidence.messageIndex];
     if (evidence.conversationId !== conversation.id || !message || !message.text.includes(evidence.quote)) {
       throw new WeeklyAnalysisAdapterError("EVIDENCE_MISMATCH", "分析根拠の会話箇所を確認できません。");
+    }
+  }
+  if (response.analysis && isWeeklyAnalysisPayloadV2(response.analysis)) {
+    const groups = [
+      response.analysis.metricAssessments.initiative.evidence,
+      response.analysis.metricAssessments.reasoning.evidence,
+      response.analysis.metricAssessments.independence.evidence,
+      response.analysis.metricAssessments.independence.deliberation.evidence,
+      response.analysis.metricAssessments.independence.finalDecision.evidence,
+    ];
+    for (const evidence of groups.flat()) {
+      const message = conversation.messages[evidence.messageIndex];
+      const expectedUtteranceId = `${conversation.id}:message:${evidence.messageIndex}`;
+      if (evidence.conversationId !== conversation.id || evidence.utteranceId !== expectedUtteranceId
+        || !message || evidence.speaker !== message.role || !message.text.includes(evidence.quote)) {
+        throw new WeeklyAnalysisAdapterError("EVIDENCE_MISMATCH", "指標別の分析根拠を会話内で確認できません。");
+      }
     }
   }
 }

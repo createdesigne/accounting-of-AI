@@ -6,6 +6,7 @@ import {
   buildConfirmedExtensionRecord,
   buildMeasuredTimeCandidates,
   extensionConversationFingerprint,
+  selectUnlinkedMeasuredTimeCandidates,
 } from "../src/weeklyExtensionImport.ts";
 import {
   importTimeRecords,
@@ -117,6 +118,44 @@ test("re-sending the same conversation is idempotent and conflicting reuse is re
     (error: unknown) => error instanceof WeeklyStoreError && error.code === "USAGE_ALREADY_LINKED",
   );
   assert.equal(loadWeeklyRecordStore(context.storage).records.length, 1);
+});
+
+test("linked 109 seconds are excluded while an unlinked 19-second measurement remains selectable", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const context = { storage, locks };
+  await importTimeRecords([{
+    recordId: "research-session-109:day:2026-11-17",
+    sessionId: "research-session-109",
+    provider: "ChatGPT",
+    localDate: "2026-11-17",
+    timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-17T10:00:00+09:00"),
+    endedAt: Date.parse("2026-11-17T10:01:49+09:00"),
+    durationSeconds: 109,
+  }], context);
+  const linked109 = buildMeasuredTimeCandidates(loadTimeAccountingStore(storage))[0];
+  await saveExtensionWeeklyRecord(confirmed(linked109), context);
+  await importTimeRecords([{
+    recordId: "research-session-19:day:2026-11-18",
+    sessionId: "research-session-19",
+    provider: "ChatGPT",
+    localDate: "2026-11-18",
+    timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-18T10:00:00+09:00"),
+    endedAt: Date.parse("2026-11-18T10:00:19+09:00"),
+    durationSeconds: 19,
+  }], context);
+  const allMeasurements = buildMeasuredTimeCandidates(loadTimeAccountingStore(storage));
+  const available = selectUnlinkedMeasuredTimeCandidates(
+    allMeasurements,
+    loadWeeklyRecordStore(storage).records,
+  );
+  assert.equal(allMeasurements.length, 2);
+  assert.equal(available.length, 1);
+  assert.equal(available[0].measurementRecordId, "research-session-19:day:2026-11-18");
+  assert.equal(available[0].activeSeconds, 19);
+  assert.equal(available.some((item) => item.measurementRecordId === linked109.measurementRecordId), false);
 });
 
 test("time-only never stores conversation text and cannot create an analysis request", async () => {

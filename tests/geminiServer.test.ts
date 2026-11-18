@@ -55,6 +55,25 @@ test('Real Google SDK uses Interactions, header key, selected model, no history/
   assert.equal(calls, 1); assert.equal(JSON.stringify(input), before);
 });
 
+test('GenerateContent writing uses the explicitly selected method and preserves the existing writing contract', async () => {
+  let calls = 0;
+  const adapter = createGeminiProvider({ apiKey: testKey, model, apiMethod: 'generate-content', fetchImpl: async (url, options) => {
+    calls++;
+    assert.equal(url, `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`);
+    const body = JSON.parse(String(options.body));
+    assert.equal(body.contents[0].parts[0].text, JSON.stringify(input));
+    assert.equal(body.generationConfig.maxOutputTokens, 2048);
+    assert.equal(body.systemInstruction.parts[0].text.includes('原文の事実'), true);
+    assert.equal(String(options.body).includes(testKey), false);
+    return Response.json({
+      responseId: 'generate-writing-test',
+      candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [{ text: '整えた文章' }] } }],
+    });
+  }});
+  assert.deepEqual(await adapter.rewrite(input), { text: '整えた文章' });
+  assert.equal(calls, 1);
+});
+
 test('Gemini distinguishes permissions, quota, model errors and service errors without exposing upstream details', async () => {
   for (const [status, code] of [[401, 'AUTH_ERROR'], [403, 'AUTH_ERROR'], [429, 'RATE_LIMITED'], [404, 'MODEL_UNAVAILABLE'], [500, 'PROVIDER_ERROR']]) {
     let calls = 0;
@@ -65,7 +84,7 @@ test('Gemini distinguishes permissions, quota, model errors and service errors w
 });
 
 test('Gemini blocked, truncated, malformed, oversized and empty output are never treated as generated text', async () => {
-  await rejectsCode(provider(async () => Response.json({ id: 'failed-test', status: 'failed', errors: [{ code: 'SAFETY', message: 'private details' }] })).rewrite(input), 'PROVIDER_ERROR');
+  await rejectsCode(provider(async () => Response.json({ id: 'failed-test', status: 'failed', errors: [{ code: 'SAFETY', message: 'private details' }] })).rewrite(input), 'CONTENT_BLOCKED');
   await rejectsCode(provider(async () => Response.json({ id: 'partial-test', status: 'requires_continuation', steps: [{ type: 'model_output', content: [{ type: 'text', text: 'partial' }] }] })).rewrite(input), 'OUTPUT_TRUNCATED');
   for (const data of [null, {}, { id: 'x', status: 'completed', steps: [] }, success([{ type: 'text', text: '' }]), success([{ type: 'text', text: 'x'.repeat(8001) }]), success([{ type: 'function_call', name: 'unexpected' }]), success([{ type: 'text', text: 'x'.repeat(140000) }])]) await rejectsCode(provider(async () => Response.json(data)).rewrite(input), 'INVALID_OUTPUT');
   await rejectsCode(provider(async () => new Response('not JSON')).rewrite(input), 'INVALID_OUTPUT');
@@ -144,7 +163,7 @@ test('Client is opt-in, sends per-user header credentials without cookies, and n
   for (const baseUrl of ['//evil.example', '/\\evil.example', 'http://public.example', 'https://user:password@example.com', 'https://example.com?key=secret']) assert.throws(() => createAiClient({ baseUrl }));
   await assert.rejects(createAiClient({ baseUrl: '/api/ai', apiKey: testKey, model, fetchImpl: async (_url, options) => {
     assert.equal(options.credentials, 'omit');
-    assert.deepEqual(options.headers, { 'Content-Type': 'application/json', Authorization: `Bearer ${testKey}`, 'X-Gemini-Model': model });
+    assert.deepEqual(options.headers, { 'Content-Type': 'application/json', Authorization: `Bearer ${testKey}`, 'X-Gemini-Model': model, 'X-Gemini-Api-Method': 'interactions' });
     assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
     return Response.json({ error: { code: 'AUTH_ERROR', message: testKey } }, { status: 502 });
   } }).rewrite(input), e => e instanceof AiClientError && e.code === 'AUTH_ERROR' && !e.message.includes(testKey));

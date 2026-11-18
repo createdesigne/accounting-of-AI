@@ -1,7 +1,6 @@
 .weekly-dashboard {
   color: #1e293b;
 }
-
 .weekly-dashboard-hero {
   padding: 20px;
   border-radius: 22px;
@@ -213,9 +212,16 @@
 }
 
 .weekly-dashboard-status-card.analysis {
+  grid-column: 1 / -1;
   border-color: #bfdbfe;
   color: #1e40af;
   background: #eff6ff;
+}
+
+.weekly-dashboard-status-card.measured {
+  border-color: #a5f3fc;
+  color: #155e75;
+  background: #ecfeff;
 }
 
 .weekly-dashboard-status-card span {
@@ -230,6 +236,23 @@
 .weekly-dashboard-status-card small {
   font-size: 9px;
   line-height: 1.5;
+}
+
+.weekly-analysis-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  margin-top: 4px;
+}
+
+.weekly-analysis-counts span {
+  display: flex;
+  justify-content: space-between;
+  gap: 5px;
+  padding: 6px 7px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 9px;
 }
 
 .weekly-dashboard-task-list,
@@ -309,8 +332,40 @@
 
 .weekly-dashboard-actions {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
+}
+
+.weekly-dashboard-record-button {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 12px;
+  text-align: left;
+}
+
+.weekly-dashboard-record-button strong,
+.weekly-dashboard-record-button small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.weekly-dashboard-record-button small {
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.weekly-dashboard-record-button.secondary {
+  color: #1e40af;
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.weekly-dashboard-record-button.secondary small,
+.weekly-dashboard-record-button.reflection small {
+  color: #475569;
 }
 
 .weekly-dashboard-record-button.reflection {
@@ -344,6 +399,10 @@
 
   .weekly-dashboard-status-grid {
     grid-template-columns: 1fr;
+  }
+
+  .weekly-analysis-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .weekly-week-navigation button {

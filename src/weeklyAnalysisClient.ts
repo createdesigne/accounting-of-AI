@@ -2,6 +2,7 @@ import {
   parseWeeklyAnalysisRequestV1,
   parseWeeklyAnalysisResponseV1,
   type WeeklyAnalysisErrorCode,
+  type GeminiApiMethod,
   type WeeklyAnalysisRequestV1,
   type WeeklyAnalysisResponseV1,
 } from "./integrations/weeklyAnalysisContract.ts";
@@ -39,12 +40,14 @@ export function createWeeklyAnalysisClient({
   baseUrl = "",
   apiKey = "",
   model = "gemini-3.5-flash-lite",
+  apiMethod = "interactions",
   fetchImpl = fetch,
   timeoutMs = 20_000,
 }: {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  apiMethod?: GeminiApiMethod;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 } = {}) {
@@ -54,7 +57,8 @@ export function createWeeklyAnalysisClient({
     async analyze(input: WeeklyAnalysisRequestV1, { signal }: { signal?: AbortSignal } = {}): Promise<WeeklyAnalysisResponseV1> {
       if (!baseUrl) throw new WeeklyAnalysisClientError("PROVIDER_ERROR");
       if (!apiKey) throw new WeeklyAnalysisClientError("API_KEY_REQUIRED");
-      if (!/^[\x21-\x7e]{1,512}$/.test(apiKey) || !/^gemini-[a-zA-Z0-9._-]{1,120}$/.test(model)) {
+      if (!/^[\x21-\x7e]{1,512}$/.test(apiKey) || !/^gemini-[a-zA-Z0-9._-]{1,120}$/.test(model)
+        || !["interactions", "generate-content"].includes(apiMethod)) {
         throw new WeeklyAnalysisClientError("INVALID_CREDENTIALS");
       }
       let request: WeeklyAnalysisRequestV1;
@@ -76,6 +80,7 @@ export function createWeeklyAnalysisClient({
             "Content-Type": "application/json",
             Authorization: `Bearer ${apiKey}`,
             "X-Gemini-Model": model,
+            "X-Gemini-Api-Method": apiMethod,
           },
           body: JSON.stringify(request),
           signal: controller.signal,
@@ -109,6 +114,7 @@ export function createClientFailureResponse(
   error: WeeklyAnalysisClientError,
   model: string,
   now = new Date(),
+  apiMethod: GeminiApiMethod = "interactions",
 ): WeeklyAnalysisResponseV1 {
   const code = mapFailureCode(error.code);
   return parseWeeklyAnalysisResponseV1({
@@ -123,9 +129,11 @@ export function createClientFailureResponse(
     analysisStatus: "failed",
     receivedAt: now.toISOString(),
     model,
+    apiMethod,
     rubricVersion: WEEKLY_ANALYSIS_RUBRIC_VERSION,
     analyzedAt: now.toISOString(),
     analysis: null,
+    unresolvedFields: [],
     error: { code, retryable: ["RATE_LIMITED", "MODEL_UNAVAILABLE", "TIMEOUT", "PROVIDER_ERROR"].includes(code) },
   });
 }

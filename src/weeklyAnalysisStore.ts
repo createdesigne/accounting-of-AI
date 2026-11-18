@@ -25,7 +25,7 @@ export type WeeklyAnalysisEntryV1 = Readonly<{
   thoughtReceiptId: string;
   conversationFingerprint: string;
   requestedAt: string;
-  analysisStatus: "pending" | "complete" | "failed";
+  analysisStatus: "pending" | "complete" | "partial" | "failed";
   response: WeeklyAnalysisResponseV1 | null;
 }>;
 
@@ -35,7 +35,7 @@ export type WeeklyAnalysisStoreV1 = Readonly<{
 }>;
 
 export type WeeklyAnalysisDisplayState = Readonly<{
-  analysisStatus: "not-connected" | "pending" | "complete" | "failed" | "not-applicable";
+  analysisStatus: "not-connected" | "pending" | "complete" | "partial" | "failed" | "not-applicable";
   response: WeeklyAnalysisResponseV1 | null;
 }>;
 
@@ -256,7 +256,7 @@ function parseEntry(value: unknown): WeeklyAnalysisEntryV1 {
     || typeof value.thoughtReceiptId !== "string" || !value.thoughtReceiptId
     || typeof value.conversationFingerprint !== "string" || !value.conversationFingerprint
     || typeof value.requestedAt !== "string" || Number.isNaN(new Date(value.requestedAt).getTime())
-    || !["pending", "complete", "failed"].includes(value.analysisStatus as string)) {
+    || !["pending", "complete", "partial", "failed"].includes(value.analysisStatus as string)) {
     return invalidStore("週次分析結果の内容が正しくありません。");
   }
   let response: WeeklyAnalysisResponseV1 | null = null;

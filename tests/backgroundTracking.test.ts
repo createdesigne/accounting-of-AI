@@ -6,6 +6,7 @@ import vm from 'node:vm';
 const coreSource = readFileSync(new URL('../chrome-extension/activityTracker.js', import.meta.url), 'utf8');
 const protocolSource = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const backgroundSource = readFileSync(new URL('../chrome-extension/background.js', import.meta.url), 'utf8');
+const manifest = JSON.parse(readFileSync(new URL('../chrome-extension/manifest.json', import.meta.url), 'utf8'));
 
 type Listener = (...args: any[]) => any;
 
@@ -14,12 +15,14 @@ function eventHook() {
   return { listeners, addListener(listener: Listener) { listeners.push(listener); } };
 }
 
-function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
-  initialStored?: any; initialNow?: number; initialUuid?: number;
+function createHarness({ initialStored, initialNow = 0, initialUuid = 0, watcherAccess = 'allowed' }: {
+  initialStored?: any; initialNow?: number; initialUuid?: number; watcherAccess?: 'allowed' | 'denied';
 } = {}) {
   let now = initialNow;
   let uuid = initialUuid;
   const storageValues = new Map<string, any>();
+  const injectedTabs: number[] = [];
+  const attachedTabs = new Set<number>();
   if (initialStored) {
     storageValues.set('chatgptActiveTimeTrackingV1', JSON.parse(JSON.stringify(initialStored)));
   }
@@ -66,6 +69,21 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
         [...tabs.values()].filter(tab => (!active || tab.active) && (windowId === undefined || tab.windowId === windowId))
           .map(tab => ({ ...tab }))
       ),
+      sendMessage: async (tabId: number, message: any) => {
+        if (message?.type === 'tracking:watcherPing' && attachedTabs.has(tabId)) return { ok: true };
+        throw new Error('Could not establish connection. Receiving end does not exist.');
+      },
+    },
+    scripting: {
+      executeScript: async ({ target, files }: { target: { tabId: number }; files: string[] }) => {
+        assert.equal(JSON.stringify(files), '["activity.js"]');
+        if (watcherAccess === 'denied') {
+          throw new Error('Cannot access contents of url. Extension manifest must request permission to access this host.');
+        }
+        injectedTabs.push(target.tabId);
+        attachedTabs.add(target.tabId);
+        return [];
+      },
     },
     windows: {
       WINDOW_ID_NONE: -1,
@@ -89,21 +107,30 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
     },
   };
 
-  const context = vm.createContext({
+  let context: vm.Context;
+  const importedSources = new Map([
+    ['activityTracker.js', coreSource],
+    ['timeRecordProtocol.js', protocolSource],
+  ]);
+  context = vm.createContext({
     chrome,
     console: { error() {} },
     crypto: { randomUUID: () => `uuid-${++uuid}` },
     Date: FakeDate,
-    importScripts() {},
+    importScripts(...names: string[]) {
+      for (const name of names) {
+        const source = importedSources.get(name);
+        if (!source) throw new Error(`missing imported service worker script: ${name}`);
+        vm.runInContext(source, context, { filename: name });
+      }
+    },
     URL,
     Intl,
     TextEncoder,
     encodeURIComponent,
     unescape,
   });
-  vm.runInContext(coreSource, context);
-  vm.runInContext(protocolSource, context);
-  vm.runInContext(backgroundSource, context);
+  vm.runInContext(backgroundSource, context, { filename: 'background.js' });
 
   async function send(message: any, tabId?: number) {
     const listener = hooks.message.listeners[0];
@@ -163,30 +190,90 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0 }: {
     focus,
     alarm,
     startup,
+    installed: async () => { hooks.installed.listeners[0](); return summary(); },
     summary,
     stored: () => storageValues.get('chatgptActiveTimeTrackingV1'),
     importStatus: () => storageValues.get('chatgptTimeAccountingImportsV1'),
     alarmExists: () => alarmExists,
+    injectedTabs: () => [...injectedTabs],
   };
 }
+
+test('manifest grants only ChatGPT and the research-local bridge hosts needed by injection', () => {
+  assert.equal(manifest.permissions.includes('scripting'), true);
+  assert.equal(manifest.permissions.includes('tabs'), true);
+  assert.deepEqual(manifest.host_permissions, [
+    'https://chatgpt.com/*',
+    'https://chat.openai.com/*',
+    'http://localhost:5174/*',
+  ]);
+  assert.equal(manifest.optional_host_permissions, undefined);
+  assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
+  assert.equal(manifest.content_scripts.some((entry: any) => (
+    entry.matches.includes('http://localhost:5174/accounting-of-AI/*')
+    && entry.js.includes('timeRecordBridge.js')
+  )), true);
+});
+
+test('enabling tracking attaches the watcher to an already-open ChatGPT tab', async () => {
+  const app = createHarness();
+  const started = await app.enable();
+  assert.equal(started.active, true);
+  assert.deepEqual(app.injectedTabs(), [1]);
+});
+
+test('a denied site permission is reported in Japanese and does not create unmeasured active time', async () => {
+  const app = createHarness({ watcherAccess: 'denied' });
+  const started = await app.enable();
+  assert.equal(started.enabled, true);
+  assert.equal(started.active, false);
+  assert.equal(started.totalSeconds, 0);
+  assert.equal(started.watcherIssue.code, 'site-access-denied');
+  assert.match(started.watcherIssue.message, /現在、ChatGPTへのサイトアクセス権限がありません/);
+  assert.match(started.watcherIssue.message, /すべてのサイト.*不要/);
+});
+
+test('install and browser restart reattach watchers without resetting saved seconds', async () => {
+  const first = createHarness();
+  await first.enable();
+  first.setNow(28_000);
+  assert.equal((await first.alarm()).totalSeconds, 28);
+  const saved = first.stored();
+
+  const restarted = createHarness({ initialStored: saved, initialNow: 30_000 });
+  const afterStartup = await restarted.startup();
+  assert.equal(afterStartup.totalSeconds, 28);
+  assert.deepEqual(restarted.injectedTabs().sort(), [1, 2]);
+
+  const updated = createHarness({ initialStored: restarted.stored(), initialNow: 31_000 });
+  const afterInstall = await updated.installed();
+  assert.equal(afterInstall.totalSeconds, 28);
+  assert.deepEqual(updated.injectedTabs().sort(), [1, 2]);
+});
 
 test('five-minute allowance stops measuring but keeps the logical session open until twenty minutes', async () => {
   const app = createHarness();
   const started = await app.enable();
   assert.equal(started.active, true);
   assert.equal(started.totalSeconds, 0);
+  assert.equal(started.sessionSeconds, 0);
+  assert.equal(started.finalizedSeconds, 0);
 
   app.setNow(360_000);
   const afterSixMinutes = await app.alarm();
   assert.equal(afterSixMinutes.active, false);
   assert.equal(afterSixMinutes.sessionOpen, true);
   assert.equal(afterSixMinutes.totalSeconds, 300);
+  assert.equal(afterSixMinutes.sessionSeconds, 300);
+  assert.equal(afterSixMinutes.finalizedSeconds, 0);
   assert.equal(app.stored().records.length, 0);
   assert.equal(app.stored().session.segments[0].durationSeconds, 300);
 
   app.setNow(1_200_000);
   const finalized = await app.alarm();
   assert.equal(finalized.sessionOpen, false);
+  assert.equal(finalized.sessionSeconds, 0);
+  assert.equal(finalized.finalizedSeconds, 300);
   assert.equal(app.stored().records.length, 1);
   assert.equal(app.stored().records[0].durationSeconds, 300);
 });

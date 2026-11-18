@@ -6,17 +6,17 @@ import vm from 'node:vm';
 const source = readFileSync(new URL('../chrome-extension/activity.js', import.meta.url), 'utf8');
 
 function eventTarget() {
-  const listeners = new Map<string, Set<() => void>>();
+  const listeners = new Map<string, Set<(...args: any[]) => any>>();
   return {
-    addEventListener(name: string, listener: () => void) {
+    addEventListener(name: string, listener: (...args: any[]) => any) {
       if (!listeners.has(name)) listeners.set(name, new Set());
       listeners.get(name)!.add(listener);
     },
-    removeEventListener(name: string, listener: () => void) {
+    removeEventListener(name: string, listener: (...args: any[]) => any) {
       listeners.get(name)?.delete(listener);
     },
-    dispatch(name: string) {
-      for (const listener of [...(listeners.get(name) || [])]) listener();
+    dispatch(name: string, ...args: any[]) {
+      return [...(listeners.get(name) || [])].map(listener => listener(...args));
     },
     listenerCount(name: string) {
       return listeners.get(name)?.size || 0;
@@ -28,10 +28,29 @@ function harness(sendMessage: (message: any) => any, runtimeId: string | undefin
   let now = 1_000;
   const window = eventTarget();
   const document = Object.assign(eventTarget(), { visibilityState: 'visible' });
-  const chrome = { runtime: { id: runtimeId, sendMessage } };
+  const runtimeListeners = new Set<(...args: any[]) => any>();
+  const chrome = { runtime: {
+    id: runtimeId,
+    sendMessage,
+    onMessage: {
+      addListener(listener: (...args: any[]) => any) { runtimeListeners.add(listener); },
+      removeListener(listener: (...args: any[]) => any) { runtimeListeners.delete(listener); },
+    },
+  } };
   class FakeDate extends Date { static now() { return now; } }
-  vm.runInNewContext(source, { window, document, chrome, Date: FakeDate, Error });
-  return { window, document, chrome, setNow(value: number) { now = value; } };
+  const context = vm.createContext({ window, document, chrome, Date: FakeDate, Error });
+  vm.runInContext(source, context);
+  return {
+    window, document, chrome,
+    reinject: () => vm.runInContext(source, context),
+    ping: () => new Promise(resolve => {
+      const listener = [...runtimeListeners][0];
+      if (!listener) return resolve(null);
+      listener({ type: 'tracking:watcherPing' }, {}, resolve);
+    }),
+    runtimeListenerCount: () => runtimeListeners.size,
+    setNow(value: number) { now = value; },
+  };
 }
 
 test('a synchronous invalidated-context error is swallowed and the old script stops', () => {
@@ -86,4 +105,25 @@ test('valid contexts still send activity and inactive signals without page conte
     { type: 'tracking:pageInactive' },
     { type: 'tracking:pageInactive' },
   ]);
+});
+
+test('reinjection on an already-open ChatGPT tab does not duplicate listeners', async () => {
+  const messages: any[] = [];
+  const page = harness((message) => { messages.push(message); return Promise.resolve(); });
+  page.reinject();
+  assert.equal(page.window.listenerCount('pointerdown'), 1);
+  assert.equal(page.window.listenerCount('keydown'), 1);
+  page.window.dispatch('pointerdown');
+  await Promise.resolve();
+  assert.deepEqual(JSON.parse(JSON.stringify(messages)), [{ type: 'tracking:activity' }]);
+});
+
+test('the watcher acknowledges the service worker and removes the channel after invalidation', async () => {
+  const page = harness(() => Promise.resolve());
+  assert.deepEqual(JSON.parse(JSON.stringify(await page.ping())), { ok: true });
+  assert.equal(page.runtimeListenerCount(), 1);
+  page.chrome.runtime.id = '';
+  page.window.dispatch('pointerdown');
+  assert.equal(page.runtimeListenerCount(), 0);
+  assert.equal(await page.ping(), null);
 });

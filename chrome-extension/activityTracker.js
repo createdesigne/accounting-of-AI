@@ -486,15 +486,17 @@
   }
 
   function summary(state) {
-    const currentSeconds = Math.floor(sessionDurationMs(state) / 1000);
-    const completedSeconds = state.records.reduce((total, record) => total + record.durationSeconds, 0);
+    const sessionSeconds = Math.floor(sessionDurationMs(state) / 1000);
+    const finalizedSeconds = state.records.reduce((total, record) => total + record.durationSeconds, 0);
     return {
       enabled: state.enabled,
       active: Boolean(state.current),
       currentActivityId: state.current?.id || null,
       currentSessionId: state.session?.id || null,
       sessionOpen: Boolean(state.session),
-      totalSeconds: completedSeconds + currentSeconds,
+      sessionSeconds,
+      finalizedSeconds,
+      totalSeconds: finalizedSeconds + sessionSeconds,
       recordCount: state.records.length,
     };
   }

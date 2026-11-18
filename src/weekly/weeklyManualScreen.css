@@ -267,6 +267,26 @@
   background: #ecfdf5;
 }
 
+.weekly-analysis-state.partial {
+  border-color: #fcd34d;
+  color: #92400e;
+  background: #fffbeb;
+}
+
+.weekly-analysis-partial {
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border-radius: 9px;
+  background: rgb(255 255 255 / 62%);
+}
+
+.weekly-analysis-partial ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+}
+
 .weekly-analysis-state.fixture {
   border-color: #c4b5fd;
   color: #5b21b6;
@@ -303,6 +323,26 @@
   white-space: pre-wrap;
 }
 
+.weekly-analysis-metrics article.compact {
+  border-style: dashed;
+  background: rgb(255 255 255 / 55%);
+}
+
+.weekly-analysis-review-metric {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+}
+
+.weekly-analysis-review-history {
+  margin: 10px 0 0;
+  padding-left: 22px;
+  font-size: 11px;
+}
+
 .weekly-analysis-evidence {
   margin-top: 6px;
   font-size: 11px;
@@ -317,12 +357,14 @@
 
 .weekly-analysis-metrics article {
   min-width: 0;
-  padding: 9px;
-  border-radius: 10px;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.75);
 }
 
-.weekly-analysis-metrics article > div { display: flex; justify-content: space-between; gap: 6px; }
+.weekly-analysis-metrics article > div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; }
+.weekly-analysis-metrics article > div b { padding: 3px 7px; border-radius: 999px; background: rgba(219, 234, 254, 0.78); font-size: 0.68rem; }
 .weekly-analysis-metrics p { margin: 6px 0 0; font-size: 0.65rem; line-height: 1.55; overflow-wrap: anywhere; }
 
 @media (max-width: 720px) { .weekly-analysis-metrics { grid-template-columns: 1fr; } }
@@ -373,6 +415,35 @@
   padding: 9px;
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.7);
+}
+
+.weekly-analysis-technical {
+  min-width: 0;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(100, 116, 139, 0.24);
+  border-radius: 10px;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.weekly-analysis-technical summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.weekly-analysis-technical[open] summary {
+  margin-bottom: 6px;
+}
+
+.weekly-analysis-technical > span {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.weekly-analysis-technical.error-details {
+  color: #7f1d1d;
 }
 
 .weekly-analysis-review {
@@ -512,6 +583,58 @@
   color: #64748b;
   font-size: 11px;
   font-weight: 700;
+}
+
+.weekly-accounting-editor {
+  margin-top: 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.weekly-accounting-editor > summary {
+  cursor: pointer;
+  font-weight: 800;
+  color: #334155;
+}
+
+.weekly-accounting-editor form,
+.weekly-accounting-ai-reference {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.weekly-accounting-ai-reference {
+  padding: 10px;
+  border-radius: 10px;
+  background: #eef2ff;
+  color: #3730a3;
+}
+
+.weekly-accounting-ai-reference span,
+.weekly-accounting-history li span {
+  overflow-wrap: anywhere;
+}
+
+.weekly-accounting-history {
+  margin-top: 14px;
+}
+
+.weekly-accounting-history ol {
+  display: grid;
+  gap: 6px;
+  padding-left: 22px;
+}
+
+.weekly-accounting-history li span {
+  display: block;
+}
+
+.weekly-accounting-disabled {
+  margin-top: 10px;
+  color: #64748b;
 }
 
 @media (max-width: 370px) {

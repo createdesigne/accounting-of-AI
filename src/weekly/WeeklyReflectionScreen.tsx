@@ -2,6 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatPeriod, shiftPeriod } from "../ledgerPeriods.ts";
 import { buildWeeklyDashboardData } from "../weeklyDashboard.ts";
 import {
+  loadWeeklyAnalysisStore,
+  resolveWeeklyAnalysisState,
+  WEEKLY_ANALYSES_STORAGE_KEY,
+  type WeeklyAnalysisStoreV1,
+} from "../weeklyAnalysisStore.ts";
+import {
   loadWeeklyReflectionStore,
   getWeeklyReflectionNavigation,
   previousWeekReflection,
@@ -12,8 +18,11 @@ import {
   type WeeklyReflectionStoreV1,
 } from "../weeklyReflectionStore.ts";
 import {
+  loadWeeklyConversationStore,
   loadWeeklyRecordStore,
+  WEEKLY_CONVERSATIONS_STORAGE_KEY,
   WEEKLY_RECORDS_STORAGE_KEY,
+  type WeeklyConversationStoreV1,
   type WeeklyRecordStoreV1,
 } from "../weeklyStore.ts";
 import type { WeeklyRecordV1 } from "../weeklyData.ts";
@@ -44,6 +53,8 @@ export function WeeklyReflectionScreen({
 }) {
   const [anchor, setAnchor] = useState(() => new Date(initialAnchor));
   const [records, setRecords] = useState<WeeklyRecordStoreV1>(() => loadRecordsSafely());
+  const [conversations, setConversations] = useState<WeeklyConversationStoreV1>(() => loadConversationsSafely());
+  const [analyses, setAnalyses] = useState<WeeklyAnalysisStoreV1>(() => loadAnalysesSafely());
   const [reflections, setReflections] = useState<WeeklyReflectionStoreV1>(() => loadReflectionsSafely());
   const [draft, setDraft] = useState<ReflectionDraft>(emptyDraft);
   const [message, setMessage] = useState("");
@@ -57,6 +68,15 @@ export function WeeklyReflectionScreen({
   const previousReflection = useMemo(() => previousWeekReflection(reflections, anchor), [reflections, anchor]);
   const weekKey = dashboard.weekKey;
   const navigation = getWeeklyReflectionNavigation(anchor);
+  const conversationByRecord = useMemo(
+    () => new Map(conversations.conversations.map((item) => [item.recordId, item])),
+    [conversations.conversations],
+  );
+  const analysisCounts = useMemo(() => dashboard.records.reduce((counts, { record }) => {
+    const status = resolveWeeklyAnalysisState(record, analyses, conversationByRecord.get(record.id) ?? null).analysisStatus;
+    counts[status] += 1;
+    return counts;
+  }, { "not-connected": 0, pending: 0, complete: 0, partial: 0, failed: 0, "not-applicable": 0 }), [dashboard.records, analyses, conversationByRecord]);
 
   useEffect(() => {
     setDraft(savedReflection ? {
@@ -71,6 +91,8 @@ export function WeeklyReflectionScreen({
   const refresh = useCallback(() => {
     try {
       setRecords(loadWeeklyRecordStore());
+      setConversations(loadWeeklyConversationStore());
+      setAnalyses(loadWeeklyAnalysisStore());
       setReflections(loadWeeklyReflectionStore());
       setError("");
     } catch (caught) {
@@ -81,7 +103,7 @@ export function WeeklyReflectionScreen({
   useEffect(() => {
     refresh();
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_REFLECTIONS_STORAGE_KEY || event.key === null) refresh();
+      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_CONVERSATIONS_STORAGE_KEY || event.key === WEEKLY_ANALYSES_STORAGE_KEY || event.key === WEEKLY_REFLECTIONS_STORAGE_KEY || event.key === null) refresh();
     };
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("storage", onStorage);
@@ -206,7 +228,7 @@ export function WeeklyReflectionScreen({
                 <input type="checkbox" checked={selected} onChange={() => toggleActivity(record)} disabled={navigation.isFutureWeek || (!selected && draft.selectedActivities.length >= 3)} />
                 <span className="weekly-reflection-activity-copy">
                   <span><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong><b>{formatDuration(allocatedSeconds)}</b></span>
-                  <small>{record.activityCategory ?? "未分類"}・{sourceLabel(record.timeSource)}・思考レシート {record.links.thoughtReceiptId}</small>
+                  <small>{formatActivityDate(record.recordedAt)}・{record.activityCategory ?? "未分類"}・{sourceLabel(record.timeSource)}</small>
                   <small>{task ? `AIAS Level ${task.plannedAiasLevel ?? "未設定"}（課題でのAIの役割）` : "AIAS課題設定なし"}</small>
                   <p>{record.manualNotes?.discovery ?? record.manualNotes?.ownThoughts ?? "本人による活動メモなし"}</p>
                 </span>
@@ -216,7 +238,7 @@ export function WeeklyReflectionScreen({
         )}
         {missingSelections.length > 0 && <div className="weekly-reflection-missing">
           <h4>現在の活動一覧にない保存済みリンク</h4>
-          {missingSelections.map((reference) => <div key={reference.recordId}><span>思考レシート {reference.thoughtReceiptId}</span><button type="button" onClick={() => removeActivityReference(reference.recordId)}>選択から外す</button></div>)}
+          {missingSelections.map((reference) => <div key={reference.recordId}><span>以前選択した活動（現在の活動一覧にはありません）</span><button type="button" onClick={() => removeActivityReference(reference.recordId)}>選択から外す</button></div>)}
         </div>}
       </section>
 
@@ -236,7 +258,9 @@ export function WeeklyReflectionScreen({
       </section>
 
       <section className="weekly-reflection-context" aria-label="AIAS課題設定と分析状態">
-        <p><strong>AI分析：</strong>未接続・未評価。本人の入力内容は将来の分析結果で上書きしません。</p>
+        <p><strong>AI分析：</strong>分析済み {analysisCounts.complete}件／一部未評価 {analysisCounts.partial}件／未分析 {analysisCounts["not-connected"]}件／分析待ち {analysisCounts.pending}件／分析失敗 {analysisCounts.failed}件／対象外 {analysisCounts["not-applicable"]}件</p>
+        <p>一部未評価は、分析自体は完了し、根拠不足の項目だけを保留した状態です。分析失敗とは区別します。</p>
+        <p>本人の入力内容は将来の分析結果で上書きしません。現在のAI分析とも別に保存します。</p>
       </section>
 
       <div className="weekly-reflection-actions">
@@ -251,6 +275,14 @@ function loadRecordsSafely(): WeeklyRecordStoreV1 {
   try { return loadWeeklyRecordStore(); } catch { return Object.freeze({ schemaVersion: 1, records: Object.freeze([]), tasks: Object.freeze([]) }); }
 }
 
+function loadConversationsSafely(): WeeklyConversationStoreV1 {
+  try { return loadWeeklyConversationStore(); } catch { return Object.freeze({ schemaVersion: 1, conversations: Object.freeze([]) }); }
+}
+
+function loadAnalysesSafely(): WeeklyAnalysisStoreV1 {
+  try { return loadWeeklyAnalysisStore(); } catch { return Object.freeze({ schemaVersion: 1, entries: Object.freeze([]) }); }
+}
+
 function loadReflectionsSafely(): WeeklyReflectionStoreV1 {
   try { return loadWeeklyReflectionStore(); } catch { return Object.freeze({ schemaVersion: 1, reflections: Object.freeze([]) }); }
 }
@@ -263,4 +295,8 @@ function formatDuration(seconds: number) {
 
 function sourceLabel(value: WeeklyRecordV1["timeSource"]) {
   return { manual: "手入力", measured: "自動計測", adjusted: "補正", unknown: "取得方法不明" }[value];
+}
+
+function formatActivityDate(value: string) {
+  return new Intl.DateTimeFormat("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }

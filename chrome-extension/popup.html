@@ -59,6 +59,9 @@
       .tracking-actions button { min-height: 40px; }
       #trackingStop { color: #334155; background: #e2e8f0; }
       #timeLedgerTransfer { margin-top: 10px; background: #047857; }
+      #timeManualCopy { margin-top: 8px; color: #065f46; background: #d1fae5; }
+      #timeTransferText { box-sizing: border-box; width: 100%; min-height: 88px; margin-top: 8px; resize: vertical; border: 1px solid #94a3b8; border-radius: 10px; padding: 8px; font: 11px/1.45 ui-monospace, monospace; }
+      #conversationDiagnostic { margin-top: 10px; color: #334155; background: #e2e8f0; }
     </style>
   </head>
   <body>
@@ -67,6 +70,8 @@
     <label>送信先<select id="destination"><option value="production">本番サイト</option><option value="legacy">旧サイト（以前の帳簿）</option><option value="preview">確認用プレビュー</option><option value="local">ローカル開発用（5173）</option><option value="research">研究用ローカル（5174）</option></select></label>
     <button id="createReceipt" type="button">思考レシート化する</button>
     <p id="status" role="status" aria-live="polite">ボタンを押すと、現在のAI会話を選択したWebアプリへ渡します。内容を確認してから帳簿に保存できます。</p>
+    <button id="conversationDiagnostic" type="button">会話取得を診断</button>
+    <p id="diagnosticStatus" role="status" aria-live="polite">診断結果には会話本文・URL・タイトル・入力欄の内容を含めません。</p>
     <section class="tracking" aria-labelledby="trackingHeading">
       <h2 id="trackingHeading">ChatGPT利用時間</h2>
       <p>開始を押した後、ChatGPTを操作している時間だけ端末内に記録します。会話本文や入力内容は取得・送信しません。</p>
@@ -77,6 +82,9 @@
       <p id="trackingStatus" role="status" aria-live="polite">計測状態を確認しています…</p>
       <button id="timeLedgerTransfer" type="button">帳簿へ連携</button>
       <p id="timeTransferStatus" role="status" aria-live="polite">確定済みの利用時間だけを選択した送信先へ渡します。この操作だけでは帳簿へ保存されません。</p>
+      <button id="timeManualCopy" type="button">実測記録をコピー</button>
+      <textarea id="timeTransferText" aria-label="手動連携用の実測記録" readonly hidden></textarea>
+      <p>自動連携できない場合だけ使用します。コピー内容には計測ID、日時、実測秒数だけが含まれ、会話本文やAPIキーは含まれません。</p>
     </section>
     <p id="version" aria-label="拡張機能のバージョン"></p>
     <script src="timeRecordProtocol.js"></script>

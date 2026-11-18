@@ -88,7 +88,7 @@ export async function saveWeeklyAnalysisReview(
     const records = loadWeeklyRecordStore(storage);
     const entry = analyses.entries.find((item) => item.response?.analysisId === review.analysisId);
     const record = records.records.find((item) => item.id === review.recordId);
-    if (!entry?.response || entry.analysisStatus !== "complete" || !record
+    if (!entry?.response || !["complete", "partial"].includes(entry.analysisStatus) || !record
       || entry.recordId !== record.id || entry.thoughtReceiptId !== review.thoughtReceiptId
       || entry.response.analysisId !== review.analysisId) {
       throw new WeeklyAnalysisReviewStoreError("LINK_MISMATCH", "分析結果と活動・思考レシートの関連付けが一致しません。");

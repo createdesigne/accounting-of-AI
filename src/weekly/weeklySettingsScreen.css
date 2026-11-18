@@ -42,8 +42,25 @@
   margin-top: 12px;
 }
 
+.weekly-api-diagnostics {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #dbeafe;
+}
+
+.weekly-api-diagnostics h4 { margin: 0 0 6px; }
+.weekly-api-diagnostic-row { padding: 12px 0; border-top: 1px solid #e2e8f0; }
+.weekly-api-diagnostic-row > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.weekly-api-diagnostic-row dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 10px 0 0; }
+.weekly-api-diagnostic-row dl div { padding: 9px; border-radius: 10px; background: #f8fafc; }
+.weekly-api-diagnostic-row dt { font-size: 0.72rem; color: #475569; }
+.weekly-api-diagnostic-row dd { margin: 3px 0 0; font-size: 0.76rem; overflow-wrap: anywhere; }
+.weekly-api-diagnostic-row dd[data-status="success"] { color: #047857; }
+.weekly-api-diagnostic-row dd[data-status="failed"] { color: #b91c1c; }
+
 @media (max-width: 720px) {
   .weekly-privacy-options {
     grid-template-columns: 1fr;
   }
+  .weekly-api-diagnostic-row dl { grid-template-columns: 1fr; }
 }

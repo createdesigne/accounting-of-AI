@@ -1,43 +1,38 @@
 import type { AnalysisScore } from "./analysisContract.ts";
 
-export const WEEKLY_ANALYSIS_RUBRIC_VERSION = "research-thinking-rubric-v1" as const;
-
+export const LEGACY_WEEKLY_ANALYSIS_RUBRIC_VERSION = "research-thinking-rubric-v1" as const;
+export const WEEKLY_ANALYSIS_RUBRIC_VERSION = "research-thinking-rubric-v2" as const;
 export const WEEKLY_ANALYSIS_SCORE_OPTIONS = [0, 25, 50, 75, 100] as const;
 
-export type WeeklyAnalysisMetric = "initiative" | "reasoning" | "criticalJudgment";
+export type WeeklyAnalysisMetric = "initiative" | "reasoning" | "independence";
+export type WeeklyAnalysisEvaluationStatus = "confirmed" | "provisional" | "hold" | "not_applicable";
+export type WeeklyAnalysisEvidenceSufficiency = "high" | "medium" | "low";
+export type WeeklyAnalysisRubricLevel = Readonly<{ score: Exclude<AnalysisScore, null>; description: string }>;
 
-export type WeeklyAnalysisRubricLevel = Readonly<{
-  score: Exclude<AnalysisScore, null>;
-  description: string;
-}>;
-
-/**
- * Research-specific behavioral anchors. They are not official AIAS scores and
- * do not measure a person's general ability. A score is valid only when the
- * analyzed conversation contains direct supporting evidence; otherwise null.
- */
 export const WEEKLY_ANALYSIS_RUBRIC: Readonly<Record<WeeklyAnalysisMetric, readonly WeeklyAnalysisRubricLevel[]>> = Object.freeze({
   initiative: Object.freeze([
-    Object.freeze({ score: 0, description: "AIの提案に従う発言だけがあり、目的・条件・次の行動を本人が示していない。" }),
-    Object.freeze({ score: 25, description: "本人が依頼や関心を示すが、目的・条件・進め方の具体化はAI側に委ねている。" }),
-    Object.freeze({ score: 50, description: "本人が目的または条件を示し、AIへの依頼や選択を一部具体化している。" }),
-    Object.freeze({ score: 75, description: "本人が目的・条件・判断基準を示し、AIへの追加指示や方向修正を行っている。" }),
-    Object.freeze({ score: 100, description: "本人が課題、検証手順、判断基準を主導して設計し、結論と次の行動を自ら決めている。" }),
-  ]),
+    { score: 0, description: "思考を要する課題で、自分は考えず全てAIに任せると明示した。" },
+    { score: 25, description: "自分の関心・話題は示すが、自ら理由を発展させずAIの答えにほぼ従う。" },
+    { score: 50, description: "AIの問いに対し、自分の仮説と理由を述べる。" },
+    { score: 75, description: "自分から新しい視点や解決策を提示する。" },
+    { score: 100, description: "自分の案の弱点を検討し、適切に発展・再構成する。" },
+  ].map(row => Object.freeze(row))) as readonly WeeklyAnalysisRubricLevel[],
   reasoning: Object.freeze([
-    Object.freeze({ score: 0, description: "本人の結論や選択に、会話内で理由・関係・比較が示されていない。" }),
-    Object.freeze({ score: 25, description: "本人が結論や希望を述べるが、根拠や比較の説明は限定的である。" }),
-    Object.freeze({ score: 50, description: "本人が少なくとも一つの理由、条件、因果関係を示している。" }),
-    Object.freeze({ score: 75, description: "本人が複数案・条件・利点と制約を比較し、選択理由を説明している。" }),
-    Object.freeze({ score: 100, description: "本人が仮説、根拠、反例や不確実性を関連付け、検証可能な形で結論を組み立てている。" }),
-  ]),
-  criticalJudgment: Object.freeze([
-    Object.freeze({ score: 0, description: "本人がAI出力を受け入れる発言だけで、確認・留保・修正が会話内にない。" }),
-    Object.freeze({ score: 25, description: "本人が疑問や違和感を示すが、具体的な確認または修正には至っていない。" }),
-    Object.freeze({ score: 50, description: "本人がAI出力の一部を確認、修正、採否判断している。" }),
-    Object.freeze({ score: 75, description: "本人が根拠・出典・制約を確認し、AI案を比較して採用・修正・却下している。" }),
-    Object.freeze({ score: 100, description: "本人が独立した検証を行い、AI出力の限界を明示したうえで判断理由と適用範囲を記録している。" }),
-  ]),
+    { score: 0, description: "中核の推論に決定的な矛盾など、十分に明確な重大問題がある。" },
+    { score: 25, description: "結論を支える根拠が著しく弱い、または重要な論理飛躍がある。" },
+    { score: 50, description: "主張と理由に基本的なつながりがある。" },
+    { score: 75, description: "関連する反論・制約・リスクを検討して調整する。" },
+    { score: 100, description: "課題の目的に必要十分な推論・重要条件・検証可能性を扱う。" },
+  ].map(row => Object.freeze(row))) as readonly WeeklyAnalysisRubricLevel[],
+  independence: Object.freeze([
+    { score: 0, description: "本人が担うべき判断を、検討せずAIに全面委任した証拠がある。" },
+    { score: 25, description: "自分の関心を多少使うが、判断の大部分をAIに委ねる。" },
+    { score: 50, description: "自分の価値観・条件を実際の判断や方向性に使う。" },
+    { score: 75, description: "自分の基準で比較し、またはAI提案を吟味して方向性を修正する。" },
+    { score: 100, description: "自分の目的から検討方向を主体的に定め、選択または理由ある判断保留を行う。" },
+  ].map(row => Object.freeze(row))) as readonly WeeklyAnalysisRubricLevel[],
 });
 
-export const WEEKLY_ANALYSIS_NULL_RULE = "会話内の本人発言から直接確認できる根拠が不足する場合はnullとし、0点に置き換えない。";
+export const WEEKLY_ANALYSIS_NULL_RULE = "証拠不足はholdかprovisionalとし、点数はnullにする。0点は考えなかったことを示す直接の証拠がある場合だけ使用する。";
+export const WEEKLY_ANALYSIS_CONTEXT_RULE = "短文や選択肢への回答は利用を許可された前後文脈と合わせて評価し、文脈不足ならholdとする。";
+export const WEEKLY_ANALYSIS_SCOPE_NOTICE = "会話から観察できた行動の評価であり、本人の内面・潜在能力・AIAS Level・課題の複雑さを示す点数ではない。";

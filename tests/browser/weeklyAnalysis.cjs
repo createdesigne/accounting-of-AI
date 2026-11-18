@@ -20,7 +20,9 @@ const model = 'gemini-browser-weekly-test';
       analyzeWeekly: async request => {
         calls += 1;
         const quote = request.messages[0].text;
-        const targets = ['activity-category', 'account-candidate', 'accounting-disposition', 'ai-role', 'collaboration-behavior', 'initiative', 'reasoning', 'critical-judgment', 'thinking-change', 'discovery'];
+        const targets = ['activity-category', 'account-candidate', 'accounting-disposition', 'ai-role', 'collaboration-behavior', 'thinking-change', 'discovery'];
+        const metricEvidence = [{ conversationId: request.conversationId, messageIndex: 0, utteranceId: `${request.conversationId}:message:0`, speaker: request.messages[0].role, quote, observedFeature: '本人の比較と判断を確認', source: 'observed_behavior' }];
+        const metric = score => ({ score, status: 'confirmed', reason: '会話内行動を確認', rubricLevel: score, evidence: metricEvidence, unconfirmed: [], evidenceSufficiency: 'high' });
         return createWeeklySuccessResponse(request, {
           activityCategory: '壁打ち',
           accountCandidate: '思考探究費',
@@ -29,7 +31,10 @@ const model = 'gemini-browser-weekly-test';
           collaborationBehaviors: [{ kind: 'comparison', description: 'AIが比較軸を示し、本人が採否を判断した' }],
           initiative: 75,
           reasoning: 75,
-          criticalJudgment: 50,
+          independence: 50,
+          metricAssessments: { initiative: metric(75), reasoning: metric(75), independence: { ...metric(50), deliberation: metric(75), finalDecision: metric(50) } },
+          taskComplexity: { level: 'medium', reason: '比較判断', considerationFactors: '複数案', uncertainty: '一部あり', reasoningProcess: '比較と確認' },
+          subjectiveDifficulty: { level: 'not_provided', source: 'self_report', note: null },
           thinkingChange: '根拠確認を優先するようになった',
           discovery: '比較軸を先に決めると判断しやすい',
           evidence: targets.map(target => ({ target, conversationId: request.conversationId, messageIndex: 0, quote })),
@@ -92,24 +97,22 @@ const model = 'gemini-browser-weekly-test';
 
     const review = record.locator('details.weekly-analysis-review');
     await review.locator('summary').click();
-    await review.getByLabel('批判的判断').selectOption('75');
-    await review.getByLabel('本人確認メモ').fill('本人が会話を確認して50から75へ修正');
-    await review.getByRole('button', { name: '本人の確認内容を別保存', exact: true }).click();
-    await record.getByText('本人の確認・修正内容をAI分析とは別に保存しました。', { exact: true }).waitFor();
+    await review.getByLabel('本人による補足（self_report）').fill('本人が会話を確認して補足');
+    await review.getByLabel('本人の主観的な難しさ').selectOption('high');
+    await review.getByRole('button', { name: '変更履歴へ追記', exact: true }).click();
+    await record.getByText('本人の補足・異議・除外・再評価を変更履歴として追記しました。AIの元結果は変更していません。', { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => localStorage.getItem('watashi-to-ai-weekly-records:v1')), weeklyBefore);
     const storedAnalysis = await page.evaluate(() => JSON.parse(localStorage.getItem('watashi-to-ai-weekly-analyses:v1')));
     assert.equal(storedAnalysis.entries[0].response.model, model);
-    assert.equal(storedAnalysis.entries[0].response.rubricVersion, 'research-thinking-rubric-v1');
+    assert.equal(storedAnalysis.entries[0].response.rubricVersion, 'research-thinking-rubric-v2');
     assert.equal(storedAnalysis.entries[0].response.analyzedAt, '2026-11-16T02:00:00.000Z');
-    assert.ok(await page.evaluate(() => localStorage.getItem('watashi-to-ai-weekly-analysis-reviews:v1')));
+    assert.ok(await page.evaluate(() => localStorage.getItem('watashi-to-ai-weekly-analysis-review-history:v2')));
 
     await page.reload();
     await page.getByRole('navigation', { name: '画面切り替え' }).getByRole('button', { name: '記録', exact: true }).click();
     await page.getByRole('navigation', { name: '記録方法の切り替え' }).getByRole('button', { name: '保存済み記録・手入力', exact: true }).click();
     const restored = page.locator('.weekly-record-card').filter({ hasText: '研究用分析テスト' });
-    await restored.getByText('本人確認済み：', { exact: false }).waitFor();
-    assert.equal(await restored.getByLabel('批判的判断').inputValue(), '75');
-    assert.equal(await restored.getByLabel('本人確認メモ').inputValue(), '本人が会話を確認して50から75へ修正');
+    await restored.getByText(/補足（基準 research-thinking-rubric-v2）/).waitFor();
     assert.deepEqual(errors, []);
     console.log('PASS: explicit consent, mocked structured analysis, evidence display, separate human corrections, reload persistence, and no weekly/accounting mutation.');
   } finally {

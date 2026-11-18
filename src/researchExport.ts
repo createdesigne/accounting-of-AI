@@ -11,11 +11,17 @@ import {
   findWeeklyAnalysisReview,
   type WeeklyAnalysisReviewStoreV1,
 } from "./weeklyAnalysisReviewStore.ts";
+import { isWeeklyAnalysisPayloadV2 } from "./integrations/weeklyAnalysisContract.ts";
+import { revisionsForAnalysis, type WeeklyAnalysisReviewHistoryStoreV2 } from "./weeklyAnalysisReviewV2Store.ts";
 import {
   resolveWeeklyAnalysisState,
   type WeeklyAnalysisStoreV1,
 } from "./weeklyAnalysisStore.ts";
 import type { WeeklyReflectionStoreV1 } from "./weeklyReflectionStore.ts";
+import {
+  accountingRevisionsForRecord,
+  type WeeklyAccountingRevisionStoreV1,
+} from "./weeklyAccountingClassificationStore.ts";
 import type {
   WeeklyConversationStoreV1,
   WeeklyRecordStoreV1,
@@ -32,6 +38,9 @@ export type ResearchExportSources = Readonly<{
   conversations: WeeklyConversationStoreV1;
   analyses: WeeklyAnalysisStoreV1;
   reviews: WeeklyAnalysisReviewStoreV1;
+  reviewHistoryV2?: WeeklyAnalysisReviewHistoryStoreV2;
+  /** Optional for exports created from data saved before accounting revision tracking existed. */
+  accountingRevisions?: WeeklyAccountingRevisionStoreV1;
   reflections: WeeklyReflectionStoreV1;
   settlements: WeeklySettlementStoreV1;
 }>;
@@ -77,7 +86,13 @@ export function buildResearchExportBundle(
     const analysisState = resolveWeeklyAnalysisState(record, sources.analyses, conversation);
     const response = analysisState.response;
     const analysis = response?.analysis ?? null;
+    const analysisV2 = analysis && isWeeklyAnalysisPayloadV2(analysis) ? analysis : null;
     const review = findWeeklyAnalysisReview(sources.reviews, response?.analysisId);
+    const reviewHistoryV2 = sources.reviewHistoryV2 ? revisionsForAnalysis(sources.reviewHistoryV2, response?.analysisId) : [];
+    const latestReviewV2 = reviewHistoryV2[reviewHistoryV2.length - 1] ?? null;
+    const accountingRevisionHistory = sources.accountingRevisions
+      ? accountingRevisionsForRecord(sources.accountingRevisions, record.id)
+      : [];
     const relatedReflections = selectedReflections.filter((reflection) => (
       reflection.selectedActivities.some((item) => item.recordId === record.id)
     ));
@@ -103,6 +118,19 @@ export function buildResearchExportBundle(
       activityCategorySource: record.activityCategorySource,
       accountingAccount: confirmedAccountForWeeklyRecord(record),
       accountingDisposition: record.accountingDisposition,
+      accountingRevisionHistory: Object.freeze(accountingRevisionHistory.map((revision) => Object.freeze({
+        revisionId: revision.id,
+        changedAt: revision.changedAt,
+        changedBy: "person" as const,
+        before: Object.freeze({
+          accountingDisposition: revision.before.disposition,
+          accountingAccount: revision.before.account,
+        }),
+        after: Object.freeze({
+          accountingDisposition: revision.after.disposition,
+          accountingAccount: revision.after.account,
+        }),
+      }))),
       aiasTask: task === null ? null : Object.freeze({
         taskId: task.id,
         plannedLevel: task.plannedAiasLevel,
@@ -125,15 +153,27 @@ export function buildResearchExportBundle(
           : Object.freeze([]),
         initiative: analysis?.initiative ?? null,
         reasoning: analysis?.reasoning ?? null,
-        criticalJudgment: analysis?.criticalJudgment ?? null,
+        criticalJudgment: analysis && !isWeeklyAnalysisPayloadV2(analysis) ? analysis.criticalJudgment : null,
+        independence: analysisV2?.independence ?? null,
+        metricAssessments: analysisV2 ? exportMetricAssessments(analysisV2.metricAssessments, options.includeSensitiveText) : null,
+        taskComplexity: analysisV2 ? Object.freeze({
+          level: analysisV2.taskComplexity.level,
+          reason: options.includeSensitiveText ? analysisV2.taskComplexity.reason : null,
+          considerationFactors: options.includeSensitiveText ? analysisV2.taskComplexity.considerationFactors : null,
+          uncertainty: options.includeSensitiveText ? analysisV2.taskComplexity.uncertainty : null,
+          reasoningProcess: options.includeSensitiveText ? analysisV2.taskComplexity.reasoningProcess : null,
+        }) : null,
+        subjectiveDifficulty: analysisV2?.subjectiveDifficulty ?? null,
         thinkingChange: options.includeSensitiveText ? analysis?.thinkingChange ?? null : null,
         discovery: options.includeSensitiveText ? analysis?.discovery ?? null : null,
         evidenceCount: analysis?.evidence.length ?? 0,
         evidence: options.includeSensitiveText ? Object.freeze([...(analysis?.evidence ?? [])]) : Object.freeze([]),
         model: response?.model ?? null,
+        apiMethod: response?.apiMethod ?? null,
         rubricVersion: response?.rubricVersion ?? null,
         analyzedAt: response?.analyzedAt ?? response?.receivedAt ?? null,
         errorCode: response?.error?.code ?? null,
+        unresolvedFields: Object.freeze([...(response?.unresolvedFields ?? [])]),
       }),
       humanReview: review === null ? null : Object.freeze({
         analysisId: review.analysisId,
@@ -150,6 +190,8 @@ export function buildResearchExportBundle(
         discovery: options.includeSensitiveText ? review.fields.discovery : null,
         reviewerNote: options.includeSensitiveText ? review.fields.reviewerNote : null,
       }),
+      humanReviewV2: latestReviewV2 === null ? null : exportReviewV2(latestReviewV2, options.includeSensitiveText),
+      humanReviewHistoryV2: Object.freeze(reviewHistoryV2.map(item => exportReviewV2(item, options.includeSensitiveText))),
       personAuthored: Object.freeze({
         interactionSummary: options.includeSensitiveText ? record.manualNotes?.interactionSummary ?? null : null,
         ownThoughts: options.includeSensitiveText ? record.manualNotes?.ownThoughts ?? null : null,
@@ -195,6 +237,11 @@ export function buildResearchExportBundle(
     sensitiveTextIncluded: options.includeSensitiveText,
     privacyNotice: "Conversation message bodies and API keys are never included.",
     scoreNotice: "null means unevaluated or insufficient evidence; it is not zero.",
+    comparisonPolicy: Object.freeze({
+      defaultTrendStatus: "trend_hold" as const,
+      rule: "Compare only similar purposes and complexity under the same rubric; insufficient count or theme balance remains trend_hold.",
+      scientificMinimumCount: null,
+    }),
     activities: Object.freeze(activities),
     reflections: Object.freeze(reflections),
     weeklyStatements: Object.freeze(weeklyStatements),
@@ -211,12 +258,19 @@ const activityCsvColumns = [
   "aias_activity_category", "aias_task_title", "aias_goal", "aias_expected_ai_role", "aias_human_decision",
   "analysis_status", "analysis_origin", "analysis_id", "ai_activity_category", "ai_account_candidate",
   "ai_accounting_disposition_candidate", "ai_role", "ai_collaboration_behaviors", "ai_initiative",
-  "ai_reasoning", "ai_critical_judgment", "ai_thinking_change", "ai_discovery", "evidence_count",
-  "evidence", "model", "rubric_version", "analyzed_at", "analysis_error_code", "human_reviewed_at",
+  "ai_reasoning", "ai_critical_judgment_legacy_v1", "ai_independence_v2",
+  "initiative_status_v2", "initiative_reason_v2", "initiative_rubric_v2", "initiative_evidence_sufficiency_v2",
+  "reasoning_status_v2", "reasoning_reason_v2", "reasoning_rubric_v2", "reasoning_evidence_sufficiency_v2",
+  "independence_status_v2", "independence_reason_v2", "independence_rubric_v2", "independence_evidence_sufficiency_v2",
+  "independence_deliberation_v2", "independence_final_decision_v2", "metric_evidence_v2",
+  "task_complexity_level", "task_complexity_reason", "task_complexity_factors", "task_complexity_uncertainty", "task_complexity_reasoning_process",
+  "ai_subjective_difficulty", "ai_thinking_change", "ai_discovery", "evidence_count",
+  "evidence", "model", "api_method", "rubric_version", "analyzed_at", "analysis_error_code", "analysis_unresolved_fields", "human_reviewed_at",
   "human_activity_category", "human_account_candidate", "human_accounting_disposition_candidate",
   "human_initiative", "human_reasoning", "human_critical_judgment", "human_ai_role",
   "human_collaboration_summary", "human_thinking_change", "human_discovery", "human_reviewer_note",
   "person_interaction_summary", "person_own_thoughts", "person_discovery", "person_self_reflection",
+  "human_v2_latest_revision", "human_v2_revision_history", "human_subjective_difficulty",
   "representative_reflection_weeks", "measurement_range", "sensitive_text_included",
 ] as const;
 
@@ -258,15 +312,39 @@ export function serializeResearchActivitiesCsv(bundle: ResearchExportBundleV1) {
     ai_collaboration_behaviors: jsonCell(item.analysis.collaborationBehaviors),
     ai_initiative: item.analysis.initiative,
     ai_reasoning: item.analysis.reasoning,
-    ai_critical_judgment: item.analysis.criticalJudgment,
+    ai_critical_judgment_legacy_v1: item.analysis.criticalJudgment,
+    ai_independence_v2: item.analysis.independence,
+    initiative_status_v2: item.analysis.metricAssessments?.initiative.status ?? null,
+    initiative_reason_v2: item.analysis.metricAssessments?.initiative.reason ?? null,
+    initiative_rubric_v2: item.analysis.metricAssessments?.initiative.rubricLevel ?? null,
+    initiative_evidence_sufficiency_v2: item.analysis.metricAssessments?.initiative.evidenceSufficiency ?? null,
+    reasoning_status_v2: item.analysis.metricAssessments?.reasoning.status ?? null,
+    reasoning_reason_v2: item.analysis.metricAssessments?.reasoning.reason ?? null,
+    reasoning_rubric_v2: item.analysis.metricAssessments?.reasoning.rubricLevel ?? null,
+    reasoning_evidence_sufficiency_v2: item.analysis.metricAssessments?.reasoning.evidenceSufficiency ?? null,
+    independence_status_v2: item.analysis.metricAssessments?.independence.status ?? null,
+    independence_reason_v2: item.analysis.metricAssessments?.independence.reason ?? null,
+    independence_rubric_v2: item.analysis.metricAssessments?.independence.rubricLevel ?? null,
+    independence_evidence_sufficiency_v2: item.analysis.metricAssessments?.independence.evidenceSufficiency ?? null,
+    independence_deliberation_v2: jsonCell(item.analysis.metricAssessments?.independence.deliberation ?? null),
+    independence_final_decision_v2: jsonCell(item.analysis.metricAssessments?.independence.finalDecision ?? null),
+    metric_evidence_v2: jsonCell(item.analysis.metricAssessments ?? null),
+    task_complexity_level: item.analysis.taskComplexity?.level ?? null,
+    task_complexity_reason: item.analysis.taskComplexity?.reason ?? null,
+    task_complexity_factors: item.analysis.taskComplexity?.considerationFactors ?? null,
+    task_complexity_uncertainty: item.analysis.taskComplexity?.uncertainty ?? null,
+    task_complexity_reasoning_process: item.analysis.taskComplexity?.reasoningProcess ?? null,
+    ai_subjective_difficulty: item.analysis.subjectiveDifficulty?.level ?? null,
     ai_thinking_change: item.analysis.thinkingChange,
     ai_discovery: item.analysis.discovery,
     evidence_count: item.analysis.evidenceCount,
     evidence: jsonCell(item.analysis.evidence),
     model: item.analysis.model,
+    api_method: item.analysis.apiMethod,
     rubric_version: item.analysis.rubricVersion,
     analyzed_at: item.analysis.analyzedAt,
     analysis_error_code: item.analysis.errorCode,
+    analysis_unresolved_fields: jsonCell(item.analysis.unresolvedFields),
     human_reviewed_at: item.humanReview?.reviewedAt ?? null,
     human_activity_category: item.humanReview?.activityCategory ?? null,
     human_account_candidate: item.humanReview?.accountCandidate ?? null,
@@ -279,6 +357,9 @@ export function serializeResearchActivitiesCsv(bundle: ResearchExportBundleV1) {
     human_thinking_change: item.humanReview?.thinkingChange ?? null,
     human_discovery: item.humanReview?.discovery ?? null,
     human_reviewer_note: item.humanReview?.reviewerNote ?? null,
+    human_v2_latest_revision: jsonCell(item.humanReviewV2),
+    human_v2_revision_history: jsonCell(item.humanReviewHistoryV2),
+    human_subjective_difficulty: item.humanReviewV2?.subjectiveDifficulty ?? null,
     person_interaction_summary: item.personAuthored.interactionSummary,
     person_own_thoughts: item.personAuthored.ownThoughts,
     person_discovery: item.personAuthored.discovery,
@@ -347,8 +428,34 @@ export function csvCell(value: unknown) {
   return `"${text.replace(/"/g, '""')}"`;
 }
 
-function jsonCell(value: readonly unknown[]) {
-  return value.length === 0 ? "" : JSON.stringify(value);
+function jsonCell(value: unknown) {
+  return value === null || value === undefined || (Array.isArray(value) && value.length === 0) ? "" : JSON.stringify(value);
+}
+
+function exportMetricAssessments(value: import("./integrations/weeklyAnalysisContract.ts").WeeklyAnalysisPayloadV2["metricAssessments"], includeSensitiveText: boolean) {
+  const metric = (row: import("./integrations/weeklyAnalysisContract.ts").WeeklyAnalysisMetricAssessmentV2) => Object.freeze({
+    score: row.score, status: row.status, reason: includeSensitiveText ? row.reason : null,
+    rubricLevel: row.rubricLevel, evidence: includeSensitiveText ? row.evidence : Object.freeze([]),
+    unconfirmed: includeSensitiveText ? row.unconfirmed : Object.freeze([]), evidenceSufficiency: row.evidenceSufficiency,
+  });
+  return Object.freeze({
+    initiative: metric(value.initiative), reasoning: metric(value.reasoning),
+    independence: Object.freeze({ ...metric(value.independence), deliberation: metric(value.independence.deliberation), finalDecision: metric(value.independence.finalDecision) }),
+  });
+}
+
+function exportReviewV2(value: import("./weeklyAnalysisReviewV2Store.ts").WeeklyAnalysisReviewRevisionV2, includeSensitiveText: boolean) {
+  return Object.freeze({
+    ...value,
+    supplement: includeSensitiveText ? value.supplement : null,
+    objection: includeSensitiveText ? value.objection : null,
+    exclusionReason: includeSensitiveText ? value.exclusionReason : null,
+    metrics: Object.freeze({
+      initiative: Object.freeze({ ...value.metrics.initiative, reason: includeSensitiveText ? value.metrics.initiative.reason : "" }),
+      reasoning: Object.freeze({ ...value.metrics.reasoning, reason: includeSensitiveText ? value.metrics.reasoning.reason : "" }),
+      independence: Object.freeze({ ...value.metrics.independence, reason: includeSensitiveText ? value.metrics.independence.reason : "" }),
+    }),
+  });
 }
 
 function statementWeekKeys(sources: ResearchExportSources, selectedWeekKey: string | null) {
@@ -391,6 +498,7 @@ function validateSourceUniqueness(sources: ResearchExportSources) {
   assertUnique(sources.analyses.entries.map((item) => item.requestId), "分析リクエストID");
   assertUnique(sources.analyses.entries.flatMap((item) => item.response ? [item.response.analysisId] : []), "分析結果ID");
   assertUnique(sources.reviews.reviews.map((item) => item.analysisId), "本人確認済み分析ID");
+  if (sources.reviewHistoryV2) assertUnique(sources.reviewHistoryV2.revisions.map(item => item.revisionId), "v2本人確認履歴ID");
   assertUnique(sources.reflections.reflections.map((item) => item.weekKey), "週次振り返り週");
   assertUnique(sources.settlements.weeks.map((item) => item.weekKey), "週次決算週");
   const measuredIds = sources.records.records

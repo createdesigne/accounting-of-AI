@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatPeriod, periodBounds, shiftPeriod } from "../ledgerPeriods.ts";
-import { WEEKLY_ACCOUNTS, type WeeklyAccount } from "../weeklyAccounting.ts";
+import type { WeeklyAccount } from "../weeklyAccounting.ts";
 import { buildWeeklyDashboardData } from "../weeklyDashboard.ts";
 import {
   loadWeeklyReflectionStore,
@@ -143,22 +143,24 @@ export function WeeklySettlementScreen({ onOpenRecords, onOpenReflection }: { on
         </button>
       </section>
 
-      <section className="weekly-settlement-panel" aria-labelledby="weekly-bs-heading">
-        <div className="weekly-settlement-heading"><div><p className="eyebrow">時間会計</p><h3 id="weekly-bs-heading">週次B/S</h3></div></div>
-        <p className="weekly-settlement-note">企業会計の財務諸表ではなく、秒を単位にした独自の時間会計表示です。</p>
-        <div className="weekly-statement-columns">
-          <StatementColumn title="借方" lines={preview.settlement.balanceSheet.debit} />
-          <StatementColumn title="貸方" lines={preview.settlement.balanceSheet.credit} />
+      <details className="weekly-settlement-panel weekly-disclosure">
+        <summary><span><small>時間会計</small><strong id="weekly-bs-heading">週次B/S</strong></span><b>借方・貸方 {formatDuration(preview.settlement.balanceSheet.debitSeconds)}</b></summary>
+        <div className="weekly-disclosure-body">
+          <p className="weekly-settlement-note">企業会計の財務諸表ではなく、秒を単位にした独自の時間会計表示です。</p>
+          <div className="weekly-statement-columns">
+            <StatementColumn title="借方" lines={preview.settlement.balanceSheet.debit} />
+            <StatementColumn title="貸方" lines={preview.settlement.balanceSheet.credit} />
+          </div>
+          <div className="weekly-statement-total"><span>借方 {formatDuration(preview.settlement.balanceSheet.debitSeconds)}</span><span>貸方 {formatDuration(preview.settlement.balanceSheet.creditSeconds)}</span></div>
         </div>
-        <div className="weekly-statement-total"><span>借方 {formatDuration(preview.settlement.balanceSheet.debitSeconds)}</span><span>貸方 {formatDuration(preview.settlement.balanceSheet.creditSeconds)}</span></div>
-      </section>
+      </details>
 
-      <section className="weekly-settlement-panel" aria-labelledby="weekly-pl-heading">
-        <div className="weekly-settlement-heading"><div><p className="eyebrow">活動費用</p><h3 id="weekly-pl-heading">週次P/L</h3></div><strong>{formatDuration(preview.settlement.profitAndLoss.totalExpenseSeconds)}</strong></div>
-        <div className="weekly-pl-list">
+      <details className="weekly-settlement-panel weekly-disclosure">
+        <summary><span><small>活動費用</small><strong id="weekly-pl-heading">週次P/L</strong></span><b>{formatDuration(preview.settlement.profitAndLoss.totalExpenseSeconds)}</b></summary>
+        <div className="weekly-disclosure-body weekly-pl-list">
           {preview.settlement.profitAndLoss.expenses.map((line) => <div key={line.account}><span>{line.account}</span><strong>{formatDuration(line.seconds)}</strong></div>)}
         </div>
-      </section>
+      </details>
 
       <section className="weekly-settlement-panel" aria-labelledby="weekly-category-chart-heading">
         <div className="weekly-settlement-heading"><div><p className="eyebrow">今週の活動構成</p><h3 id="weekly-category-chart-heading">活動テーマ別グラフ</h3></div><span>{dashboard.recordCount}件</span></div>
@@ -181,21 +183,23 @@ export function WeeklySettlementScreen({ onOpenRecords, onOpenReflection }: { on
         {onOpenReflection && <button className="weekly-settlement-edit" type="button" onClick={() => onOpenReflection(anchor)}>{reflection ? "振り返りを編集" : "本人の振り返りを記録"}</button>}
       </section>
 
-      <section className="weekly-settlement-panel" aria-labelledby="weekly-journal-heading">
-        <div className="weekly-settlement-heading"><div><p className="eyebrow">借方＝貸方</p><h3 id="weekly-journal-heading">週次仕訳一覧</h3></div><span>{preview.journalEntries.length}仕訳</span></div>
-        {preview.journalEntries.length === 0 ? <p className="weekly-settlement-empty">この週のAI利用仕訳はありません。</p> : (
-          <div className="weekly-journal-list">
+      <details className="weekly-settlement-panel weekly-disclosure">
+        <summary><span><small>借方＝貸方</small><strong id="weekly-journal-heading">週次仕訳一覧</strong></span><b>{preview.journalEntries.length}仕訳</b></summary>
+        <div className="weekly-disclosure-body">
+          <p className="weekly-settlement-note"><strong>仮仕訳</strong>は利用時間の発生、<strong>決算振替</strong>は本人が確定した区分への移動です。同じ秒数が両方に表示されても二重計上ではありません。</p>
+          {preview.journalEntries.length === 0 ? <p className="weekly-settlement-empty">この週のAI利用仕訳はありません。</p> : (
+            <div className="weekly-journal-list">
             {preview.journalEntries.map((entry) => <article key={entry.id}>
               <div className="weekly-journal-meta"><span>{entry.kind === "usage-recognition" ? "仮仕訳" : "決算振替"}</span><span>{sourceLabel(entry.timeSource)}</span></div>
               <div className="weekly-journal-lines">
                 <div><small>借方</small><strong>{entry.lines[0].account}</strong><span>{formatDuration(entry.lines[0].seconds)}</span></div>
                 <div><small>貸方</small><strong>{entry.lines[1].account}</strong><span>{formatDuration(entry.lines[1].seconds)}</span></div>
               </div>
-              <small className="weekly-journal-id">記録ID: {entry.recordId}</small>
             </article>)}
-          </div>
-        )}
-      </section>
+            </div>
+          )}
+        </div>
+      </details>
 
       <section className="weekly-settlement-panel" aria-labelledby="weekly-revision-heading">
         <div className="weekly-settlement-heading"><div><p className="eyebrow">監査履歴</p><h3 id="weekly-revision-heading">確定履歴</h3></div><span>{preview.revisions.length}件</span></div>

@@ -7,6 +7,7 @@ import { vercelOrigins } from '../server/vercel.mjs';
 import healthHandler from '../api/ai/health.mjs';
 import rewriteHandler from '../api/ai/rewrite.mjs';
 import analyzeWeeklyHandler from '../api/ai/analyze-weekly.mjs';
+import testStructuredHandler from '../api/ai/test-structured.mjs';
 
 const allowed = 'https://deployment.example';
 async function start(handler, parsed = false) {
@@ -40,7 +41,8 @@ test('Vercel parsed-body requests preserve credentials, limits, sanitized errors
 });
 test('Vercel entrypoints return health and reject missing keys without an upstream request', async () => {
   const app = await start((req, res) => req.url.endsWith('health') ? healthHandler(req, res)
-    : req.url.endsWith('analyze-weekly') ? analyzeWeeklyHandler(req, res) : rewriteHandler(req, res), true);
+    : req.url.endsWith('analyze-weekly') ? analyzeWeeklyHandler(req, res)
+    : req.url.endsWith('test-structured') ? testStructuredHandler(req, res) : rewriteHandler(req, res), true);
   try {
     const health = await fetch(app.url + '/api/ai/health');
     assert.equal(health.status, 200); assert.equal((await health.json()).credentialMode, 'per_request');
@@ -48,6 +50,8 @@ test('Vercel entrypoints return health and reject missing keys without an upstre
     assert.equal(response.status, 401); assert.deepEqual(await response.json(), { error: { code: 'API_KEY_REQUIRED' } });
     const analysis = await fetch(app.url + '/api/ai/analyze-weekly', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
     assert.equal(analysis.status, 400); assert.deepEqual(await analysis.json(), { error: { code: 'INVALID_INPUT' } });
+    const structured = await fetch(app.url + '/api/ai/test-structured', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ schemaVersion: 1 }) });
+    assert.equal(structured.status, 401); assert.deepEqual(await structured.json(), { error: { code: 'API_KEY_REQUIRED' } });
   } finally { await app.close(); }
 });
 test('only explicit Vercel deployment hosts and HTTPS public origins are allowed', () => {

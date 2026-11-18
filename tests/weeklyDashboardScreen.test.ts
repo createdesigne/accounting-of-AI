@@ -21,11 +21,17 @@ test("weekly workspace keeps the five research areas and their detailed screens 
 test("dashboard exposes week navigation and required factual sections", () => {
   for (const text of [
     "今週のAI実利用時間", "前の週", "今週", "次の週", "時間の記録元", "利用時間と件数",
-    "未分類・未処理", "登録済みのAIAS課題", "週次活動履歴", "未接続・未評価",
+    "会計区分が未分類の活動", "活動に未紐付けの実測時間", "登録済みのAIAS課題", "週次活動履歴",
   ]) assert.ok(screen.includes(text), `missing dashboard label: ${text}`);
   assert.match(screen, /手入力は「実測」と表示しません/);
   assert.match(screen, /能力評価や成長スコアではありません/);
   assert.match(screen, /この週の記録はありません。0件/);
+  assert.match(screen, /新しい会話・時間を取り込む/);
+  assert.match(screen, /保存済み活動を確認/);
+  assert.match(screen, /この週の振り返りを開く/);
+  assert.match(workspace, /onOpenSavedRecords=\{\(\) => openRecords\(true\)\}/);
+  for (const status of ["分析済み", "一部未評価", "未分析", "分析失敗"]) assert.match(screen, new RegExp(status));
+  assert.match(screen, /selectUnlinkedMeasuredTimeCandidates/);
 });
 
 test("dashboard contains no external analysis calls or fabricated fixtures", () => {

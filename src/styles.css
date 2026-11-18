@@ -776,6 +776,42 @@ button {
   font-weight: 800;
 }
 
+.manual-time-transfer {
+  margin-bottom: 14px;
+}
+
+.manual-time-transfer > summary {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.manual-time-transfer > p,
+.manual-time-transfer label {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.manual-time-transfer label {
+  display: grid;
+  gap: 6px;
+}
+
+.manual-time-transfer textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 10px;
+  color: #1e293b;
+  background: #ffffff;
+  font: 12px/1.5 ui-monospace, monospace;
+}
+
 .extension-setup-hint {
   margin: 0;
   color: #475569;

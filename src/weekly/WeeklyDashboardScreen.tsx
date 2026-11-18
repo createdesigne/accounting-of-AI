@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatPeriod, periodBounds, shiftPeriod } from "../ledgerPeriods.ts";
+import { TIME_ACCOUNTING_STORAGE_BASE_KEY, loadTimeAccountingStore } from "../timeAccountingStore.ts";
 import { buildWeeklyDashboardData } from "../weeklyDashboard.ts";
+import { buildMeasuredTimeCandidates, selectUnlinkedMeasuredTimeCandidates } from "../weeklyExtensionImport.ts";
 import { loadWeeklyAnalysisStore, resolveWeeklyAnalysisState, WEEKLY_ANALYSES_STORAGE_KEY, type WeeklyAnalysisStoreV1 } from "../weeklyAnalysisStore.ts";
 import { loadWeeklyConversationStore, loadWeeklyRecordStore, WEEKLY_CONVERSATIONS_STORAGE_KEY, WEEKLY_RECORDS_STORAGE_KEY, type WeeklyConversationStoreV1, type WeeklyRecordStoreV1 } from "../weeklyStore.ts";
 import type { AccountingDisposition, WeeklyTimeSource } from "../weeklyData.ts";
@@ -8,9 +10,11 @@ import "./weeklyDashboardScreen.css";
 
 export function WeeklyDashboardScreen({
   onOpenRecords,
+  onOpenSavedRecords,
   onOpenReflection,
 }: {
   onOpenRecords: () => void;
+  onOpenSavedRecords: () => void;
   onOpenReflection: (anchor: Date) => void;
 }) {
   const [anchor, setAnchor] = useState(() => new Date());
@@ -29,7 +33,15 @@ export function WeeklyDashboardScreen({
     const status = resolveWeeklyAnalysisState(item.record, analyses, conversationByRecord.get(item.record.id) ?? null).analysisStatus;
     counts[status] += 1;
     return counts;
-  }, { "not-connected": 0, pending: 0, complete: 0, failed: 0, "not-applicable": 0 }), [dashboard.records, analyses, conversationByRecord]);
+  }, { "not-connected": 0, pending: 0, complete: 0, partial: 0, failed: 0, "not-applicable": 0 }), [dashboard.records, analyses, conversationByRecord]);
+  const unclassifiedAccountingCount = dashboard.records.filter(({ record }) => record.accountingDisposition === "unclassified").length;
+  const unlinkedMeasurements = useMemo(
+    () => loadUnlinkedMeasurements(store).filter((item) => (
+      new Date(item.endedAt) > dashboard.weekStart && new Date(item.startedAt) < dashboard.weekEndExclusive
+    )),
+    [store, dashboard.weekStart, dashboard.weekEndExclusive],
+  );
+  const unlinkedMeasurementSeconds = unlinkedMeasurements.reduce((total, item) => total + item.activeSeconds, 0);
 
   const refresh = useCallback(() => {
     try {
@@ -44,7 +56,7 @@ export function WeeklyDashboardScreen({
 
   useEffect(() => {
     const onStorage = (event: StorageEvent) => {
-      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_CONVERSATIONS_STORAGE_KEY || event.key === WEEKLY_ANALYSES_STORAGE_KEY || event.key === null) refresh();
+      if (event.key === WEEKLY_RECORDS_STORAGE_KEY || event.key === WEEKLY_CONVERSATIONS_STORAGE_KEY || event.key === WEEKLY_ANALYSES_STORAGE_KEY || event.key === TIME_ACCOUNTING_STORAGE_BASE_KEY || event.key === null) refresh();
     };
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("storage", onStorage);
@@ -79,7 +91,41 @@ export function WeeklyDashboardScreen({
         <button type="button" disabled={isCurrentWeek} onClick={() => moveWeek(1)}>次の週 →</button>
       </nav>
 
+      <section className="weekly-dashboard-panel weekly-dashboard-next" aria-labelledby="weekly-next-action-heading">
+        <div className="weekly-dashboard-heading"><div><p className="eyebrow">迷ったらここから</p><h3 id="weekly-next-action-heading">次にすること</h3></div></div>
+        <div className="weekly-dashboard-actions">
+          <button className="weekly-dashboard-record-button" type="button" onClick={onOpenRecords}><strong>新しい会話・時間を取り込む</strong><small>拡張機能の記録を確認して保存</small></button>
+          <button className="weekly-dashboard-record-button secondary" type="button" onClick={onOpenSavedRecords}><strong>保存済み活動を確認</strong><small>分析・本人確認・会計区分を編集</small></button>
+          <button className="weekly-dashboard-record-button reflection" type="button" onClick={() => onOpenReflection(anchor)}><strong>この週の振り返りを開く</strong><small>本人の発見と次週の挑戦を記録</small></button>
+        </div>
+      </section>
+
       {loadError && <p className="weekly-dashboard-error" role="alert">{loadError}</p>}
+
+      <section className="weekly-dashboard-status-grid" aria-label="未処理と分析の状態">
+        <article className="weekly-dashboard-status-card">
+          <span>会計区分が未分類の活動</span>
+          <strong>{unclassifiedAccountingCount}件</strong>
+          <small>本人が会計区分を確認するまで未分類として保持します。</small>
+        </article>
+        <article className="weekly-dashboard-status-card measured">
+          <span>活動に未紐付けの実測時間</span>
+          <strong>{unlinkedMeasurements.length}件・{formatDuration(unlinkedMeasurementSeconds)}</strong>
+          <small>会計には取り込み済みですが、週次活動としてはまだ確定していません。</small>
+        </article>
+        <article className="weekly-dashboard-status-card analysis">
+          <span>AI分析の状態</span>
+          <strong>{dashboard.recordCount === 0 ? "記録なし" : `${dashboard.recordCount}件の内訳`}</strong>
+          <div className="weekly-analysis-counts">
+            <span>分析済み <b>{analysisCounts.complete}件</b></span>
+            <span>一部未評価 <b>{analysisCounts.partial}件</b></span>
+            <span>未分析 <b>{analysisCounts["not-connected"]}件</b></span>
+            <span>分析待ち <b>{analysisCounts.pending}件</b></span>
+            <span>分析失敗 <b>{analysisCounts.failed}件</b></span>
+            <span>対象外 <b>{analysisCounts["not-applicable"]}件</b></span>
+          </div>
+        </article>
+      </section>
 
       <section className="weekly-dashboard-panel" aria-labelledby="weekly-time-source-heading">
         <div className="weekly-dashboard-heading"><div><p className="eyebrow">計測方法</p><h3 id="weekly-time-source-heading">時間の記録元</h3></div></div>
@@ -102,19 +148,6 @@ export function WeeklyDashboardScreen({
             <small>{row.count}件</small>
           </div>)}
         </div>}
-      </section>
-
-      <section className="weekly-dashboard-status-grid" aria-label="未処理と分析の状態">
-        <article className="weekly-dashboard-status-card">
-          <span>未分類・未処理</span>
-          <strong>{dashboard.unclassifiedCount}件</strong>
-          <small>AI不使用として確定したLevel 1課題は含みません。</small>
-        </article>
-        <article className="weekly-dashboard-status-card analysis">
-          <span>AI分析</span>
-          <strong>{dashboard.recordCount === 0 ? "記録なし" : analysisCounts.complete > 0 ? `分析完了 ${analysisCounts.complete}件` : analysisCounts.pending > 0 ? `分析待ち ${analysisCounts.pending}件` : analysisCounts.failed > 0 ? `分析失敗 ${analysisCounts.failed}件` : analysisCounts["not-connected"] > 0 ? "未接続・未評価" : "対象外"}</strong>
-          <small>未評価 {analysisCounts["not-connected"]}件 / 失敗 {analysisCounts.failed}件 / 対象外 {analysisCounts["not-applicable"]}件</small>
-        </article>
       </section>
 
       <section className="weekly-dashboard-panel" aria-labelledby="weekly-task-list-heading">
@@ -146,10 +179,6 @@ export function WeeklyDashboardScreen({
         </div>}
       </section>
 
-      <div className="weekly-dashboard-actions">
-        <button className="weekly-dashboard-record-button reflection" type="button" onClick={() => onOpenReflection(anchor)}>この週の振り返りを開く</button>
-        <button className="weekly-dashboard-record-button" type="button" onClick={onOpenRecords}>課題設定・手入力を開く</button>
-      </div>
     </div>
   );
 }
@@ -170,8 +199,19 @@ function emptyOrLoadedAnalyses(): WeeklyAnalysisStoreV1 {
   try { return loadWeeklyAnalysisStore(); } catch { return Object.freeze({ schemaVersion: 1, entries: Object.freeze([]) }); }
 }
 
-function analysisStatusLabel(value: "not-connected" | "pending" | "complete" | "failed" | "not-applicable") {
-  return { "not-connected": "未接続・未評価（スコアはnull）", pending: "分析待ち", complete: "分析完了", failed: "分析失敗", "not-applicable": "対象外" }[value];
+function loadUnlinkedMeasurements(store: WeeklyRecordStoreV1) {
+  try {
+    return selectUnlinkedMeasuredTimeCandidates(
+      buildMeasuredTimeCandidates(loadTimeAccountingStore()),
+      store.records,
+    );
+  } catch {
+    return Object.freeze([]);
+  }
+}
+
+function analysisStatusLabel(value: "not-connected" | "pending" | "complete" | "partial" | "failed" | "not-applicable") {
+  return { "not-connected": "未分析", pending: "分析待ち", complete: "分析完了", partial: "一部未評価", failed: "分析失敗", "not-applicable": "対象外" }[value];
 }
 
 function sourceLabel(source: WeeklyTimeSource) {

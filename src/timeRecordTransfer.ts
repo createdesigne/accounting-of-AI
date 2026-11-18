@@ -9,6 +9,8 @@ export const TIME_RECORD_ACK_RESULT_SOURCE = "ai-time-record-extension";
 export const TIME_RECORD_ACK_RESULT_TYPE = "AI_TIME_RECORDS_IMPORT_ACK_RESULT";
 export const TIME_RECORD_AUTO_REQUEST_TYPE = "AI_TIME_RECORDS_AUTO_REQUEST";
 export const TIME_RECORD_AUTO_RESULT_TYPE = "AI_TIME_RECORDS_AUTO_RESULT";
+export const TIME_RECORD_PENDING_ACK_BASE_KEY = "watashi-to-ai-time-record-pending-ack";
+export const TIME_RECORD_PENDING_PREVIEW_BASE_KEY = "watashi-to-ai-time-record-pending-preview";
 export const TIME_RECORD_MAX_COUNT = 500;
 export const TIME_RECORD_MAX_BYTES = 192 * 1024;
 
@@ -73,6 +75,16 @@ export function parseTimeRecordPayload(value: unknown): TimeRecordPayload | null
   return payload;
 }
 
+export function parseManualTimeRecordTransfer(value: string): TimeRecordPayload | null {
+  if (typeof value !== "string" || value.length === 0
+    || new TextEncoder().encode(value).byteLength > TIME_RECORD_MAX_BYTES) return null;
+  try {
+    return parseTimeRecordPayload(JSON.parse(value) as unknown);
+  } catch {
+    return null;
+  }
+}
+
 export function createTimeRecordPayload(records: readonly TimeRecordPreview[], requestId: string): TimeRecordPayload {
   const payload = parseTimeRecordPayload({ protocol: TIME_RECORD_PROTOCOL, requestId, records: [...records] });
   if (!payload) throw new Error("利用時間の完了通知データが正しくありません。");
@@ -109,6 +121,89 @@ export function mergeTimeRecordPreviews(
   ));
 }
 
+export function loadPendingTimeRecordPreview(
+  storage: Pick<Storage, "getItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_PREVIEW_BASE_KEY,
+): readonly TimeRecordPreview[] {
+  return parsePendingTimeRecordPreviewEnvelope(storage.getItem(storageKey))?.records
+    ?? Object.freeze([]);
+}
+
+export function loadPendingTimeRecordAutomaticIds(
+  storage: Pick<Storage, "getItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_PREVIEW_BASE_KEY,
+): readonly string[] {
+  return parsePendingTimeRecordPreviewEnvelope(storage.getItem(storageKey))?.automaticRecordIds
+    ?? Object.freeze([]);
+}
+
+export function savePendingTimeRecordPreview(
+  records: readonly TimeRecordPreview[],
+  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_PREVIEW_BASE_KEY,
+  automaticRecordIds: readonly string[] = [],
+) {
+  const currentEnvelope = parsePendingTimeRecordPreviewEnvelope(storage.getItem(storageKey));
+  const merged = mergeTimeRecordPreviews([...(currentEnvelope?.records ?? [])], [...records]);
+  const payload = createTimeRecordPayload(merged, "pending-preview-save");
+  const knownIds = new Set(payload.records.map((record) => record.recordId));
+  const mergedAutomaticIds = new Set(currentEnvelope?.automaticRecordIds ?? []);
+  for (const recordId of automaticRecordIds) {
+    if (!knownIds.has(recordId)) throw new Error("自動受信した実測記録IDが保存内容と一致しません。");
+    mergedAutomaticIds.add(recordId);
+  }
+  const serialized = JSON.stringify({
+    version: 1,
+    status: "received-unconfirmed",
+    records: payload.records,
+    automaticRecordIds: [...mergedAutomaticIds].sort(),
+  });
+  storage.setItem(storageKey, serialized);
+  if (storage.getItem(storageKey) !== serialized) {
+    throw new Error("未確定の実測記録を端末に保持できませんでした。");
+  }
+  return Object.freeze(payload.records);
+}
+
+function parsePendingTimeRecordPreviewEnvelope(raw: string | null) {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isObject(value) || value.version !== 1 || value.status !== "received-unconfirmed"
+      || !Array.isArray(value.records) || !Array.isArray(value.automaticRecordIds)) return null;
+    const keys = Object.keys(value);
+    if (keys.length !== 4
+      || keys.some((key) => !["version", "status", "records", "automaticRecordIds"].includes(key))) return null;
+    const payload = parseTimeRecordPayload({
+      protocol: TIME_RECORD_PROTOCOL,
+      requestId: "pending-preview-validation",
+      records: value.records,
+    });
+    if (!payload) return null;
+    const recordIds = new Set(payload.records.map((record) => record.recordId));
+    const automaticRecordIds: string[] = [];
+    const seen = new Set<string>();
+    for (const recordId of value.automaticRecordIds) {
+      if (typeof recordId !== "string" || !recordIds.has(recordId) || seen.has(recordId)) return null;
+      seen.add(recordId);
+      automaticRecordIds.push(recordId);
+    }
+    return Object.freeze({
+      records: Object.freeze(payload.records),
+      automaticRecordIds: Object.freeze(automaticRecordIds),
+    });
+  } catch {
+    return null;
+  }
+}
+
+export function clearPendingTimeRecordPreview(
+  storage: Pick<Storage, "removeItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_PREVIEW_BASE_KEY,
+) {
+  storage.removeItem(storageKey);
+}
+
 export function formatTimeRecordDuration(totalSeconds: number) {
   const seconds = Math.max(0, Math.floor(totalSeconds));
   const hours = Math.floor(seconds / 3600);
@@ -120,19 +215,88 @@ export function formatTimeRecordDuration(totalSeconds: number) {
 export function acknowledgeImportedTimeRecords(
   records: readonly TimeRecordPreview[],
   timeoutMs = 4_000,
+  channel: TimeRecordMessageChannel = window,
 ): Promise<void> {
   const requestId = `time-import-ack-${crypto.randomUUID()}`;
   const payload = createTimeRecordPayload(records, requestId);
+  const attempts = 2;
+  const attemptTimeoutMs = Math.max(250, Math.floor(timeoutMs / attempts));
+  return retryAcknowledgement(payload, attempts, attemptTimeoutMs, channel);
+}
+
+export function loadPendingTimeRecordAcknowledgement(
+  storage: Pick<Storage, "getItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_ACK_BASE_KEY,
+): readonly TimeRecordPreview[] {
+  const raw = storage.getItem(storageKey);
+  if (raw === null) return Object.freeze([]);
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!isObject(value) || value.version !== 1 || !Array.isArray(value.records)) return Object.freeze([]);
+    const payload = parseTimeRecordPayload({
+      protocol: TIME_RECORD_PROTOCOL,
+      requestId: "pending-ack-validation",
+      records: value.records,
+    });
+    return payload ? Object.freeze(payload.records) : Object.freeze([]);
+  } catch {
+    return Object.freeze([]);
+  }
+}
+
+export function savePendingTimeRecordAcknowledgement(
+  records: readonly TimeRecordPreview[],
+  storage: Pick<Storage, "getItem" | "setItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_ACK_BASE_KEY,
+) {
+  const payload = createTimeRecordPayload(records, "pending-ack-save");
+  const serialized = JSON.stringify({ version: 1, records: payload.records });
+  storage.setItem(storageKey, serialized);
+  if (storage.getItem(storageKey) !== serialized) {
+    throw new Error("拡張機能への完了通知待ち記録を端末に保持できませんでした。");
+  }
+}
+
+export function clearPendingTimeRecordAcknowledgement(
+  storage: Pick<Storage, "removeItem"> = window.localStorage,
+  storageKey = TIME_RECORD_PENDING_ACK_BASE_KEY,
+) {
+  storage.removeItem(storageKey);
+}
+
+async function retryAcknowledgement(
+  payload: TimeRecordPayload,
+  attempts: number,
+  timeoutMs: number,
+  channel: TimeRecordMessageChannel,
+) {
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      await sendAcknowledgement(payload, timeoutMs, channel);
+      return;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error("拡張機能へ取込完了を通知できませんでした。");
+    }
+  }
+  throw lastError ?? new Error("拡張機能へ取込完了を通知できませんでした。");
+}
+
+function sendAcknowledgement(
+  payload: TimeRecordPayload,
+  timeoutMs: number,
+  channel: TimeRecordMessageChannel,
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    const timeout = window.setTimeout(() => {
+    const timeout = channel.setTimeout(() => {
       cleanup();
-      reject(new Error("拡張機能への取込完了通知がタイムアウトしました。"));
-    }, timeoutMs);
+      reject(new Error("拡張機能への取込完了通知がタイムアウトしました（受信ブリッジまたはService Worker応答待ち）。"));
+    }, timeoutMs) as number;
     const receiveResult = (event: MessageEvent) => {
-      if (event.source !== window || event.origin !== window.location.origin
+      if (event.source !== channel || event.origin !== channel.location.origin
         || event.data?.source !== TIME_RECORD_ACK_RESULT_SOURCE
         || event.data?.type !== TIME_RECORD_ACK_RESULT_TYPE
-        || event.data?.requestId !== requestId) return;
+        || event.data?.requestId !== payload.requestId) return;
       cleanup();
       if (event.data.ok === true) resolve();
       else reject(new Error(
@@ -142,15 +306,15 @@ export function acknowledgeImportedTimeRecords(
       ));
     };
     function cleanup() {
-      window.clearTimeout(timeout);
-      window.removeEventListener("message", receiveResult);
+      channel.clearTimeout(timeout);
+      channel.removeEventListener("message", receiveResult);
     }
-    window.addEventListener("message", receiveResult);
-    window.postMessage({
+    channel.addEventListener("message", receiveResult);
+    channel.postMessage({
       source: TIME_RECORD_ACK_SOURCE,
       type: TIME_RECORD_ACK_TYPE,
       payload,
-    }, window.location.origin);
+    }, channel.location.origin);
   });
 }
 

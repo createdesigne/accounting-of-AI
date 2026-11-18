@@ -20,7 +20,10 @@ test("settlement UI exposes preview, confirmation, statements, journals and revi
   assert.match(screen, /手入力/);
   assert.match(screen, /自動計測/);
   assert.match(screen, /企業会計の財務諸表ではなく/);
+  assert.match(screen, /weekly-disclosure/);
+  assert.doesNotMatch(screen, /記録ID:/);
   assert.match(css, /max-width: 390px/);
+  assert.match(css, /weekly-disclosure/);
 });
 
 test("settlement UI contains no Gemini or external API implementation", () => {

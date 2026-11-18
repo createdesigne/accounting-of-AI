@@ -253,6 +253,40 @@ test("a failed analysis is retained without changing accounting", async () => {
   assert.equal(resolveWeeklyAnalysisState(context.record, loadWeeklyAnalysisStore(context.storage), context.conversation).analysisStatus, "failed");
 });
 
+test("a partial analysis survives reload, permits human review, and leaves accounting unchanged", async () => {
+  const context = await setupFullRecord();
+  const complete = fixtureResponse(context.request);
+  assert.ok(complete.analysis);
+  const partial = parseWeeklyAnalysisResponseV1({
+    ...complete,
+    analysisStatus: "partial",
+    analysis: { ...complete.analysis, accountCandidate: null },
+    unresolvedFields: [{ field: "analysis.accountCandidate", reason: "missing-evidence" }],
+  });
+  const settlementBefore = buildWeeklySettlement(loadWeeklyRecordStore(context.storage).records, new Date("2026-11-10T03:00:00.000Z"));
+  await queueWeeklyAnalysisRequest(context.request, context);
+  await acceptWeeklyAnalysisResponse(partial, context);
+  const reloaded = loadWeeklyAnalysisStore(context.storage);
+  assert.equal(resolveWeeklyAnalysisState(context.record, reloaded, context.conversation).analysisStatus, "partial");
+  assert.equal(reloaded.entries[0].response?.analysis?.accountCandidate, null);
+  assert.deepEqual(reloaded.entries[0].response?.unresolvedFields, [{ field: "analysis.accountCandidate", reason: "missing-evidence" }]);
+  await saveWeeklyAnalysisReview({
+    schemaVersion: 1,
+    analysisId: partial.analysisId,
+    recordId: context.record.id,
+    thoughtReceiptId: context.record.links.thoughtReceiptId,
+    reviewedAt: "2026-11-10T03:00:00.000Z",
+    fields: {
+      activityCategory: "壁打ち", accountCandidate: "思考探究費", accountingDispositionCandidate: "expense",
+      aiRole: null, collaborationSummary: null, initiative: 75, reasoning: 75,
+      criticalJudgment: 50, thinkingChange: null, discovery: null,
+      reviewerNote: "勘定科目は本人が会話と活動内容を確認して分類",
+    },
+  }, context);
+  assert.equal(loadWeeklyAnalysisReviewStore(context.storage).reviews[0].fields.accountCandidate, "思考探究費");
+  assert.deepEqual(buildWeeklySettlement(loadWeeklyRecordStore(context.storage).records, new Date("2026-11-10T03:00:00.000Z")), settlementBefore);
+});
+
 test("a person's corrections are saved separately without overwriting AI output, notes, or accounting", async () => {
   const context = await setupFullRecord();
   const response = fixtureResponse(context.request);

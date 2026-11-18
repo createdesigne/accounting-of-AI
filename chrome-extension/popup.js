@@ -5,11 +5,18 @@ const WEB_APP_URLS = {
   local: "http://localhost:5173/accounting-of-AI/",
   research: "http://localhost:5174/accounting-of-AI/",
 };
+const DESTINATION_STORAGE_KEY = "selectedWebAppDestinationV1";
+const ALLOWED_DESTINATIONS = new Set(Object.keys(WEB_APP_URLS));
+const HOST_PERMISSION_BY_DESTINATION = Object.freeze({
+  research: "http://localhost:5174/*",
+});
 const timeRecordProtocol = globalThis.TimeRecordProtocol;
 
 const button = document.getElementById("createReceipt");
 const statusText = document.getElementById("status");
 const destination = document.getElementById("destination");
+const destinationReady = restoreDestination();
+destination?.addEventListener?.("change", persistDestination);
 const extensionVersion = globalThis.chrome?.runtime?.getManifest?.().version || "不明";
 const versionText = document.getElementById("version");
 if (versionText) versionText.textContent = `バージョン ${extensionVersion}`;
@@ -19,21 +26,38 @@ const trackingStop = document.getElementById("trackingStop");
 const trackingStatus = document.getElementById("trackingStatus");
 const timeLedgerTransfer = document.getElementById("timeLedgerTransfer");
 const timeTransferStatus = document.getElementById("timeTransferStatus");
+const timeManualCopy = document.getElementById("timeManualCopy");
+const timeTransferText = document.getElementById("timeTransferText");
+const conversationDiagnostic = document.getElementById("conversationDiagnostic");
+const diagnosticStatus = document.getElementById("diagnosticStatus");
 
 if (trackingStart && trackingStop && trackingStatus && chrome.runtime?.sendMessage) {
   trackingStart.addEventListener("click", () => updateTracking(true));
   trackingStop.addEventListener("click", () => updateTracking(false));
   refreshTracking();
+  if (typeof setInterval === "function") {
+    const refreshTimer = setInterval(refreshTracking, 1000);
+    globalThis.addEventListener?.("unload", () => clearInterval(refreshTimer), { once: true });
+  }
 }
 
 if (timeLedgerTransfer && timeTransferStatus && timeRecordProtocol && chrome.runtime?.sendMessage) {
   timeLedgerTransfer.addEventListener("click", transferFinalizedTimeRecords);
 }
 
+if (timeManualCopy && timeTransferStatus && timeTransferText && timeRecordProtocol && chrome.runtime?.sendMessage) {
+  timeManualCopy.addEventListener("click", copyFinalizedTimeRecords);
+}
+
+if (conversationDiagnostic && diagnosticStatus) {
+  conversationDiagnostic.addEventListener("click", runConversationDiagnostic);
+}
+
 button.addEventListener("click", async () => {
   setStatus("会話を読み取っています...", true);
 
   try {
+    await destinationReady;
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab?.id || !tab.url) {
       throw new Error("現在のタブを取得できませんでした。");
@@ -63,7 +87,7 @@ button.addEventListener("click", async () => {
     setStatus("Webアプリを開きました。", false);
   } catch (error) {
     console.error(error);
-    setStatus(error instanceof Error ? error.message : "会話データを送れませんでした。", false);
+    setStatus(formatAccessError(error, "会話データを送れませんでした。"), false);
   }
 });
 
@@ -74,7 +98,13 @@ function setStatus(message, busy) {
 }
 
 async function refreshTracking() {
-  await sendTrackingMessage({ type: "tracking:get" });
+  if (refreshTracking.pending) return;
+  refreshTracking.pending = true;
+  try {
+    await sendTrackingMessage({ type: "tracking:get" });
+  } finally {
+    refreshTracking.pending = false;
+  }
 }
 
 async function updateTracking(enabled) {
@@ -89,6 +119,9 @@ async function sendTrackingMessage(message) {
     const result = await chrome.runtime.sendMessage(message);
     if (!result?.ok) throw new Error(result?.message || "計測状態を確認できませんでした。");
     renderTracking(result);
+    if (result.watcherIssue?.message && result.enabled) {
+      trackingStatus.textContent = result.watcherIssue.message;
+    }
   } catch (error) {
     trackingStatus.textContent = error instanceof Error ? error.message : "計測状態を確認できませんでした。";
     trackingStart.disabled = false;
@@ -99,12 +132,14 @@ async function sendTrackingMessage(message) {
 function renderTracking(state) {
   trackingStart.disabled = state.enabled;
   trackingStop.disabled = !state.enabled;
+  const session = formatDuration(state.sessionSeconds);
+  const finalized = formatDuration(state.finalizedSeconds);
   if (!state.enabled) {
-    trackingStatus.textContent = `停止中（保存済み ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = `停止中（確定済み ${finalized}）`;
   } else if (state.active) {
-    trackingStatus.textContent = `計測中（合計 ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = `計測中（今回 ${session}／確定済み ${finalized}／合計 ${formatDuration(state.totalSeconds)}）`;
   } else {
-    trackingStatus.textContent = `待機中：ChatGPTで操作すると計測します（合計 ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = `待機中：ChatGPTで操作すると計測します（今回 ${session}／確定済み ${finalized}／合計 ${formatDuration(state.totalSeconds)}）`;
   }
 }
 
@@ -112,6 +147,7 @@ async function transferFinalizedTimeRecords() {
   timeLedgerTransfer.disabled = true;
   timeTransferStatus.textContent = "確定済みの利用時間を準備しています…";
   try {
+    await destinationReady;
     const destinationName = destination.value;
     const response = await chrome.runtime.sendMessage({
       type: "time-records:getFinalized",
@@ -130,14 +166,79 @@ async function transferFinalizedTimeRecords() {
       throw new Error("許可されていない送信先です。");
     }
     const targetTab = await findOrCreateTimeDestination(destinationName, targetUrl);
-    await deliverTimePayload(targetTab.id, response.payload);
+    const targetAccess = await waitForTimeDestination(targetTab.id, destinationName);
+    await deliverTimePayload(targetTab.id, response.payload, destinationName, targetAccess);
     timeTransferStatus.textContent = `${response.payload.records.length}件の利用時間を確認画面へ渡しました。まだ帳簿には保存されていません。`;
     if (chrome.tabs.update) await chrome.tabs.update(targetTab.id, { active: true });
   } catch (error) {
     console.error(error);
-    timeTransferStatus.textContent = error instanceof Error ? error.message : "利用時間を連携できませんでした。";
+    timeTransferStatus.textContent = formatTimeTransferError(error);
   } finally {
     timeLedgerTransfer.disabled = false;
+  }
+}
+
+async function copyFinalizedTimeRecords() {
+  timeManualCopy.disabled = true;
+  timeTransferStatus.textContent = "確定済みの実測記録を準備しています…";
+  try {
+    await destinationReady;
+    const response = await chrome.runtime.sendMessage({
+      type: "time-records:getFinalized",
+      destination: destination.value,
+    });
+    if (!response?.ok) throw new Error(response?.message || "利用時間を準備できませんでした。");
+    const validation = timeRecordProtocol.validatePayload(response.payload);
+    if (!validation.ok) throw new Error(validation.error);
+    if (response.payload.records.length === 0) {
+      timeTransferText.value = "";
+      timeTransferText.hidden = true;
+      timeTransferStatus.textContent = "コピーできる確定済みの利用時間はまだありません。";
+      return;
+    }
+    const serialized = JSON.stringify(response.payload);
+    timeTransferText.value = serialized;
+    let copied = false;
+    try {
+      await navigator.clipboard?.writeText?.(serialized);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+    if (!copied) {
+      timeTransferText.hidden = false;
+      timeTransferText.focus?.();
+      timeTransferText.select?.();
+      try { copied = document.execCommand?.("copy") === true; } catch { copied = false; }
+    }
+    timeTransferText.hidden = copied;
+    timeTransferStatus.textContent = copied
+      ? `${response.payload.records.length}件の実測記録をコピーしました。アプリの「手動連携」に貼り付けて内容を確認してください。元の計測記録は保持されています。`
+      : "自動コピーできませんでした。下の手動連携用データを選択してコピーしてください。元の計測記録は保持されています。";
+  } catch (error) {
+    timeTransferStatus.textContent = error instanceof Error ? error.message : "実測記録をコピーできませんでした。";
+  } finally {
+    timeManualCopy.disabled = false;
+  }
+}
+
+async function restoreDestination() {
+  try {
+    const stored = await chrome.storage?.local?.get?.(DESTINATION_STORAGE_KEY);
+    const value = stored?.[DESTINATION_STORAGE_KEY];
+    if (destination && ALLOWED_DESTINATIONS.has(value)) destination.value = value;
+  } catch (error) {
+    console.error("送信先を復元できませんでした。", error);
+  }
+}
+
+async function persistDestination() {
+  const value = destination?.value;
+  if (!ALLOWED_DESTINATIONS.has(value)) return;
+  try {
+    await chrome.storage?.local?.set?.({ [DESTINATION_STORAGE_KEY]: value });
+  } catch (error) {
+    console.error("送信先を保存できませんでした。", error);
   }
 }
 
@@ -153,19 +254,124 @@ async function findOrCreateTimeDestination(destinationName, targetUrl) {
   return created;
 }
 
-async function deliverTimePayload(tabId, payload) {
+async function waitForTimeDestination(tabId, destinationName) {
+  let lastAccess = null;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    lastAccess = await inspectTimeDestination(tabId, destinationName);
+    if (lastAccess.urlMatches && lastAccess.status !== "loading") return lastAccess;
+    if (lastAccess.url && !lastAccess.urlMatches && lastAccess.status !== "loading") {
+      throw timeDeliveryError("target-url", lastAccess, "選択した送信先とは異なるURLのタブです。");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw timeDeliveryError("target-loading", lastAccess, "送信先タブの読み込みが完了しませんでした。");
+}
+
+async function inspectTimeDestination(tabId, destinationName) {
+  const tab = await chrome.tabs.get(tabId);
+  const url = typeof tab?.url === "string" && tab.url
+    ? tab.url
+    : typeof tab?.pendingUrl === "string" ? tab.pendingUrl : "";
+  const permissionPattern = HOST_PERMISSION_BY_DESTINATION[destinationName] || null;
+  let hasHostPermission = null;
+  if (permissionPattern && chrome.permissions?.contains) {
+    try {
+      hasHostPermission = await chrome.permissions.contains({ origins: [permissionPattern] });
+    } catch {
+      hasHostPermission = null;
+    }
+  }
+  return Object.freeze({
+    tabId,
+    url,
+    status: typeof tab?.status === "string" ? tab.status : "unknown",
+    urlMatches: timeRecordProtocol.isDestinationUrl(url, destinationName),
+    permissionPattern,
+    hasHostPermission,
+  });
+}
+
+async function deliverTimePayload(tabId, payload, destinationName, initialAccess) {
   let lastError;
+  let lastStage = "send-message";
+  let lastAccess = initialAccess;
+  let recoveryError = null;
+  let recoveryStage = null;
+  let injectionAttempts = 0;
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
       const response = await chrome.tabs.sendMessage(tabId, { type: "time-records:deliver", payload });
       if (response?.ok) return;
       lastError = new Error(response?.message || "Webアプリが連携データを受け取れませんでした。");
+      lastStage = "send-message-response";
     } catch (error) {
       lastError = error;
+      lastStage = "send-message";
+      if (destinationName === "research" && isMissingReceiverError(error)
+        && injectionAttempts < 3 && attempt % 10 === 0) {
+        injectionAttempts += 1;
+        lastAccess = await inspectTimeDestination(tabId, destinationName);
+        if (!lastAccess.urlMatches || lastAccess.status === "loading") {
+          lastStage = lastAccess.status === "loading" ? "target-loading" : "target-url";
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          continue;
+        }
+        if (lastAccess.hasHostPermission === false) {
+          throw timeDeliveryError("host-permission", lastAccess, "対象URLへの実効ホスト権限がありません。");
+        }
+        try {
+          await injectTimeRecordBridge(tabId);
+        } catch (injectionError) {
+          lastError = injectionError;
+          lastStage = "script-injection";
+          recoveryError = injectionError;
+          recoveryStage = lastStage;
+        }
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
-  throw lastError instanceof Error ? lastError : new Error("Webアプリへの接続がタイムアウトしました。");
+  lastAccess = await inspectTimeDestination(tabId, destinationName).catch(() => lastAccess);
+  const finalError = recoveryError || lastError;
+  const finalStage = recoveryStage || lastStage;
+  throw timeDeliveryError(finalStage, lastAccess, finalError instanceof Error ? finalError.message : "受信処理から応答がありません。");
+}
+
+async function injectTimeRecordBridge(tabId) {
+  if (!chrome.scripting?.executeScript) {
+    throw new Error("受信処理を復旧できないChrome環境です。");
+  }
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["timeRecordProtocol.js", "timeRecordBridge.js"],
+  });
+}
+
+function isMissingReceiverError(error) {
+  const detail = error instanceof Error ? error.message : String(error || "");
+  return /receiving end does not exist|could not establish connection|message port closed/i.test(detail);
+}
+
+function timeDeliveryError(stage, access, detail) {
+  const url = access?.url || "取得不可";
+  const permission = access?.hasHostPermission === true
+    ? "あり"
+    : access?.hasHostPermission === false ? "なし" : "確認不可";
+  const safeDetail = String(detail || "不明なエラー").replace(/[\r\n\u0000-\u001f\u007f]/g, " ").slice(0, 240);
+  return new Error(
+    `研究用アプリへの連携に失敗しました（段階: ${stage}／タブID: ${access?.tabId ?? "不明"}／URL: ${url}／ホスト権限: ${permission}）。${safeDetail} 確定済みの利用時間は保持されています。`,
+  );
+}
+
+function formatTimeTransferError(error) {
+  const detail = error instanceof Error ? error.message : String(error || "");
+  if (/cannot access contents|must request permission|not allowed to access|missing host permission/i.test(detail)) {
+    return `${detail} Chromeで本拡張の「詳細」→「サイトへのアクセス」を開き、localhost:5174が許可されているか確認してください。「すべてのサイト」の許可は不要です。`;
+  }
+  if (isMissingReceiverError(error)) {
+    return `研究用アプリの受信処理が見つかりません。拡張機能と ${WEB_APP_URLS.research} のタブを再読み込みしてから再送してください。確定済みの利用時間は保持されています。`;
+  }
+  return detail || "利用時間を連携できませんでした。確定済みの利用時間は保持されています。";
 }
 
 function formatDuration(totalSeconds) {
@@ -174,6 +380,40 @@ function formatDuration(totalSeconds) {
   const minutes = Math.floor((seconds % 3600) / 60);
   const rest = seconds % 60;
   return hours ? `${hours}時間${minutes}分${rest}秒` : `${minutes}分${rest}秒`;
+}
+
+function formatAccessError(error, fallback) {
+  const detail = error instanceof Error ? error.message : String(error || "");
+  if (/cannot access contents|must request permission|not allowed to access|missing host permission/i.test(detail)) {
+    return "現在、ChatGPTへのサイトアクセス権限がありません。Chromeの拡張機能管理画面で「AI Thought Receipt Bridge」→「詳細」→「サイトへのアクセス」を開き、chatgpt.com（またはchat.openai.com）で許可してから会話ページを再読み込みしてください。「すべてのサイト」の許可は不要です。";
+  }
+  if (/receiving end does not exist|could not establish connection/i.test(detail)) {
+    return "現在、拡張機能のページ接続を確認できません。拡張機能と対象ページを再読み込みしてから、もう一度お試しください。保存済みデータは変更されていません。";
+  }
+  return detail || fallback;
+}
+
+async function runConversationDiagnostic() {
+  conversationDiagnostic.disabled = true;
+  diagnosticStatus.textContent = "会話本文を含めずに、取得段階を確認しています…";
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id || !tab.url || inferAiService(tab.url) === "その他") {
+      throw new Error("対応するAIの会話ページを開いてから診断してください。");
+    }
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractConversationFromPage,
+      args: [{ diagnosticOnly: true }],
+    });
+    const diagnostic = result?.result?.diagnostic;
+    if (!diagnostic || diagnostic.schemaVersion !== 1) throw new Error("診断結果を取得できませんでした。");
+    diagnosticStatus.textContent = `診断（本文なし）：注入成功／サービス ${diagnostic.aiService}／現在形式の話者 ${diagnostic.currentRoleMarkers}件（本人 ${diagnostic.currentUserMarkers}・AI ${diagnostic.currentAssistantMarkers}）／本文候補 ${diagnostic.bodyCandidates}件（内容あり ${diagnostic.nonEmptyBodies}）／取得結果 ${diagnostic.extractedMessages}件（本人 ${diagnostic.extractedUserMessages}・AI ${diagnostic.extractedAssistantMessages}）／旧形式外枠 ${diagnostic.legacyTurnWrappers}件。`;
+  } catch (error) {
+    diagnosticStatus.textContent = formatAccessError(error, "会話取得を診断できませんでした。");
+  } finally {
+    conversationDiagnostic.disabled = false;
+  }
 }
 
 function normalizeConversation(extracted, tab) {
@@ -219,7 +459,7 @@ function inferAiService(url) {
 }
 
 // Keep this function self-contained: Chrome serializes it into the active page.
-async function extractConversationFromPage() {
+async function extractConversationFromPage(options) {
   const services = {
     "chatgpt.com": "ChatGPT", "chat.openai.com": "ChatGPT", "claude.ai": "Claude",
     "gemini.google.com": "Gemini", "perplexity.ai": "Perplexity", "www.perplexity.ai": "Perplexity",
@@ -239,7 +479,8 @@ async function extractConversationFromPage() {
     ChatGPT: {
       user: explicitRoles.user + ", article[data-turn='user'], [data-testid^='conversation-turn-'][data-turn='user']",
       assistant: explicitRoles.assistant + ", article[data-turn='assistant'], [data-testid^='conversation-turn-'][data-turn='assistant']",
-      userBody: "[data-testid='user-message'], .whitespace-pre-wrap", assistantBody: ".markdown, [data-message-content]",
+      userBody: "[data-testid='user-message'], [data-message-author-role='user'], .whitespace-pre-wrap",
+      assistantBody: "[data-message-author-role='assistant'], [data-message-content], .markdown, .prose",
     },
     Claude: {
       user: "[data-testid='user-message'], [data-message-author-role='user']",
@@ -267,6 +508,9 @@ async function extractConversationFromPage() {
     if (messages.length || attempt === 4) break;
     await new Promise(resolve => setTimeout(resolve, 300));
   }
+  if (options?.diagnosticOnly === true) {
+    return { diagnostic: buildDiagnostic(messages) };
+  }
   return {
     aiService,
     url: window.location.href,
@@ -275,6 +519,12 @@ async function extractConversationFromPage() {
   };
 
   function readMessages() {
+    if (aiService === "ChatGPT") {
+      const roleMessages = readCurrentChatGptMessages();
+      if (roleMessages !== null) return roleMessages;
+      const turnMessages = readChatGptTurns();
+      if (turnMessages !== null) return turnMessages;
+    }
     const nodes = Array.from(scope.querySelectorAll(selector));
     const nodeSet = new Set(nodes);
     return nodes.filter(node => {
@@ -297,6 +547,98 @@ async function extractConversationFromPage() {
       const text = (outerBodies.length ? outerBodies : [node]).map(readBodyText).filter(Boolean).join("\n\n");
       return { role, text };
     }).filter(message => message.text.length > 0);
+  }
+
+  function readCurrentChatGptMessages() {
+    const markerSelector = "[data-conversation-role='user'], [data-conversation-role='assistant']";
+    const markers = Array.from(scope.querySelectorAll(markerSelector)).filter(marker => (
+      isVisible(marker) && !marker.closest(navigation)
+    ));
+    if (!markers.length) return null;
+    return markers.map(marker => {
+      const role = marker.getAttribute("data-conversation-role");
+      const body = findCurrentChatGptBody(marker);
+      const text = body ? readBodyText(body) : "";
+      return text ? { role, text } : null;
+    }).filter(Boolean);
+  }
+
+  function findCurrentChatGptBody(marker) {
+    const sibling = marker.nextElementSibling;
+    if (sibling && isVisible(sibling) && !sibling.matches("input, textarea, [contenteditable='true']")) return sibling;
+    const parent = marker.parentElement;
+    if (!parent) return null;
+    return Array.from(parent.children).find(child => (
+      child !== marker && isVisible(child)
+      && !child.matches("[data-conversation-role], input, textarea, [contenteditable='true']")
+    )) || null;
+  }
+
+  function readChatGptTurns() {
+    const turnSelector = "[data-testid^='conversation-turn-']";
+    const turns = Array.from(scope.querySelectorAll(turnSelector)).filter(turn => {
+      if (!isVisible(turn) || turn.closest(navigation)) return false;
+      return !turn.parentElement?.closest(turnSelector);
+    });
+    if (!turns.length) return null;
+    return turns.map(turn => {
+      const role = findChatGptTurnRole(turn);
+      if (!role) return null;
+      const bodySelector = role === "user" ? config.userBody : config.assistantBody;
+      const bodies = Array.from(turn.querySelectorAll(bodySelector)).filter(isVisible);
+      const outerBodies = bodies.filter(body => !bodies.some(parent => parent !== body && parent.contains(body)));
+      const text = outerBodies.map(readBodyText).filter(Boolean).join("\n\n");
+      return text ? { role, text } : null;
+    }).filter(Boolean);
+  }
+
+  function findChatGptTurnRole(turn) {
+    const roleAttributes = ["data-turn", "data-message-author-role", "data-author"];
+    for (const attribute of roleAttributes) {
+      const value = String(turn.getAttribute(attribute) || "").toLowerCase();
+      if (value === "user" || value === "assistant") return value;
+    }
+    const descendantRoles = new Set(Array.from(turn.querySelectorAll("[data-message-author-role]"))
+      .map(node => String(node.getAttribute("data-message-author-role") || "").toLowerCase())
+      .filter(value => value === "user" || value === "assistant"));
+    if (descendantRoles.size === 1) return Array.from(descendantRoles)[0];
+    if (descendantRoles.size > 1) return null;
+
+    // Current ChatGPT turns expose the speaker through an accessibility heading
+    // even when data-turn/data-message-author-role is absent. Only accept exact,
+    // known speaker labels; never infer a role from turn order or CSS position.
+    const userLabels = new Set(["you", "you said", "user", "user said", "あなた", "あなたの発言", "ユーザー", "ユーザーの発言"]);
+    const assistantLabels = new Set(["chatgpt", "chatgpt said", "chatgptの発言", "chatgpt の発言", "assistant", "assistant said", "アシスタント", "アシスタントの発言"]);
+    const markers = Array.from(turn.querySelectorAll("h1, h2, h3, h4, h5, h6, [aria-label]"));
+    for (const marker of markers) {
+      if (marker.closest("[data-message-content], [data-testid='user-message'], .markdown, .prose")) continue;
+      const raw = marker.getAttribute("aria-label") || marker.textContent || "";
+      const label = raw.replace(/\s+/g, " ").trim().replace(/[：:]$/, "").trim().toLowerCase();
+      if (userLabels.has(label)) return "user";
+      if (assistantLabels.has(label)) return "assistant";
+    }
+    return null;
+  }
+
+  function buildDiagnostic(extracted) {
+    const currentMarkers = Array.from(scope.querySelectorAll("[data-conversation-role='user'], [data-conversation-role='assistant']"))
+      .filter(marker => isVisible(marker) && !marker.closest(navigation));
+    const bodies = currentMarkers.map(findCurrentChatGptBody).filter(Boolean);
+    return {
+      schemaVersion: 1,
+      aiService,
+      readyState: document.readyState,
+      currentRoleMarkers: currentMarkers.length,
+      currentUserMarkers: currentMarkers.filter(marker => marker.getAttribute("data-conversation-role") === "user").length,
+      currentAssistantMarkers: currentMarkers.filter(marker => marker.getAttribute("data-conversation-role") === "assistant").length,
+      bodyCandidates: bodies.length,
+      nonEmptyBodies: bodies.filter(body => readBodyText(body).length > 0).length,
+      legacyTurnWrappers: scope.querySelectorAll("[data-testid^='conversation-turn-']").length,
+      legacyAuthorMarkers: scope.querySelectorAll("[data-message-author-role='user'], [data-message-author-role='assistant']").length,
+      extractedMessages: extracted.length,
+      extractedUserMessages: extracted.filter(message => message.role === "user").length,
+      extractedAssistantMessages: extracted.filter(message => message.role === "assistant").length,
+    };
   }
 
   function isVisible(element) {

@@ -209,7 +209,6 @@ function sameImportedContent(
     privacy: record.privacy,
     taskId: record.taskId,
     activityCategory: record.activityCategory,
-    accountingDisposition: record.accountingDisposition,
     selfReflection: record.selfReflection,
     manualNotes: record.manualNotes,
   });

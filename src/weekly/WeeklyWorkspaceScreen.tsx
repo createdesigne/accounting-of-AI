@@ -35,7 +35,7 @@ export function WeeklyWorkspaceScreen({ view = "home", onNavigate = () => undefi
     onNavigate("settlement");
   }
 
-  if (view === "home") return <WeeklyDashboardScreen onOpenRecords={() => openRecords()} onOpenReflection={openReflection} />;
+  if (view === "home") return <WeeklyDashboardScreen onOpenRecords={() => openRecords()} onOpenSavedRecords={() => openRecords(true)} onOpenReflection={openReflection} />;
   if (view === "journal") return <WeeklyJournalScreen onOpenRecords={() => openRecords(true)} />;
   if (view === "settings") return <WeeklySettingsScreen onOpenRecords={() => openRecords(true)} />;
   if (view === "settlement") return <div className="weekly-workspace">

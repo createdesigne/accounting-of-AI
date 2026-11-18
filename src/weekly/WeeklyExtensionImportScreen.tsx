@@ -7,6 +7,7 @@ import {
   buildMeasuredTimeCandidates,
   extensionConversationFingerprint,
   loadExtensionConversationDraft,
+  selectUnlinkedMeasuredTimeCandidates,
   type MeasuredTimeCandidate,
 } from "../weeklyExtensionImport.ts";
 import {
@@ -41,11 +42,14 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
   const existing = fingerprint
     ? store.records.find((record) => record.sourceEventId === `chrome-conversation:${fingerprint}`) ?? null
     : null;
-  const linkedMeasurements = useMemo(() => new Set(store.records
-    .filter((record) => record.timeSource === "measured" && record.sessionId)
-    .map((record) => record.sessionId as string)), [store.records]);
-  const measurements = snapshot.measurements.filter((item) => !linkedMeasurements.has(item.measurementRecordId)
-    || item.measurementRecordId === existing?.sessionId);
+  const measurements = useMemo(() => (
+    selectUnlinkedMeasuredTimeCandidates(snapshot.measurements, store.records)
+  ), [snapshot.measurements, store.records]);
+  const unusedMeasurementIds = useMemo(
+    () => new Set(measurements.map((item) => item.measurementRecordId)),
+    [measurements],
+  );
+  const usedMeasurements = snapshot.measurements.filter((item) => !unusedMeasurementIds.has(item.measurementRecordId));
   const exactSessionMatches = rawConversation?.measurementSessionId
     ? measurements.filter((item) => item.sessionId === rawConversation.measurementSessionId)
     : [];
@@ -115,12 +119,15 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
   }
 
   return <div className="weekly-extension-screen stack">
-    <section className="weekly-intro-card">
-      <p className="eyebrow">研究用ローカル連携</p>
-      <h2>Chrome拡張の会話と実測時間を関連付ける</h2>
-      <p>計測中に会話を取り込んだ場合は共通セッションIDで候補を絞ります。日付や題名では推測せず、本人が実測時間を確認してから週次活動にします。</p>
-      <button type="button" className="secondary-action" onClick={refresh}>連携データを再読み込み</button>
-    </section>
+    <details className="weekly-intro-card weekly-extension-help" open={!rawConversation}>
+      <summary>Chrome拡張機能との連携方法</summary>
+      <div>
+        <p className="eyebrow">研究用ローカル連携</p>
+        <h2>会話と実測時間を関連付ける</h2>
+        <p>計測中に会話を取り込んだ場合は同じ計測セッションの候補を優先します。日時や題名だけでは推測せず、本人が実測時間を確認してから週次活動にします。</p>
+        <button type="button" className="secondary-action" onClick={refresh}>連携データを再読み込み</button>
+      </div>
+    </details>
 
     {loadError && <p className="weekly-form-message error" role="alert">{loadError}</p>}
 
@@ -130,14 +137,22 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
         <strong>{rawConversation.conversationTitle || "無題の会話"}</strong>
         <p>{rawConversation.aiService || "AIサービス不明"}／取得日時 {rawConversation.capturedAt || "不明"}／{rawConversation.messages?.length ?? 0}メッセージ</p>
         <p className="weekly-muted">会話本文は端末内にあります。ここでは本人がfullを選んで保存し、分析時に別途同意するまでGeminiへ送信しません。</p>
-        {existing && <p className="weekly-import-linked">取り込み済み：{existing.activeSeconds}秒（{existing.links.thoughtReceiptId}）</p>}
-        {rawConversation.measurementSessionId && exactSessionMatches.length === 1 && <p className="weekly-import-linked">同じ計測セッションの時間候補を選択しました。保存前に日時と秒数を確認してください。</p>}
-        {rawConversation.measurementSessionId && exactSessionMatches.length > 1 && <p className="weekly-no-ai-notice">同じセッションIDの時間候補が複数あります。推測で割り振らず、本人が対応する時間を選択してください。</p>}
-        {rawConversation.measurementSessionId && exactSessionMatches.length === 0 && <p className="weekly-no-ai-notice">この会話の計測セッションはまだ時間台帳へ取り込まれていません。先に拡張機能から確定済み時間を連携してください。</p>}
+        {existing && <p className="weekly-import-linked">この会話は{existing.activeSeconds}秒の活動として保存済みです。新規取り込みフォームは表示しません。</p>}
+        {!existing && rawConversation.measurementSessionId && exactSessionMatches.length === 1 && <p className="weekly-import-linked">同じ計測セッションの時間候補を選択しました。保存前に日時と秒数を確認してください。</p>}
+        {!existing && rawConversation.measurementSessionId && exactSessionMatches.length > 1 && <p className="weekly-no-ai-notice">同じ計測に複数の時間候補があります。推測で割り振らず、本人が対応する時間を選択してください。</p>}
+        {!existing && rawConversation.measurementSessionId && exactSessionMatches.length === 0 && <p className="weekly-no-ai-notice">この会話の計測セッションはまだ時間台帳へ取り込まれていません。先に拡張機能から確定済み時間を連携してください。</p>}
       </article>}
+      <div className="weekly-measurement-usage" aria-label="実測時間の使用状況">
+        <article><span>未使用の実測時間</span><strong>{measurements.length}件・{sumSeconds(measurements)}秒</strong><small>これから活動に関連付けられます</small></article>
+        <article className="used"><span>使用済みの実測時間</span><strong>{usedMeasurements.length}件・{sumSeconds(usedMeasurements)}秒</strong><small>保存済み活動に関連付け済みです</small></article>
+      </div>
     </section>
 
-    <section className="weekly-panel" aria-labelledby="extension-link-heading">
+    {existing ? <section className="weekly-panel weekly-existing-import" aria-labelledby="extension-existing-heading">
+      <div className="weekly-section-heading"><span>✓</span><div><p className="eyebrow">保存済み</p><h3 id="extension-existing-heading">活動・分析・本人確認へ進む</h3></div></div>
+      <p>保存済み活動から、Gemini分析、本人による補足・異議、会計区分を確認できます。</p>
+      <button className="primary-action" type="button" onClick={onOpenRecords}>保存済み活動を確認する</button>
+    </section> : <section className="weekly-panel" aria-labelledby="extension-link-heading">
       <div className="weekly-section-heading"><span>2</span><div><p className="eyebrow">本人による対応確認</p><h3 id="extension-link-heading">実測時間と活動を確定</h3></div></div>
       <form className="weekly-form" onSubmit={submit}>
         <label>対応する実測時間<select required value={measurementId} onChange={(event) => { setMeasurementId(event.target.value); setMessage(""); }}>
@@ -149,7 +164,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
         <div className="weekly-form-grid">
           <label>本人確認後の活動テーマ<select value={category} onChange={(event) => setCategory(event.target.value as typeof category)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
           <label>本人確認後の会計区分<select value={disposition} onChange={(event) => setDisposition(event.target.value as AccountingDisposition)}><option value="unclassified">未分類</option><option value="expense">費用</option><option value="asset">成果物資産</option><option value="work-in-progress">仕掛成果物</option></select></label>
-          <label>保存範囲<select value={privacy} onChange={(event) => setPrivacy(event.target.value as WeeklyPrivacyChoice)}><option value="full">full（会話本文と時間）</option><option value="time-only">time-only（時間のみ）</option><option value="off">off（保存しない）</option></select></label>
+          <label>保存範囲<select value={privacy} onChange={(event) => setPrivacy(event.target.value as WeeklyPrivacyChoice)}><option value="full">会話本文と時間を保存</option><option value="time-only">時間のみ保存</option><option value="off">保存しない</option></select></label>
         </div>
         {privacy !== "full" && <p className="weekly-privacy-notice">{privacy === "time-only" ? "会話本文は週次データに保存せず、Gemini分析も実行できません。" : "会話・時間・週次活動を保存しません。"}</p>}
         <label>AIとのやり取りの概要（本人入力）<textarea disabled={privacy !== "full"} value={interactionSummary} onChange={(event) => setInteractionSummary(event.target.value)} /></label>
@@ -161,7 +176,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
         </div>
         {message && <p className="weekly-form-message" role="status">{message}</p>}
       </form>
-    </section>
+    </section>}
   </div>;
 }
 
@@ -187,6 +202,10 @@ function safeLoadWeeklyStore(): WeeklyRecordStoreV1 {
 
 function measurementLabel(item: MeasuredTimeCandidate) {
   return `${item.localDate} ${formatTime(item.startedAt)}〜${formatTime(item.endedAt)}／${item.activeSeconds}秒／${item.provider}`;
+}
+
+function sumSeconds(items: readonly MeasuredTimeCandidate[]) {
+  return items.reduce((total, item) => total + item.activeSeconds, 0);
 }
 
 function formatTime(value: string) {

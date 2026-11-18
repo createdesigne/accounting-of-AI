@@ -42,7 +42,10 @@ const timeRecord = {
       rewrite: async input => ({ text: input.text }),
       analyzeWeekly: async request => {
         analysisCalls += 1;
-        const targets = ['activity-category', 'account-candidate', 'accounting-disposition', 'ai-role', 'collaboration-behavior', 'initiative', 'reasoning', 'critical-judgment', 'thinking-change', 'discovery'];
+        const targets = ['activity-category', 'account-candidate', 'accounting-disposition', 'ai-role', 'collaboration-behavior', 'thinking-change', 'discovery'];
+        const quote = request.messages[0].text;
+        const metricEvidence = [{ conversationId: request.conversationId, messageIndex: 0, utteranceId: `${request.conversationId}:message:0`, speaker: request.messages[0].role, quote, observedFeature: '本人の比較と判断を確認', source: 'observed_behavior' }];
+        const metric = score => ({ score, status: 'confirmed', reason: '会話内行動を確認', rubricLevel: score, evidence: metricEvidence, unconfirmed: [], evidenceSufficiency: 'high' });
         return createWeeklySuccessResponse(request, {
           activityCategory: '壁打ち',
           accountCandidate: '思考探究費',
@@ -51,10 +54,13 @@ const timeRecord = {
           collaborationBehaviors: [{ kind: 'comparison', description: 'AIが比較軸を示し、本人が採否を判断した' }],
           initiative: 75,
           reasoning: 75,
-          criticalJudgment: 50,
+          independence: 50,
+          metricAssessments: { initiative: metric(75), reasoning: metric(75), independence: { ...metric(50), deliberation: metric(75), finalDecision: metric(50) } },
+          taskComplexity: { level: 'medium', reason: '比較判断', considerationFactors: '複数案', uncertainty: '一部あり', reasoningProcess: '比較と確認' },
+          subjectiveDifficulty: { level: 'not_provided', source: 'self_report', note: null },
           thinkingChange: '速度だけでなく検証可能性も確認した',
           discovery: '比較軸を先に決めると判断しやすい',
-          evidence: targets.map(target => ({ target, conversationId: request.conversationId, messageIndex: 0, quote: request.messages[0].text })),
+          evidence: targets.map(target => ({ target, conversationId: request.conversationId, messageIndex: 0, quote })),
         }, { model: selectedModel, analysisId: `browser-flow:${request.requestId}`, now: new Date('2026-11-16T03:00:00Z') });
       },
     };
@@ -120,14 +126,14 @@ const timeRecord = {
     assert.equal(analysisCalls, 1);
     const review = record.locator('details.weekly-analysis-review');
     await review.locator('summary').click();
-    await review.getByLabel('批判的判断').selectOption('75');
-    await review.getByLabel('本人確認メモ').fill('会話を確認して本人が修正');
-    await review.getByRole('button', { name: '本人の確認内容を別保存', exact: true }).click();
-    await record.getByText('本人の確認・修正内容をAI分析とは別に保存しました。', { exact: true }).waitFor();
+    await review.getByLabel('本人による補足（self_report）').fill('会話を確認して本人が補足');
+    await review.getByLabel('本人の主観的な難しさ').selectOption('medium');
+    await review.getByRole('button', { name: '変更履歴へ追記', exact: true }).click();
+    await record.getByText('本人の補足・異議・除外・再評価を変更履歴として追記しました。AIの元結果は変更していません。', { exact: true }).waitFor();
 
     const primaryNav = page.getByRole('navigation', { name: '画面切り替え' });
     await primaryNav.getByRole('button', { name: '決算', exact: true }).click();
-    const preview = page.getByRole('heading', { name: '週次決算プレビュー', exact: true }).locator('..').locator('..');
+    const preview = page.locator('section[aria-labelledby="weekly-settlement-preview-heading"]');
     assert.match(await preview.textContent(), /12分00秒/);
     assert.match(await preview.textContent(), /仕訳貸借一致/);
     await page.getByRole('button', { name: 'プレビューを確認して確定する', exact: true }).click();
@@ -148,7 +154,7 @@ const timeRecord = {
       weekly: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-records:v1')),
       conversations: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-conversations:v1')),
       analyses: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-analyses:v1')),
-      reviews: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-analysis-reviews:v1')),
+      reviewsV2: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-analysis-review-history:v2')),
       settlements: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-settlements:v1')),
       reflections: JSON.parse(localStorage.getItem('watashi-to-ai-weekly-reflections:v1')),
     }));
@@ -157,7 +163,7 @@ const timeRecord = {
     assert.equal(saved.weekly.records[0].activeSeconds, 720);
     assert.equal(saved.conversations.conversations.length, 1);
     assert.equal(saved.analyses.entries.length, 1);
-    assert.equal(saved.reviews.reviews.length, 1);
+    assert.equal(saved.reviewsV2.revisions.length, 1);
     assert.equal(saved.settlements.weeks[0].revisions.length, 1);
     assert.equal(saved.reflections.reflections[0].selectedActivities.length, 1);
 
@@ -171,7 +177,8 @@ const timeRecord = {
     assert.equal(exported.activities[0].activeSeconds, 720);
     assert.equal(exported.activities[0].timeSource, 'measured');
     assert.equal(exported.activities[0].analysis.origin, 'gemini-api');
-    assert.equal(exported.activities[0].humanReview.criticalJudgment, 75);
+    assert.equal(exported.activities[0].analysis.independence, 50);
+    assert.equal(exported.activities[0].humanReviewV2.subjectiveDifficulty, 'medium');
     assert.equal(JSON.stringify(exported).includes(rawConversation.messages[0].text), false);
     assert.equal(exported.sensitiveTextIncluded, false);
 

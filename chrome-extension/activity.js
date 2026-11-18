@@ -1,6 +1,9 @@
 (function watchChatGptActivity() {
   "use strict";
 
+  const WATCHER_KEY = "__aiThoughtReceiptActivityWatcherV1";
+  if (globalThis[WATCHER_KEY]) return;
+  globalThis[WATCHER_KEY] = true;
   const MIN_SIGNAL_INTERVAL_MS = 1000;
   const ACTIVITY_EVENTS = ["pointerdown", "keydown", "wheel", "touchstart"];
   const LISTENER_OPTIONS = { capture: true, passive: true };
@@ -21,6 +24,12 @@
 
   function onVisibilityChange() {
     if (document.visibilityState === "hidden") signalInactive();
+  }
+
+  function onRuntimeMessage(message, _sender, sendResponse) {
+    if (message?.type !== "tracking:watcherPing") return false;
+    sendResponse({ ok: true });
+    return false;
   }
 
   function sendMessageSafely(message) {
@@ -67,6 +76,11 @@
     }
     window.removeEventListener("blur", signalInactive, LISTENER_OPTIONS);
     document.removeEventListener("visibilitychange", onVisibilityChange);
+    try {
+      globalThis.chrome?.runtime?.onMessage?.removeListener?.(onRuntimeMessage);
+    } catch {
+      // The invalidated extension context is already detached from Chrome.
+    }
   }
 
   for (const eventName of ACTIVITY_EVENTS) {
@@ -74,4 +88,5 @@
   }
   window.addEventListener("blur", signalInactive, LISTENER_OPTIONS);
   document.addEventListener("visibilitychange", onVisibilityChange);
+  globalThis.chrome?.runtime?.onMessage?.addListener?.(onRuntimeMessage);
 })();

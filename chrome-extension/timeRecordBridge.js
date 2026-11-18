@@ -1,8 +1,11 @@
 (function initializeTimeRecordBridge() {
   "use strict";
 
+  const BRIDGE_INSTANCE_KEY = "__aiThoughtReceiptTimeRecordBridgeV1";
   const protocol = globalThis.TimeRecordProtocol;
   if (!protocol || !protocol.isAllowedAppUrl(window.location.href) || !chrome.runtime?.onMessage) return;
+  if (globalThis[BRIDGE_INSTANCE_KEY]) return;
+  globalThis[BRIDGE_INSTANCE_KEY] = true;
   let pendingPayload = null;
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -46,19 +49,45 @@
       return;
     }
     try {
-      const response = await chrome.runtime.sendMessage({
+      const response = await sendRuntimeAcknowledgement({
         type: "time-records:ackImported",
         destination,
         payload: event.data.payload,
       });
       postAcknowledgementResult(event.data.payload.requestId, response);
-    } catch {
+    } catch (error) {
       postAcknowledgementResult(event.data.payload.requestId, {
         ok: false,
-        message: "拡張機能へ取込完了を通知できませんでした。",
+        message: error instanceof Error
+          ? `拡張機能へ取込完了を通知できませんでした（Service Worker通信: ${safeErrorMessage(error)}）。`
+          : "拡張機能へ取込完了を通知できませんでした（Service Worker通信）。",
       });
     }
   });
+
+  async function sendRuntimeAcknowledgement(message) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await chrome.runtime.sendMessage(message);
+        if (response?.ok === true) return response;
+        lastError = new Error(
+          typeof response?.message === "string" && response.message
+            ? response.message
+            : "Service Workerから応答がありません。",
+        );
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Service Workerとの通信に失敗しました。");
+      }
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    throw lastError ?? new Error("Service Workerとの通信に失敗しました。");
+  }
+
+  function safeErrorMessage(error) {
+    const value = typeof error?.message === "string" ? error.message : "不明なエラー";
+    return value.replace(/[\r\n\u0000-\u001f\u007f]/g, " ").slice(0, 240);
+  }
 
   function postPendingPayload() {
     if (!pendingPayload) return;

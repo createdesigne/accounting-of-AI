@@ -5,6 +5,7 @@ import {
   type AnalysisStatus,
   type ThoughtAnalysisV1,
 } from "./integrations/analysisContract.ts";
+import { isWeeklyExpenseAccount, type WeeklyExpenseAccount } from "./weeklyAccountingTypes.ts";
 
 export const WEEKLY_RECORD_SCHEMA_VERSION = 1 as const;
 
@@ -46,6 +47,8 @@ export type WeeklyRecordV1 = Readonly<{
   activityCategory: AnalysisActivityCategory;
   activityCategorySource: ActivityCategorySource;
   accountingDisposition: AccountingDisposition;
+  /** Person-confirmed expense account. Missing on legacy records and null outside expense. */
+  accountingAccount?: WeeklyExpenseAccount | null;
   analysisStatus: AnalysisStatus;
   analysis: ThoughtAnalysisV1;
   selfReflection: string | null;
@@ -107,6 +110,7 @@ export type ManualWeeklyRecordInput = Readonly<{
   taskId?: string | null;
   activityCategory: AnalysisActivityCategory;
   accountingDisposition: AccountingDisposition;
+  accountingAccount?: WeeklyExpenseAccount | null;
   selfReflection?: string | null;
   /** False only for an activity configured before starting as no-AI use. */
   analysisApplicable?: boolean;
@@ -139,6 +143,7 @@ export type ExtensionWeeklyRecordInput = Readonly<{
   taskId?: string | null;
   activityCategory: AnalysisActivityCategory;
   accountingDisposition: AccountingDisposition;
+  accountingAccount?: WeeklyExpenseAccount | null;
   selfReflection?: string | null;
   manualNotes?: ManualWeeklyRecordInput["manualNotes"];
   conversation?: NonNullable<ManualWeeklyRecordInput["conversation"]> | null;
@@ -172,6 +177,9 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
   if (!isOneOf(input.accountingDisposition, ["expense", "asset", "work-in-progress", "unclassified"])) {
     invalid("accountingDisposition is invalid.");
   }
+  if (input.accountingDisposition === "expense" && input.activityCategory === null) {
+    invalid("An expense record requires an activity category.");
+  }
   if (input.privacy === "off") {
     throw new WeeklyDataValidationError("off records must not be built for persistent storage.");
   }
@@ -179,9 +187,11 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
     && new Date(input.endedAt).getTime() <= new Date(input.startedAt).getTime()) {
     throw new WeeklyDataValidationError("endedAt must be after startedAt.");
   }
-  if (input.accountingDisposition === "expense" && input.activityCategory === null) {
-    throw new WeeklyDataValidationError("An expense record requires an activity category.");
-  }
+  const accountingAccount = normalizeAccountingAccount(
+    input.accountingDisposition,
+    input.activityCategory,
+    input.accountingAccount,
+  );
   requireNullableText(input.selfReflection, "selfReflection");
 
   const conversationId = input.privacy === "full" && input.conversation
@@ -207,6 +217,7 @@ export function buildManualWeeklyRecord(input: ManualWeeklyRecordInput): BuiltMa
     activityCategory: input.activityCategory,
     activityCategorySource: input.activityCategory === null ? "unclassified" : "user-input",
     accountingDisposition: input.accountingDisposition,
+    accountingAccount,
     analysisStatus: analysis.analysisStatus,
     analysis,
     selfReflection: normalizeNullableText(input.selfReflection),
@@ -258,6 +269,11 @@ export function buildExtensionWeeklyRecord(input: ExtensionWeeklyRecordInput): B
   if (input.accountingDisposition === "expense" && input.activityCategory === null) {
     invalid("An expense record requires an activity category.");
   }
+  const accountingAccount = normalizeAccountingAccount(
+    input.accountingDisposition,
+    input.activityCategory,
+    input.accountingAccount,
+  );
   if (input.privacy === "full" && !input.conversation) {
     invalid("A full extension import requires conversation content.");
   }
@@ -284,6 +300,7 @@ export function buildExtensionWeeklyRecord(input: ExtensionWeeklyRecordInput): B
     activityCategory: input.activityCategory,
     activityCategorySource: input.activityCategory === null ? "unclassified" : "user-input",
     accountingDisposition: input.accountingDisposition,
+    accountingAccount,
     analysisStatus: analysis.analysisStatus,
     analysis,
     selfReflection: normalizeNullableText(input.selfReflection),
@@ -353,6 +370,11 @@ export function parseWeeklyRecord(value: unknown): WeeklyRecordV1 {
   if (!isActivityCategory(value.activityCategory)) invalid("activityCategory is invalid.");
   if (!isOneOf(value.activityCategorySource, ["user-input", "ai-analysis", "unclassified"])) invalid("activityCategorySource is invalid.");
   if (!isOneOf(value.accountingDisposition, ["expense", "asset", "work-in-progress", "unclassified"])) invalid("accountingDisposition is invalid.");
+  const accountingAccount = normalizeAccountingAccount(
+    value.accountingDisposition,
+    value.activityCategory,
+    value.accountingAccount as WeeklyExpenseAccount | null | undefined,
+  );
   if (!isOneOf(value.analysisStatus, ["not-connected", "pending", "complete", "failed", "not-applicable"])) invalid("analysisStatus is invalid.");
   requireNullableText(value.selfReflection, "selfReflection");
   const manualNotes = parseManualNotes(value.manualNotes);
@@ -365,8 +387,31 @@ export function parseWeeklyRecord(value: unknown): WeeklyRecordV1 {
   requireIdentifier(value.links.thoughtReceiptId, "links.thoughtReceiptId");
   return Object.freeze({
     ...(value as unknown as WeeklyRecordV1),
+    accountingAccount,
     manualNotes,
   });
+}
+
+export function withWeeklyRecordAccounting(
+  record: WeeklyRecordV1,
+  accountingDisposition: AccountingDisposition,
+  accountingAccount: WeeklyExpenseAccount | null,
+): WeeklyRecordV1 {
+  return parseWeeklyRecord({ ...record, accountingDisposition, accountingAccount });
+}
+
+export function defaultExpenseAccountForCategory(
+  category: AnalysisActivityCategory,
+): WeeklyExpenseAccount | null {
+  if (category === null) return null;
+  return ({
+    "相談": "相談活動費",
+    "壁打ち": "思考探究費",
+    "文章作成": "成果物利用費",
+    "情報収集": "情報収集費",
+    "学習": "学習活動費",
+    "その他": "その他AI利用費",
+  } as const)[category];
 }
 
 export function parseConversationContent(value: unknown): WeeklyConversationContentV1 {
@@ -404,6 +449,24 @@ function parseManualNotes(value: unknown): WeeklyManualNotesV1 | null {
 
 function isActivityCategory(value: unknown): value is AnalysisActivityCategory {
   return value === null || isOneOf(value, ["相談", "壁打ち", "文章作成", "情報収集", "学習", "その他"]);
+}
+
+function normalizeAccountingAccount(
+  disposition: AccountingDisposition,
+  category: AnalysisActivityCategory,
+  account: WeeklyExpenseAccount | null | undefined,
+): WeeklyExpenseAccount | null {
+  if (disposition !== "expense") {
+    if (account !== undefined && account !== null) invalid("Only an expense record may have an expense account.");
+    return null;
+  }
+  if (account !== undefined && account !== null) {
+    if (!isWeeklyExpenseAccount(account)) invalid("accountingAccount is invalid.");
+    return account;
+  }
+  const fallback = defaultExpenseAccountForCategory(category);
+  if (fallback === null) invalid("An expense record requires an expense account.");
+  return fallback;
 }
 
 function isOneOf<T extends string>(value: unknown, values: readonly T[]): value is T {
