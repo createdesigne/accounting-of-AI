@@ -37,6 +37,7 @@ import {
   reregisterImportedTimeRecord,
   type TimeAccountingStore,
 } from "./timeAccountingStore";
+import { notifyTimeAccountingChanged } from "./timeAccountingEvents";
 import {
   addThinkingLedgerRecords,
   clearThinkingLedgerRecords,
@@ -612,6 +613,10 @@ function App() {
       return null;
     }
   });
+  const applyTimeAccountingStore = useCallback((store: TimeAccountingStore) => {
+    setTimeAccountingStore(store);
+    notifyTimeAccountingChanged();
+  }, []);
   const [thinkingLedger, setThinkingLedger] = useState<IssuedThinkingReceipt[]>([]);
   const [ledgerStatus, setLedgerStatus] = useState<"loading" | "ready" | "error">("loading");
   const timeRecordTotalSeconds = useMemo(
@@ -709,7 +714,7 @@ function App() {
         storageKey: TIME_ACCOUNTING_STORAGE_KEY,
       }),
       acknowledge: acknowledgeImportedTimeRecords,
-      onSaved: (result) => setTimeAccountingStore(result.store),
+      onSaved: (result) => applyTimeAccountingStore(result.store),
     }).then((outcome) => {
       if (cancelled) return;
       setAutomaticTimeImportMessage("");
@@ -833,7 +838,7 @@ function App() {
       });
       // importTimeRecords が保存後の再読込まで検証した store を返すため、
       // 拡張機能への完了通知に失敗しても帳簿表示は安全に更新できます。
-      setTimeAccountingStore(result.store);
+      applyTimeAccountingStore(result.store);
       try { clearPendingTimeRecordPreview(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY); } catch { /* 会計保存は完了済みです。 */ }
       setTimeRecordPreview([]);
       timeRecordPreviewRef.current = [];
@@ -897,7 +902,7 @@ function App() {
       const result = await importTimeRecords(pendingTimeAcknowledgement, {
         storageKey: TIME_ACCOUNTING_STORAGE_KEY,
       });
-      setTimeAccountingStore(result.store);
+      applyTimeAccountingStore(result.store);
       await acknowledgeImportedTimeRecords(result.records);
       try { clearPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY); } catch { /* ACKは完了済みです。 */ }
       setPendingTimeAcknowledgement([]);
@@ -921,7 +926,7 @@ function App() {
     const result = await cancelImportedTimeRecord(recordId, {
       storageKey: TIME_ACCOUNTING_STORAGE_KEY,
     });
-    setTimeAccountingStore(result.store);
+    applyTimeAccountingStore(result.store);
     if (result.cancelled) {
       showToast("取消仕訳を保存しました。元の利用記録と仕訳はそのまま残しています。");
     } else {
@@ -933,7 +938,7 @@ function App() {
     const result = await reregisterImportedTimeRecord(recordId, {
       storageKey: TIME_ACCOUNTING_STORAGE_KEY,
     });
-    setTimeAccountingStore(result.store);
+    applyTimeAccountingStore(result.store);
     if (result.reregistered) {
       showToast("再登録仕訳を保存し、有効な会計上の利用時間を復元しました。");
     } else {
@@ -945,7 +950,7 @@ function App() {
     const result = await correctImportedTimeRecord(recordId, seconds, reason, {
       storageKey: TIME_ACCOUNTING_STORAGE_KEY,
     });
-    setTimeAccountingStore(result.store);
+    applyTimeAccountingStore(result.store);
     if (result.corrected) {
       showToast(`訂正仕訳を保存し、有効な利用時間を${formatTimeRecordDuration(result.effectiveSeconds)}に変更しました。`);
     } else {

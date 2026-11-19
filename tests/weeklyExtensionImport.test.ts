@@ -6,7 +6,10 @@ import {
   buildConfirmedExtensionRecord,
   buildMeasuredTimeCandidates,
   extensionConversationFingerprint,
+  extensionConversationSourceEventId,
+  loadExtensionConversationDraft,
   selectUnlinkedMeasuredTimeCandidates,
+  selectSessionMatchedMeasurements,
 } from "../src/weeklyExtensionImport.ts";
 import {
   importTimeRecords,
@@ -156,6 +159,109 @@ test("linked 109 seconds are excluded while an unlinked 19-second measurement re
   assert.equal(available[0].measurementRecordId, "research-session-19:day:2026-11-18");
   assert.equal(available[0].activeSeconds, 19);
   assert.equal(available.some((item) => item.measurementRecordId === linked109.measurementRecordId), false);
+});
+
+test("a finalized 24-second record becomes selectable and survives a store reload", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  await importTimeRecords([{
+    recordId: "research-session-24:day:2026-11-19",
+    sessionId: "research-session-24",
+    provider: "ChatGPT",
+    localDate: "2026-11-19",
+    timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-19T10:00:00+09:00"),
+    endedAt: Date.parse("2026-11-19T10:00:24+09:00"),
+    durationSeconds: 24,
+  }], { storage, locks });
+  const afterReload = loadTimeAccountingStore(storage);
+  const available = selectUnlinkedMeasuredTimeCandidates(buildMeasuredTimeCandidates(afterReload), []);
+  assert.equal(available.length, 1);
+  assert.equal(available[0].activeSeconds, 24);
+  assert.equal(available[0].measurementRecordId, "research-session-24:day:2026-11-19");
+});
+
+test("the same conversation content can be captured again and linked to a new unused measurement", async () => {
+  const storage = new MemoryStorage();
+  const locks = new SerialLocks();
+  const records = [{
+    recordId: "repeat-session-1:day:2026-11-19", sessionId: "repeat-session-1", provider: "ChatGPT" as const,
+    localDate: "2026-11-19", timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-19T10:00:00+09:00"), endedAt: Date.parse("2026-11-19T10:00:24+09:00"), durationSeconds: 24,
+  }, {
+    recordId: "repeat-session-2:day:2026-11-19", sessionId: "repeat-session-2", provider: "ChatGPT" as const,
+    localDate: "2026-11-19", timeZone: "Asia/Tokyo",
+    startedAt: Date.parse("2026-11-19T11:00:00+09:00"), endedAt: Date.parse("2026-11-19T11:00:31+09:00"), durationSeconds: 31,
+  }];
+  await importTimeRecords(records, { storage, locks });
+  const measurements = buildMeasuredTimeCandidates(loadTimeAccountingStore(storage));
+  const firstMeasurement = measurements.find((item) => item.sessionId === "repeat-session-1")!;
+  const secondMeasurement = measurements.find((item) => item.sessionId === "repeat-session-2")!;
+  const firstCapture = { ...conversation, captureId: "capture-repeat-1", measurementSessionId: "repeat-session-1" };
+  const secondCapture = { ...conversation, captureId: "capture-repeat-2", measurementSessionId: "repeat-session-2" };
+
+  assert.equal(extensionConversationFingerprint(firstCapture), extensionConversationFingerprint(secondCapture));
+  assert.notEqual(extensionConversationSourceEventId(firstCapture), extensionConversationSourceEventId(secondCapture));
+  await saveExtensionWeeklyRecord(confirmed(firstMeasurement, { rawConversation: firstCapture }), { storage, locks });
+  const remaining = selectUnlinkedMeasuredTimeCandidates(
+    buildMeasuredTimeCandidates(loadTimeAccountingStore(storage)),
+    loadWeeklyRecordStore(storage).records,
+  );
+  assert.deepEqual(remaining.map((item) => item.measurementRecordId), [secondMeasurement.measurementRecordId]);
+  assert.deepEqual(selectSessionMatchedMeasurements(remaining, secondCapture.measurementSessionId), [secondMeasurement]);
+
+  const second = await saveExtensionWeeklyRecord(confirmed(secondMeasurement, { rawConversation: secondCapture }), { storage, locks });
+  const duplicate = await saveExtensionWeeklyRecord(confirmed(secondMeasurement, { rawConversation: secondCapture }), { storage, locks });
+  assert.equal(second.inserted, true);
+  assert.equal(duplicate.deduplicated, true);
+  assert.equal(loadWeeklyRecordStore(storage).records.length, 2);
+  assert.equal(loadWeeklyRecordStore(storage).records.reduce((sum, item) => sum + item.activeSeconds, 0), 55);
+});
+
+test("only an exact measurement session is suggested; another session requires person confirmation", async () => {
+  const context = await setup();
+  assert.equal(selectSessionMatchedMeasurements([context.measurement], "another-session").length, 0);
+  assert.deepEqual(selectSessionMatchedMeasurements([context.measurement], "research-session"), [context.measurement]);
+  assert.equal(selectSessionMatchedMeasurements([context.measurement], undefined).length, 0);
+});
+
+test("conversation-first and time-first delivery both retain the exact session candidate", async () => {
+  for (const order of ["conversation-first", "time-first"] as const) {
+    const storage = new MemoryStorage();
+    const locks = new SerialLocks();
+    const rawConversation = {
+      ...conversation,
+      captureId: `capture-${order}`,
+      ...(order === "conversation-first" ? { measurementSessionId: `session-${order}` } : {}),
+    };
+    const timeRecord = {
+      recordId: `session-${order}:day:2026-11-19`,
+      sessionId: `session-${order}`,
+      provider: "ChatGPT" as const,
+      localDate: "2026-11-19",
+      timeZone: "Asia/Tokyo",
+      startedAt: Date.parse("2026-11-19T12:00:00+09:00"),
+      endedAt: Date.parse("2026-11-19T12:00:24+09:00"),
+      durationSeconds: 24,
+    };
+    if (order === "conversation-first") storage.setItem("aiConversationRaw", JSON.stringify(rawConversation));
+    await importTimeRecords([timeRecord], { storage, locks });
+    if (order === "time-first") storage.setItem("aiConversationRaw", JSON.stringify(rawConversation));
+
+    const restoredConversation = loadExtensionConversationDraft(storage);
+    assert.equal(restoredConversation?.captureId, rawConversation.captureId);
+    const available = selectUnlinkedMeasuredTimeCandidates(
+      buildMeasuredTimeCandidates(loadTimeAccountingStore(storage)),
+      loadWeeklyRecordStore(storage).records,
+    );
+    const exact = selectSessionMatchedMeasurements(available, restoredConversation?.measurementSessionId);
+    assert.equal(exact.length, order === "conversation-first" ? 1 : 0);
+    assert.equal(available.length, 1);
+    const selectedByPerson = exact[0] ?? available[0];
+    const saved = await saveExtensionWeeklyRecord(confirmed(selectedByPerson, { rawConversation: restoredConversation }), { storage, locks });
+    assert.equal(saved.inserted, true);
+    assert.equal(loadWeeklyRecordStore(storage).records[0].activeSeconds, 24);
+  }
 });
 
 test("time-only never stores conversation text and cannot create an analysis request", async () => {

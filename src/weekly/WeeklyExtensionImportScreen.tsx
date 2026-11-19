@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import type { AnalysisActivityCategory } from "../integrations/analysisContract.ts";
+import { TIME_ACCOUNTING_CHANGED_EVENT } from "../timeAccountingEvents.ts";
 import { TIME_ACCOUNTING_STORAGE_BASE_KEY, loadTimeAccountingStore } from "../timeAccountingStore.ts";
 import type { AccountingDisposition, WeeklyPrivacyChoice } from "../weeklyData.ts";
 import {
   buildConfirmedExtensionRecord,
   buildMeasuredTimeCandidates,
-  extensionConversationFingerprint,
+  extensionConversationSourceEventId,
   loadExtensionConversationDraft,
   selectUnlinkedMeasuredTimeCandidates,
+  selectSessionMatchedMeasurements,
   type MeasuredTimeCandidate,
 } from "../weeklyExtensionImport.ts";
 import {
@@ -38,9 +40,9 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
 
   const snapshot = useMemo(() => loadSnapshot(), [revision]);
   const rawConversation = snapshot.conversation;
-  const fingerprint = rawConversation ? extensionConversationFingerprint(rawConversation) : null;
-  const existing = fingerprint
-    ? store.records.find((record) => record.sourceEventId === `chrome-conversation:${fingerprint}`) ?? null
+  const sourceEventId = rawConversation ? extensionConversationSourceEventId(rawConversation) : null;
+  const existing = sourceEventId
+    ? store.records.find((record) => record.sourceEventId === sourceEventId) ?? null
     : null;
   const measurements = useMemo(() => (
     selectUnlinkedMeasuredTimeCandidates(snapshot.measurements, store.records)
@@ -50,9 +52,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
     [measurements],
   );
   const usedMeasurements = snapshot.measurements.filter((item) => !unusedMeasurementIds.has(item.measurementRecordId));
-  const exactSessionMatches = rawConversation?.measurementSessionId
-    ? measurements.filter((item) => item.sessionId === rawConversation.measurementSessionId)
-    : [];
+  const exactSessionMatches = selectSessionMatchedMeasurements(measurements, rawConversation?.measurementSessionId);
   const exactMeasurementId = exactSessionMatches.length === 1
     ? exactSessionMatches[0].measurementRecordId
     : "";
@@ -61,7 +61,29 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
 
   useEffect(() => {
     setMeasurementId(exactMeasurementId);
-  }, [fingerprint, exactMeasurementId]);
+  }, [sourceEventId, exactMeasurementId]);
+
+  useEffect(() => {
+    const reload = () => {
+      setStore(safeLoadWeeklyStore());
+      setRevision((value) => value + 1);
+      setLoadError("");
+    };
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === null || event.key === TIME_ACCOUNTING_STORAGE_BASE_KEY) reload();
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") reload(); };
+    window.addEventListener(TIME_ACCOUNTING_CHANGED_EVENT, reload);
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", reload);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener(TIME_ACCOUNTING_CHANGED_EVENT, reload);
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", reload);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
 
   function refresh() {
     try {
@@ -140,7 +162,9 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
         {existing && <p className="weekly-import-linked">この会話は{existing.activeSeconds}秒の活動として保存済みです。新規取り込みフォームは表示しません。</p>}
         {!existing && rawConversation.measurementSessionId && exactSessionMatches.length === 1 && <p className="weekly-import-linked">同じ計測セッションの時間候補を選択しました。保存前に日時と秒数を確認してください。</p>}
         {!existing && rawConversation.measurementSessionId && exactSessionMatches.length > 1 && <p className="weekly-no-ai-notice">同じ計測に複数の時間候補があります。推測で割り振らず、本人が対応する時間を選択してください。</p>}
-        {!existing && rawConversation.measurementSessionId && exactSessionMatches.length === 0 && <p className="weekly-no-ai-notice">この会話の計測セッションはまだ時間台帳へ取り込まれていません。先に拡張機能から確定済み時間を連携してください。</p>}
+        {!existing && rawConversation.measurementSessionId && exactSessionMatches.length === 0 && measurements.length === 0 && <p className="weekly-no-ai-notice">この会話の計測セッションはまだ時間台帳へ取り込まれていません。先に拡張機能から確定済み時間を連携してください。</p>}
+        {!existing && rawConversation.measurementSessionId && exactSessionMatches.length === 0 && measurements.length > 0 && <p className="weekly-no-ai-notice">同じ計測セッションの候補はありません。別の会話へ推測で紐付けず、日時と秒数を本人が確認してください。</p>}
+        {!existing && !rawConversation.measurementSessionId && measurements.length > 0 && <p className="weekly-no-ai-notice">会話取得時の計測セッションを確認できません。日時と秒数を本人が確認して選択してください。</p>}
       </article>}
       <div className="weekly-measurement-usage" aria-label="実測時間の使用状況">
         <article><span>未使用の実測時間</span><strong>{measurements.length}件・{sumSeconds(measurements)}秒</strong><small>これから活動に関連付けられます</small></article>

@@ -92,13 +92,13 @@ export function selectUnlinkedMeasuredTimeCandidates(
 
 export function buildConfirmedExtensionRecord(input: ConfirmExtensionImportInput): ExtensionWeeklyRecordInput {
   const conversation = normalizeConversation(input.rawConversation);
-  const fingerprint = extensionConversationFingerprint(input.rawConversation);
-  const id = `weekly-extension:${fingerprint}`;
-  const conversationId = `extension-conversation:${fingerprint}`;
+  const importIdentity = extensionConversationImportIdentity(input.rawConversation);
+  const id = `weekly-extension:${importIdentity}`;
+  const conversationId = `extension-conversation:${importIdentity}`;
   const capturedAt = parseCapturedAt(input.rawConversation.capturedAt) ?? input.measurement.endedAt;
   return Object.freeze({
     id,
-    sourceEventId: `chrome-conversation:${fingerprint}`,
+    sourceEventId: extensionConversationSourceEventId(input.rawConversation),
     measurementRecordId: input.measurement.measurementRecordId,
     usageId: input.measurement.usageId,
     recordedAt: capturedAt,
@@ -124,6 +124,27 @@ export function buildConfirmedExtensionRecord(input: ConfirmExtensionImportInput
       messages: conversation,
     }) : null,
   });
+}
+
+/**
+ * Separates a single extension capture from conversation-content identity.
+ * Legacy drafts without captureId keep their historical fingerprint identity.
+ */
+export function extensionConversationImportIdentity(raw: RawConversation) {
+  const captureId = raw.captureId?.trim();
+  return captureId ? captureId : extensionConversationFingerprint(raw);
+}
+
+export function extensionConversationSourceEventId(raw: RawConversation) {
+  return `chrome-conversation:${extensionConversationImportIdentity(raw)}`;
+}
+
+export function selectSessionMatchedMeasurements(
+  measurements: readonly MeasuredTimeCandidate[],
+  measurementSessionId: string | undefined,
+) {
+  if (!measurementSessionId) return Object.freeze([]) as readonly MeasuredTimeCandidate[];
+  return Object.freeze(measurements.filter((item) => item.sessionId === measurementSessionId));
 }
 
 /** Stable import identity. capturedAt is excluded so re-sending the same page is idempotent. */

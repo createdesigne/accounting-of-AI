@@ -17,3 +17,11 @@ test('rejects malformed or empty conversation messages rather than generating a 
   }
   for (const value of ['{broken', '%zz', 'not base64']) assert.equal(parseDraftConversation(value), null);
 });
+
+test('accepts an optional capture id without requiring it from legacy drafts', () => {
+  const base = { aiService: 'ChatGPT', messages: [{ role: 'user', text: '本文' }] };
+  assert.equal(parseDraftConversation(JSON.stringify(base))?.captureId, undefined);
+  assert.equal(parseDraftConversation(JSON.stringify({ ...base, captureId: 'capture-123' }))?.captureId, 'capture-123');
+  assert.equal(parseDraftConversation(JSON.stringify({ ...base, captureId: '' })), null);
+  assert.equal(parseDraftConversation(JSON.stringify({ ...base, captureId: `capture-${'x'.repeat(200)}` })), null);
+});

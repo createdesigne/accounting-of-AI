@@ -13,11 +13,12 @@ function popup({ source = 'https://chatgpt.com/c/example', result = conversation
   const stored: Record<string, any> = {};
   if (storedDestination) stored.selectedWebAppDestinationV1 = storedDestination;
   let injected = 0;
+  let captureCounter = 0;
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination, disabled: false, addEventListener: (_event: string, handler: typeof changeDestination) => { changeDestination = handler; } } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
     chrome: { runtime: { getManifest: () => ({ version: '0.5.5' }), sendMessage: async () => ({ ok: true, currentSessionId: trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
-    URL, URLSearchParams, Date, Error, console: { error() {} },
+    URL, URLSearchParams, Date, Error, crypto: { randomUUID: () => `capture-test-${++captureCounter}` }, console: { error() {} },
   });
   return { run: () => click(), changeDestination: async (value: string) => { elements.destination.value = value; await changeDestination(); }, created, elements, stored, injections: () => injected };
 }
@@ -27,10 +28,20 @@ test('extension defaults to production and sends actual text in a fragment, not 
   assert.equal(url.origin + url.pathname, 'https://accounting-of-ai.vercel.app/accounting-of-AI/');
   assert.equal(url.search, '');
   const raw = JSON.parse(new URLSearchParams(url.hash.slice(1)).get('draft')!);
-  assert.deepEqual(Object.keys(raw).sort(), ['aiService', 'capturedAt', 'conversationTitle', 'messages', 'url']);
+  assert.deepEqual(Object.keys(raw).sort(), ['aiService', 'captureId', 'capturedAt', 'conversationTitle', 'messages', 'url']);
+  assert.equal(raw.captureId, 'capture-capture-test-1');
   assert.deepEqual(raw.messages, conversation.messages);
   assert.equal(raw.conversationTitle, conversation.conversationTitle);
   assert.equal(page.elements.createReceipt.disabled, false);
+});
+test('each explicit conversation capture gets a new id while a delivered capture remains stable', async () => {
+  const page = popup();
+  await page.run();
+  await page.run();
+  const first = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
+  const second = JSON.parse(new URLSearchParams(new URL(page.created[1]).hash.slice(1)).get('draft')!);
+  assert.notEqual(first.captureId, second.captureId);
+  assert.deepEqual(first.messages, second.messages);
 });
 test('an active tracker session is attached as an exact linking hint without changing conversation identity fields', async () => {
   const page = popup({ trackingSession: 'session-exact-1' }); await page.run();

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatPeriod, periodBounds, shiftPeriod } from "../ledgerPeriods.ts";
+import { TIME_ACCOUNTING_CHANGED_EVENT } from "../timeAccountingEvents.ts";
 import { TIME_ACCOUNTING_STORAGE_BASE_KEY, loadTimeAccountingStore } from "../timeAccountingStore.ts";
 import { buildWeeklyDashboardData } from "../weeklyDashboard.ts";
 import { buildMeasuredTimeCandidates, selectUnlinkedMeasuredTimeCandidates } from "../weeklyExtensionImport.ts";
@@ -60,10 +61,12 @@ export function WeeklyDashboardScreen({
     };
     const onVisible = () => { if (document.visibilityState === "visible") refresh(); };
     window.addEventListener("storage", onStorage);
+    window.addEventListener(TIME_ACCOUNTING_CHANGED_EVENT, refresh);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.removeEventListener("storage", onStorage);
+      window.removeEventListener(TIME_ACCOUNTING_CHANGED_EVENT, refresh);
       window.removeEventListener("focus", refresh);
       document.removeEventListener("visibilitychange", onVisible);
     };

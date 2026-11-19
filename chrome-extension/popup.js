@@ -74,6 +74,7 @@ button.addEventListener("click", async () => {
     });
 
     const rawConversation = normalizeConversation(extracted?.result, tab);
+    rawConversation.captureId = createCaptureId();
     const tracking = await chrome.runtime?.sendMessage?.({ type: "tracking:get" }).catch(() => null);
     // This is an exact tracker identifier, not a date/title-based guess. The app still asks
     // the person to confirm the matching finalized measurement before saving an activity.
@@ -92,6 +93,12 @@ button.addEventListener("click", async () => {
     setStatus(formatAccessError(error, "会話データを送れませんでした。"), false);
   }
 });
+
+function createCaptureId() {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (typeof uuid === "string" && uuid) return `capture-${uuid}`;
+  return `capture-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
 
 function setStatus(message, busy) {
   statusText.textContent = message;

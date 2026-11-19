@@ -3,6 +3,8 @@ export type RawConversation = {
   url?: string;
   capturedAt?: string;
   conversationTitle?: string;
+  /** Identifies one explicit extension capture. Older saved drafts omit it. */
+  captureId?: string;
   /** Active-time tracker session captured by the extension, when one is running. */
   measurementSessionId?: string;
   messages?: { role?: string; text?: string }[];
@@ -28,10 +30,15 @@ export function parseDraftConversation(draft: string): RawConversation | null {
 function isRawConversation(value: unknown): value is RawConversation {
   if (!value || typeof value !== "object") return false;
   const raw = value as RawConversation;
-  return [raw.aiService, raw.url, raw.capturedAt, raw.conversationTitle, raw.measurementSessionId]
+  return [raw.aiService, raw.url, raw.capturedAt, raw.conversationTitle, raw.captureId, raw.measurementSessionId]
     .every(v => v === undefined || typeof v === "string")
+    && (raw.captureId === undefined || isSafeCaptureId(raw.captureId))
     && Array.isArray(raw.messages) && raw.messages.length > 0
     && raw.messages.every(message => message !== null && typeof message === "object"
       && typeof message.text === "string" && (message.role === undefined || typeof message.role === "string"))
     && raw.messages.some(message => message.text!.trim().length > 0);
+}
+
+function isSafeCaptureId(value: string) {
+  return value.length > 0 && value.length <= 160 && !/[\u0000-\u001f\u007f]/.test(value);
 }
