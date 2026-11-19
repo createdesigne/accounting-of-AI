@@ -2,7 +2,7 @@
 
 AIとの会話を思考レシートにし、自分とAIの関係を帳簿・決算として振り返るReactアプリです。
 
-本番: https://accounting-of-ai.vercel.app/accounting-of-AI/
+本番: https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/
 
 旧公開版（以前の帳簿）: https://createdesigne.github.io/accounting-of-AI/
 
