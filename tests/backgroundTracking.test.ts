@@ -199,16 +199,21 @@ function createHarness({ initialStored, initialNow = 0, initialUuid = 0, watcher
   };
 }
 
-test('manifest grants only ChatGPT and the research-local bridge hosts needed by injection', () => {
+test('manifest grants only ChatGPT and the two research bridge hosts needed by injection', () => {
   assert.equal(manifest.permissions.includes('scripting'), true);
   assert.equal(manifest.permissions.includes('tabs'), true);
   assert.deepEqual(manifest.host_permissions, [
     'https://chatgpt.com/*',
     'https://chat.openai.com/*',
+    'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*',
     'http://localhost:5174/*',
   ]);
   assert.equal(manifest.optional_host_permissions, undefined);
   assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
+  assert.equal(manifest.content_scripts.some((entry: any) => (
+    entry.matches.includes('https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/*')
+    && entry.js.includes('timeRecordBridge.js')
+  )), true);
   assert.equal(manifest.content_scripts.some((entry: any) => (
     entry.matches.includes('http://localhost:5174/accounting-of-AI/*')
     && entry.js.includes('timeRecordBridge.js')
@@ -457,10 +462,15 @@ test('marks records imported only after a matching acknowledgement and per desti
   assert.equal(acknowledged.acknowledgedCount, 1);
   assert.equal((await app.finalizedRecords('production')).payload.records.length, 0);
   assert.equal((await app.finalizedRecords('preview')).payload.records.length, 1);
+  const researchPreviewPayload = await app.finalizedRecords('researchPreview');
+  assert.equal(researchPreviewPayload.payload.records.length, 1);
+  assert.equal((await app.acknowledge(researchPreviewPayload.payload, 'researchPreview')).ok, true);
+  assert.equal((await app.finalizedRecords('researchPreview')).payload.records.length, 0);
   assert.equal((await app.finalizedRecords('research')).payload.records.length, 1);
   const researchPayload = await app.finalizedRecords('research');
   assert.equal((await app.acknowledge(researchPayload.payload, 'research')).ok, true);
   assert.equal((await app.finalizedRecords('research')).payload.records.length, 0);
   assert.ok(app.importStatus().destinations.production[pending.payload.records[0].recordId]);
+  assert.ok(app.importStatus().destinations.researchPreview[pending.payload.records[0].recordId]);
   assert.ok(app.importStatus().destinations.research[pending.payload.records[0].recordId]);
 });

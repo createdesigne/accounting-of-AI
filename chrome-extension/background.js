@@ -317,7 +317,7 @@ function getPendingDailyRecords(state, importStatus, destination) {
 }
 
 function requireDestination(value) {
-  if (["production", "legacy", "preview", "local", "research"].includes(value)) return value;
+  if (["production", "researchPreview", "legacy", "preview", "local", "research"].includes(value)) return value;
   throw new Error("許可されていない送信先です。");
 }
 
@@ -331,6 +331,7 @@ function normalizeImportStatus(value) {
     version: 1,
     destinations: {
       production: Object.create(null),
+      researchPreview: Object.create(null),
       legacy: Object.create(null),
       preview: Object.create(null),
       local: Object.create(null),
@@ -338,7 +339,7 @@ function normalizeImportStatus(value) {
     },
   };
   if (!value || value.version !== 1 || !value.destinations) return normalized;
-  for (const destination of ["production", "legacy", "preview", "local", "research"]) {
+  for (const destination of ["production", "researchPreview", "legacy", "preview", "local", "research"]) {
     const records = value.destinations[destination];
     if (!records || typeof records !== "object" || Array.isArray(records)) continue;
     for (const [recordId, status] of Object.entries(records)) {

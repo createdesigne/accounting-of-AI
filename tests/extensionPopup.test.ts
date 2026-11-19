@@ -38,7 +38,7 @@ test('an active tracker session is attached as an exact linking hint without cha
   assert.equal(raw.measurementSessionId, 'session-exact-1');
 });
 test('legacy/preview/local/research destinations preserve the application base path', async () => {
-  for (const [destination, expected] of [['legacy', 'https://createdesigne.github.io/accounting-of-AI/'], ['preview', 'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/'], ['local', 'http://localhost:5173/accounting-of-AI/'], ['research', 'http://localhost:5174/accounting-of-AI/']]) {
+  for (const [destination, expected] of [['researchPreview', 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/'], ['legacy', 'https://createdesigne.github.io/accounting-of-AI/'], ['preview', 'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/'], ['local', 'http://localhost:5173/accounting-of-AI/'], ['research', 'http://localhost:5174/accounting-of-AI/']]) {
     const page = popup({ destination }); await page.run();
     assert.ok(page.created[0].startsWith(expected + '#draft='));
   }
@@ -260,6 +260,34 @@ test('time transfer can open the added research-local destination without changi
   assert.equal(page.activated[0], 8);
   assert.match(page.elements.timeTransferStatus.textContent, /1件/);
   assert.deepEqual(JSON.parse(JSON.stringify(page.permissionChecks)), [{ origins: ['http://localhost:5174/*'] }]);
+});
+
+test('time transfer uses the selected research Vercel Preview and its exact host permission', async () => {
+  const page = transferPopup('researchPreview');
+  await page.run();
+  assert.equal(page.delivered.length, 1);
+  assert.equal(page.delivered[0].tabId, 8);
+  assert.equal(page.activated[0], 8);
+  assert.match(page.elements.timeTransferStatus.textContent, /1件/);
+  assert.deepEqual(JSON.parse(JSON.stringify(page.permissionChecks)), [{ origins: ['https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*'] }]);
+});
+
+test('time transfer can restore the bridge on an authenticated research Vercel Preview tab', async () => {
+  const page = transferPopup('researchPreview', {
+    existingUrl: 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/',
+    failuresBeforeSuccess: 1,
+  });
+  await page.run();
+  assert.equal(page.injections.length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(page.injections[0])), {
+    target: { tabId: 7 },
+    files: ['timeRecordProtocol.js', 'timeRecordBridge.js'],
+  });
+  assert.deepEqual(JSON.parse(JSON.stringify(page.permissionChecks)), [
+    { origins: ['https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*'] },
+    { origins: ['https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*'] },
+  ]);
+  assert.match(page.elements.timeTransferStatus.textContent, /1件/);
 });
 
 test('manual fallback copies only the validated minimal time payload and keeps the source records pending', async () => {

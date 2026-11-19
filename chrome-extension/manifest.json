@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "AI Thought Receipt Bridge",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "description": "AI conversation pages can be sent to the thought receipt web app, with optional on-device ChatGPT active-time tracking.",
   "permissions": ["activeTab", "scripting", "tabs", "storage", "alarms"],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://chat.openai.com/*",
+    "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*",
     "http://localhost:5174/*"
   ],
   "background": {
@@ -21,6 +22,7 @@
     {
       "matches": [
         "https://accounting-of-ai.vercel.app/accounting-of-AI/*",
+        "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/*",
         "https://createdesigne.github.io/accounting-of-AI/*",
         "http://localhost:5173/accounting-of-AI/*",
         "http://localhost:5174/accounting-of-AI/*"

@@ -1,5 +1,6 @@
 const WEB_APP_URLS = {
   production: "https://accounting-of-ai.vercel.app/accounting-of-AI/",
+  researchPreview: "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/",
   legacy: "https://createdesigne.github.io/accounting-of-AI/",
   preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
   local: "http://localhost:5173/accounting-of-AI/",
@@ -8,6 +9,7 @@ const WEB_APP_URLS = {
 const DESTINATION_STORAGE_KEY = "selectedWebAppDestinationV1";
 const ALLOWED_DESTINATIONS = new Set(Object.keys(WEB_APP_URLS));
 const HOST_PERMISSION_BY_DESTINATION = Object.freeze({
+  researchPreview: "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*",
   research: "http://localhost:5174/*",
 });
 const timeRecordProtocol = globalThis.TimeRecordProtocol;
@@ -307,7 +309,7 @@ async function deliverTimePayload(tabId, payload, destinationName, initialAccess
     } catch (error) {
       lastError = error;
       lastStage = "send-message";
-      if (destinationName === "research" && isMissingReceiverError(error)
+      if ((destinationName === "research" || destinationName === "researchPreview") && isMissingReceiverError(error)
         && injectionAttempts < 3 && attempt % 10 === 0) {
         injectionAttempts += 1;
         lastAccess = await inspectTimeDestination(tabId, destinationName);
@@ -365,11 +367,12 @@ function timeDeliveryError(stage, access, detail) {
 
 function formatTimeTransferError(error) {
   const detail = error instanceof Error ? error.message : String(error || "");
+  const selectedTarget = WEB_APP_URLS[destination?.value] || WEB_APP_URLS.production;
   if (/cannot access contents|must request permission|not allowed to access|missing host permission/i.test(detail)) {
-    return `${detail} Chromeで本拡張の「詳細」→「サイトへのアクセス」を開き、localhost:5174が許可されているか確認してください。「すべてのサイト」の許可は不要です。`;
+    return `${detail} Chromeで本拡張の「詳細」→「サイトへのアクセス」を開き、${new URL(selectedTarget).origin}が許可されているか確認してください。「すべてのサイト」の許可は不要です。`;
   }
   if (isMissingReceiverError(error)) {
-    return `研究用アプリの受信処理が見つかりません。拡張機能と ${WEB_APP_URLS.research} のタブを再読み込みしてから再送してください。確定済みの利用時間は保持されています。`;
+    return `研究用アプリの受信処理が見つかりません。拡張機能と ${selectedTarget} のタブを再読み込みしてから再送してください。確定済みの利用時間は保持されています。`;
   }
   return detail || "利用時間を連携できませんでした。確定済みの利用時間は保持されています。";
 }
