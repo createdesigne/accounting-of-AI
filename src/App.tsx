@@ -6,6 +6,59 @@ import { type LedgerPeriod, calendarDate, dateKey, formatPeriod, ledgerDate, par
 import { buildReportSummary } from "./reportSummary";
 import { prepareReceiptPage, clearReceiptPage } from "./receiptPrint";
 import { type RawConversation, parseDraftConversation } from "./conversationDraft";
+import { extensionConversationStorageKey } from "./weeklyExtensionImport";
+import {
+  TIME_RECORD_READY_SOURCE,
+  TIME_RECORD_READY_TYPE,
+  TIME_RECORD_PENDING_ACK_BASE_KEY,
+  TIME_RECORD_PENDING_PREVIEW_BASE_KEY,
+  TIME_RECORD_WINDOW_MESSAGE_TYPE,
+  TIME_RECORD_WINDOW_SOURCE,
+  formatTimeRecordDuration,
+  acknowledgeImportedTimeRecords,
+  clearPendingTimeRecordAcknowledgement,
+  clearPendingTimeRecordPreview,
+  loadPendingTimeRecordAcknowledgement,
+  loadPendingTimeRecordAutomaticIds,
+  loadPendingTimeRecordPreview,
+  mergeTimeRecordPreviews,
+  parseManualTimeRecordTransfer,
+  parseTimeRecordPayload,
+  requestAutomaticTimeRecords,
+  savePendingTimeRecordAcknowledgement,
+  savePendingTimeRecordPreview,
+  type TimeRecordPreview,
+} from "./timeRecordTransfer";
+import {
+  TIME_ACCOUNTING_STORAGE_BASE_KEY,
+  cancelImportedTimeRecord,
+  correctImportedTimeRecord,
+  importTimeRecords,
+  loadTimeAccountingStore,
+  reregisterImportedTimeRecord,
+  type TimeAccountingStore,
+} from "./timeAccountingStore";
+import { notifyTimeAccountingChanged } from "./timeAccountingEvents";
+import {
+  addThinkingLedgerRecords,
+  clearThinkingLedgerRecords,
+  deleteThinkingLedgerRecord,
+  updateThinkingLedgerRecord,
+} from "./thinkingLedgerStore";
+import { saveThoughtJournalRecord } from "./thoughtJournalStore";
+import { WeeklyWorkspaceScreen, type WeeklyPrimaryView } from "./weekly/WeeklyWorkspaceScreen";
+import {
+  buildTimeAccountingView,
+  buildTimeImportHistory,
+  type TimeImportHistoryRow,
+  type TimeJournalRow,
+} from "./timeAccountingView";
+import {
+  TIME_AUTO_IMPORT_SETTINGS_BASE_KEY,
+  loadAutomaticTimeImportEnabled,
+  runAutomaticTimeImport,
+  saveAutomaticTimeImportEnabled,
+} from "./timeAccountingAutoImport";
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,17 +71,16 @@ import {
   Clock3,
   Coins,
   Home,
-  LineChart,
   NotebookTabs,
-  Plus,
   ReceiptText,
   ScanLine,
+  Settings,
   Sparkles,
   WalletCards,
   X,
 } from "lucide-react";
 
-type TabKey = "home" | "journal" | "receipts" | "analysis" | "tax";
+type TabKey = "home" | "weekly" | "journal" | "receipts" | "analysis" | "tax" | "settings";
 type SettlementView = LedgerPeriod;
 
 type JournalUnit = {
@@ -91,14 +143,24 @@ type CandidateField = keyof ThoughtReceiptCandidate;
 type IssuedThinkingReceipt = ThoughtReceiptCandidate & {
   receiptNo: string;
   issuedAt: string;
+  /** Accounting date is separate from the original conversation/issue date. */
+  accountingPostedOn?: string;
 };
 
 // 応募用プロトタイプなので、外部DBではなく画面確認用のサンプルデータを置いています。
 const IS_PREVIEW = window.location.pathname.startsWith("/accounting-of-AI/preview/");
+const RESEARCH_WEEKLY_MODE = true;
+const SHOW_DEMO_TOOLS = IS_PREVIEW
+  || window.location.hostname === "localhost"
+  || window.location.hostname === "127.0.0.1";
 const STORAGE_PREFIX = IS_PREVIEW ? "preview-month-ledger:" : "";
 const STORAGE_KEY = `${STORAGE_PREFIX}watashi-to-ai-thought-receipts`;
-const RAW_CONVERSATION_KEY = `${STORAGE_PREFIX}aiConversationRaw`;
+const RAW_CONVERSATION_KEY = extensionConversationStorageKey(window.location.pathname);
 const THINKING_LEDGER_KEY = `${STORAGE_PREFIX}thinkingLedger`;
+const TIME_ACCOUNTING_STORAGE_KEY = `${STORAGE_PREFIX}${TIME_ACCOUNTING_STORAGE_BASE_KEY}`;
+const TIME_AUTO_IMPORT_SETTINGS_KEY = `${STORAGE_PREFIX}${TIME_AUTO_IMPORT_SETTINGS_BASE_KEY}`;
+const TIME_RECORD_PENDING_ACK_KEY = `${STORAGE_PREFIX}${TIME_RECORD_PENDING_ACK_BASE_KEY}`;
+const TIME_RECORD_PENDING_PREVIEW_KEY = `${STORAGE_PREFIX}${TIME_RECORD_PENDING_PREVIEW_BASE_KEY}`;
 const RECEIPT_HASH_KEY = "receipt";
 const DRAFT_QUERY_KEY = "draft";
 
@@ -426,7 +488,7 @@ const previousSettlement = {
   summary:
     "5月は、課題・レポートと文章作成の相談が中心でした。AIには先生や助手の役割を求める場面が多く、考えを整えてから自分の言葉で提出物に落とし込む流れが残っています。",
   metrics: [
-    { label: "AIスクリーンタイム", value: "2時間53分" },
+    { label: "レシート記載時間（目安）", value: "2時間53分" },
     { label: "思考レシート", value: "9枚" },
     { label: "主要相談科目", value: "課題・レポート" },
     { label: "よく求めた役割", value: "先生" },
@@ -438,13 +500,6 @@ const previousSettlement = {
   ],
 };
 
-const baseMonthlyScreenTime = [
-  { month: "2月", minutes: 138 },
-  { month: "3月", minutes: 164 },
-  { month: "4月", minutes: 196 },
-  { month: "5月", minutes: 173 },
-];
-
 const moodFlow = [
   { label: "6/10", score: 62 },
   { label: "6/14", score: 78 },
@@ -455,11 +510,13 @@ const moodFlow = [
 ];
 
 const tabLabels: Record<TabKey, string> = {
-  home: "レシート",
+  home: "ホーム",
+  weekly: "記録",
   journal: "仕訳",
   receipts: "帳簿",
   analysis: "月次",
   tax: "決算",
+  settings: "設定",
 };
 
 type ReaderStep = "closed" | "scan" | "confirm";
@@ -500,7 +557,7 @@ function resetPageScroll(behavior: ScrollBehavior = "auto", extraElement?: HTMLE
 
 function App() {
   const screenRef = useRef<HTMLDivElement | null>(null);
-  const [activeTab, setActiveTab] = useState<TabKey>(IS_PREVIEW ? "tax" : "home");
+  const [activeTab, setActiveTab] = useState<TabKey>(RESEARCH_WEEKLY_MODE ? "home" : IS_PREVIEW ? "tax" : "home");
   const [receiptData, setReceiptData] = useState<ThoughtReceipt[]>(loadReceipts);
   const [readerStep, setReaderStep] = useState<ReaderStep>("closed");
   const [scannedReceipt, setScannedReceipt] = useState<ThoughtReceipt | null>(null);
@@ -530,8 +587,58 @@ function App() {
   const [qrMessage, setQrMessage] = useState("");
   const [ledgerMessage, setLedgerMessage] = useState("");
   const [receiptActionMessage, setReceiptActionMessage] = useState("");
+  const [timeRecordPreview, setTimeRecordPreview] = useState<TimeRecordPreview[]>(() => (
+    [...loadPendingTimeRecordPreview(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY)]
+  ));
+  const timeRecordPreviewRef = useRef<TimeRecordPreview[]>([]);
+  const [timeImportBusy, setTimeImportBusy] = useState(false);
+  const [timeImportMessage, setTimeImportMessage] = useState("");
+  const [manualTimeTransferText, setManualTimeTransferText] = useState("");
+  const [manualTimeTransferMessage, setManualTimeTransferMessage] = useState("");
+  const automaticTimeRecordIdsRef = useRef(new Set(
+    loadPendingTimeRecordAutomaticIds(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY),
+  ));
+  const [pendingTimeAcknowledgement, setPendingTimeAcknowledgement] = useState<readonly TimeRecordPreview[]>(() => (
+    loadPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY)
+  ));
+  const [automaticTimeImportEnabled, setAutomaticTimeImportEnabled] = useState(() => (
+    loadAutomaticTimeImportEnabled(localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY)
+  ));
+  const [automaticTimeImportBusy, setAutomaticTimeImportBusy] = useState(false);
+  const [automaticTimeImportMessage, setAutomaticTimeImportMessage] = useState("");
+  const automaticTimeImportAttemptRef = useRef(0);
+  const [timeAccountingStore, setTimeAccountingStore] = useState<TimeAccountingStore | null>(() => {
+    try {
+      return loadTimeAccountingStore(localStorage, TIME_ACCOUNTING_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const applyTimeAccountingStore = useCallback((store: TimeAccountingStore) => {
+    setTimeAccountingStore(store);
+    notifyTimeAccountingChanged();
+  }, []);
   const [thinkingLedger, setThinkingLedger] = useState<IssuedThinkingReceipt[]>([]);
   const [ledgerStatus, setLedgerStatus] = useState<"loading" | "ready" | "error">("loading");
+  const timeRecordTotalSeconds = useMemo(
+    () => timeRecordPreview.reduce((sum, record) => sum + record.durationSeconds, 0),
+    [timeRecordPreview],
+  );
+  const timeAccountingView = useMemo(
+    () => buildTimeAccountingView(timeAccountingStore?.ledger ?? null),
+    [timeAccountingStore],
+  );
+  const timeImportHistory = useMemo(
+    () => buildTimeImportHistory(timeAccountingStore),
+    [timeAccountingStore],
+  );
+  const refreshTimeAccounting = useCallback(() => {
+    try {
+      setTimeAccountingStore(loadTimeAccountingStore(localStorage, TIME_ACCOUNTING_STORAGE_KEY));
+    } catch {
+      // 壊れた保存値を上書きせず、前回正常に読めた画面表示を維持します。
+    }
+  }, []);
   const refreshLedger = useCallback(() => {
     try {
       setThinkingLedger(loadThinkingLedger());
@@ -559,30 +666,329 @@ function App() {
     };
   }, [refreshLedger]);
 
-  function persistLedger(records: IssuedThinkingReceipt[]) {
-    localStorage.setItem(THINKING_LEDGER_KEY, JSON.stringify(records));
-    setThinkingLedger(records);
+  useEffect(() => {
+    refreshTimeAccounting();
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === TIME_ACCOUNTING_STORAGE_KEY || event.key === null) refreshTimeAccounting();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshTimeAccounting();
+    };
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", refreshTimeAccounting);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", refreshTimeAccounting);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [refreshTimeAccounting]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== TIME_AUTO_IMPORT_SETTINGS_KEY && event.key !== null) return;
+      setAutomaticTimeImportEnabled(
+        loadAutomaticTimeImportEnabled(localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY),
+      );
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  useEffect(() => {
+    const attempt = ++automaticTimeImportAttemptRef.current;
+    if (!automaticTimeImportEnabled) {
+      setAutomaticTimeImportBusy(false);
+      setAutomaticTimeImportMessage("");
+      return;
+    }
+    let cancelled = false;
+    setAutomaticTimeImportBusy(true);
+    setAutomaticTimeImportMessage("確定済みの利用時間を確認しています…");
+    void runAutomaticTimeImport({
+      enabled: true,
+      requestRecords: async () => {
+        const payload = await requestAutomaticTimeRecords();
+        return cancelled ? [] : payload.records;
+      },
+      importRecords: (records) => importTimeRecords(records, {
+        storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      }),
+      acknowledge: acknowledgeImportedTimeRecords,
+      onSaved: (result) => applyTimeAccountingStore(result.store),
+    }).then((outcome) => {
+      if (cancelled) return;
+      setAutomaticTimeImportMessage("");
+      if (outcome.status === "completed" && outcome.result.importedCount > 0) {
+        showToast(
+          `${outcome.result.importedCount}件・合計${formatTimeRecordDuration(outcome.result.importedSeconds)}を自動で取り込みました。`,
+        );
+      }
+    }).catch((error) => {
+      if (cancelled) return;
+      setAutomaticTimeImportMessage(
+        `${error instanceof Error ? error.message : "自動取り込みに失敗しました。"} 記録は削除せず、次回起動時に再試行します。`,
+      );
+    }).finally(() => {
+      if (!cancelled && automaticTimeImportAttemptRef.current === attempt) {
+        setAutomaticTimeImportBusy(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [automaticTimeImportEnabled]);
+
+  useEffect(() => {
+    timeRecordPreviewRef.current = timeRecordPreview;
+    if (timeRecordPreview.length > 0) {
+      try {
+        savePendingTimeRecordPreview(timeRecordPreview, localStorage, TIME_RECORD_PENDING_PREVIEW_KEY);
+      } catch {
+        setTimeImportMessage("受信済みの実測記録を端末に保持できませんでした。再読み込みする前に再送してください。");
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const receiveTimeRecords = (event: MessageEvent) => {
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      if (event.data?.source !== TIME_RECORD_WINDOW_SOURCE
+        || event.data?.type !== TIME_RECORD_WINDOW_MESSAGE_TYPE) return;
+      const payload = parseTimeRecordPayload(event.data.payload);
+      if (!payload) return;
+      try {
+        const merged = [...savePendingTimeRecordPreview(
+          payload.records,
+          localStorage,
+          TIME_RECORD_PENDING_PREVIEW_KEY,
+          payload.records.map((record) => record.recordId),
+        )];
+        payload.records.forEach((record) => automaticTimeRecordIdsRef.current.add(record.recordId));
+        timeRecordPreviewRef.current = merged;
+        setTimeRecordPreview(merged);
+        setTimeImportMessage("");
+      } catch (error) {
+        setTimeImportMessage(
+          error instanceof Error ? error.message : "受信した実測記録を端末に保持できませんでした。",
+        );
+      }
+      setIsSettlementOpen(false);
+      setActiveTab("home");
+    };
+    window.addEventListener("message", receiveTimeRecords);
+    window.postMessage({
+      source: TIME_RECORD_READY_SOURCE,
+      type: TIME_RECORD_READY_TYPE,
+    }, window.location.origin);
+    return () => window.removeEventListener("message", receiveTimeRecords);
+  }, []);
+
+  function loadManualTimeRecords() {
+    const payload = parseManualTimeRecordTransfer(manualTimeTransferText.trim());
+    if (!payload) {
+      setManualTimeTransferMessage("手動連携データの形式が正しくありません。拡張機能からコピーし直してください。");
+      return;
+    }
+    try {
+      const merged = [...savePendingTimeRecordPreview(
+        payload.records,
+        localStorage,
+        TIME_RECORD_PENDING_PREVIEW_KEY,
+      )];
+      timeRecordPreviewRef.current = merged;
+      setTimeRecordPreview(merged);
+      setManualTimeTransferText("");
+      setManualTimeTransferMessage(`${payload.records.length}件を確認画面へ読み込みました。まだ会計には保存していません。`);
+      setTimeImportMessage("");
+      setIsSettlementOpen(false);
+      setActiveTab("home");
+    } catch (error) {
+      setManualTimeTransferMessage(
+        error instanceof Error ? error.message : "同じ記録IDに異なる内容があります。",
+      );
+    }
+  }
+
+  function applyThinkingLedger(records: readonly IssuedThinkingReceipt[]) {
+    setThinkingLedger([...records]);
     setLedgerStatus("ready");
   }
 
-  function updateLedgerReceipt(receipt: IssuedThinkingReceipt) {
-    const current = loadThinkingLedger();
-    if (!current.some((item) => item.receiptNo === receipt.receiptNo)) throw new Error("記録が見つかりません。再読み込みしてください。");
-    persistLedger(current.map((item) => item.receiptNo === receipt.receiptNo ? receipt : item));
+  const thinkingMutationOptions = () => ({
+    storageKey: THINKING_LEDGER_KEY,
+    periodStorageKey: TIME_ACCOUNTING_STORAGE_KEY,
+    parseRecord: normalizeIssuedReceipt,
+  });
+
+  async function updateLedgerReceipt(receipt: IssuedThinkingReceipt) {
+    applyThinkingLedger(await updateThinkingLedgerRecord(receipt, thinkingMutationOptions()));
   }
 
-  function deleteLedgerReceipt(receiptNo: string) {
-    persistLedger(loadThinkingLedger().filter((item) => item.receiptNo !== receiptNo));
+  async function deleteLedgerReceipt(receiptNo: string) {
+    applyThinkingLedger(await deleteThinkingLedgerRecord(receiptNo, thinkingMutationOptions()));
   }
-  const stats = useMemo(() => buildStats(receiptData), [receiptData]);
 
-  useEffect(() => {
+  async function importTimeRecordPreview() {
+    if (timeImportBusy || timeRecordPreview.length === 0) return;
+    setTimeImportBusy(true);
+    setTimeImportMessage("時間会計へ保存しています…");
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(receiptData));
-    } catch {
-      // 保存できない環境でも、画面上の追加体験はそのまま使えます。
+      const result = await importTimeRecords(timeRecordPreview, {
+        storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      });
+      // importTimeRecords が保存後の再読込まで検証した store を返すため、
+      // 拡張機能への完了通知に失敗しても帳簿表示は安全に更新できます。
+      applyTimeAccountingStore(result.store);
+      try { clearPendingTimeRecordPreview(localStorage, TIME_RECORD_PENDING_PREVIEW_KEY); } catch { /* 会計保存は完了済みです。 */ }
+      setTimeRecordPreview([]);
+      timeRecordPreviewRef.current = [];
+      const acknowledgementRecords = result.records.filter((record) => (
+        automaticTimeRecordIdsRef.current.has(record.recordId)
+      ));
+      if (acknowledgementRecords.length === 0) {
+        setTimeImportMessage("");
+        setManualTimeTransferMessage("");
+        if (result.importedCount > 0) {
+          showToast(`${result.importedCount}件・合計${formatTimeRecordDuration(result.importedSeconds)}を時間会計へ取り込みました。`);
+        } else {
+          showToast(`${result.skippedCount}件は取り込み済みでした。時間や仕訳は追加していません。`);
+        }
+        if (RESEARCH_WEEKLY_MODE) setActiveTab("weekly");
+        return;
+      }
+      let pendingStored = false;
+      let persistedAcknowledgements: readonly TimeRecordPreview[] = [];
+      try {
+        persistedAcknowledgements = loadPendingTimeRecordAcknowledgement(
+          localStorage,
+          TIME_RECORD_PENDING_ACK_KEY,
+        );
+      } catch {
+        // ストレージを読めない場合も、現在の画面に保持した通知と今回分のACKは継続します。
+      }
+      const acknowledgementQueue = mergeTimeRecordPreviews(
+        mergeTimeRecordPreviews([...pendingTimeAcknowledgement], [...persistedAcknowledgements]),
+        acknowledgementRecords,
+      );
+      try {
+        savePendingTimeRecordAcknowledgement(acknowledgementQueue, localStorage, TIME_RECORD_PENDING_ACK_KEY);
+        pendingStored = true;
+      } catch {
+        // 拡張機能側の元記録はACK成功まで保持されるため、保存失敗時も通知を試行できます。
+      }
+      setPendingTimeAcknowledgement(acknowledgementQueue);
+      try {
+        await acknowledgeImportedTimeRecords(acknowledgementQueue);
+      } catch (error) {
+        setTimeImportMessage(
+          `会計への保存は完了しましたが、拡張機能への完了通知は未完了です。${error instanceof Error ? ` ${error.message}` : ""} ${pendingStored ? "下の「完了通知を再試行」から安全に再試行できます。" : "拡張機能の元記録は保持されています。再度「帳簿へ連携」してください。"}`,
+        );
+        return;
+      }
+      try { clearPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY); } catch { /* ACKは完了済みです。 */ }
+      setPendingTimeAcknowledgement([]);
+      acknowledgementQueue.forEach((record) => automaticTimeRecordIdsRef.current.delete(record.recordId));
+      setTimeImportMessage("");
+      if (result.importedCount > 0) {
+        showToast(
+          `${result.importedCount}件・合計${formatTimeRecordDuration(result.importedSeconds)}を時間会計へ取り込みました。`,
+        );
+      } else {
+        showToast(`${result.skippedCount}件は取り込み済みでした。完了通知を更新しました。`);
+      }
+      if (RESEARCH_WEEKLY_MODE) setActiveTab("weekly");
+    } catch (error) {
+      setTimeImportMessage(
+        error instanceof Error ? error.message : "利用時間を会計へ取り込めませんでした。",
+      );
+    } finally {
+      setTimeImportBusy(false);
     }
-  }, [receiptData]);
+  }
+
+  async function retryTimeRecordAcknowledgement() {
+    if (timeImportBusy || pendingTimeAcknowledgement.length === 0) return;
+    setTimeImportBusy(true);
+    setTimeImportMessage("保存済みの利用時間を確認し、拡張機能へ完了通知を再送しています…");
+    try {
+      // ACK前に会計保存済みであることを再検証します。同一IDの再取込は冪等で仕訳を増やしません。
+      const result = await importTimeRecords(pendingTimeAcknowledgement, {
+        storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      });
+      applyTimeAccountingStore(result.store);
+      await acknowledgeImportedTimeRecords(result.records);
+      try { clearPendingTimeRecordAcknowledgement(localStorage, TIME_RECORD_PENDING_ACK_KEY); } catch { /* ACKは完了済みです。 */ }
+      setPendingTimeAcknowledgement([]);
+      const acknowledgedIds = new Set(result.records.map((record) => record.recordId));
+      acknowledgedIds.forEach((recordId) => automaticTimeRecordIdsRef.current.delete(recordId));
+      const remainingPreview = timeRecordPreviewRef.current.filter((record) => !acknowledgedIds.has(record.recordId));
+      timeRecordPreviewRef.current = remainingPreview;
+      setTimeRecordPreview(remainingPreview);
+      setTimeImportMessage("");
+      showToast(`${result.records.length}件の保存済み記録について、拡張機能への完了通知を更新しました。`);
+    } catch (error) {
+      setTimeImportMessage(
+        `完了通知を再試行できませんでした。保存済みの仕訳と拡張機能の元記録は保持されています。${error instanceof Error ? ` ${error.message}` : ""}`,
+      );
+    } finally {
+      setTimeImportBusy(false);
+    }
+  }
+
+  async function cancelTimeRecord(recordId: string) {
+    const result = await cancelImportedTimeRecord(recordId, {
+      storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+    });
+    applyTimeAccountingStore(result.store);
+    if (result.cancelled) {
+      showToast("取消仕訳を保存しました。元の利用記録と仕訳はそのまま残しています。");
+    } else {
+      showToast("この取り込みはすでに取消済みです。仕訳は追加していません。");
+    }
+  }
+
+  async function reregisterTimeRecord(recordId: string) {
+    const result = await reregisterImportedTimeRecord(recordId, {
+      storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+    });
+    applyTimeAccountingStore(result.store);
+    if (result.reregistered) {
+      showToast("再登録仕訳を保存し、有効な会計上の利用時間を復元しました。");
+    } else {
+      showToast("この取り込みはすでに有効です。仕訳は追加していません。");
+    }
+  }
+
+  async function correctTimeRecord(recordId: string, seconds: number, reason: string) {
+    const result = await correctImportedTimeRecord(recordId, seconds, reason, {
+      storageKey: TIME_ACCOUNTING_STORAGE_KEY,
+    });
+    applyTimeAccountingStore(result.store);
+    if (result.corrected) {
+      showToast(`訂正仕訳を保存し、有効な利用時間を${formatTimeRecordDuration(result.effectiveSeconds)}に変更しました。`);
+    } else {
+      showToast("入力された秒数は現在の有効時間と同じです。仕訳は追加していません。");
+    }
+  }
+
+  function updateAutomaticTimeImport(enabled: boolean) {
+    try {
+      saveAutomaticTimeImportEnabled(enabled, localStorage, TIME_AUTO_IMPORT_SETTINGS_KEY);
+      setAutomaticTimeImportEnabled(enabled);
+      setAutomaticTimeImportMessage("");
+    } catch {
+      setAutomaticTimeImportMessage("自動取り込み設定を保存できませんでした。設定は変更していません。");
+    }
+  }
+  const currentMonthKey = getCurrentMonthKey();
+  const currentMonthLabel = formatMonthLabel(new Date());
+  const currentReceiptData = useMemo(
+    () => receiptData.filter((receipt) => receipt.date.startsWith(currentMonthKey)),
+    [receiptData, currentMonthKey],
+  );
+  const stats = useMemo(() => buildStats(currentReceiptData), [currentReceiptData]);
+  const allReceiptStats = useMemo(() => buildStats(receiptData), [receiptData]);
 
   useEffect(() => {
     if (activeTab !== "tax" || !analysisFocus) return;
@@ -628,6 +1034,19 @@ function App() {
       localStorage.setItem(RAW_CONVERSATION_KEY, JSON.stringify(draftConversation));
     } catch {
       // URLからの取り込み自体は続けます。localStorage保存は再読み込み用の補助です。
+    }
+
+    if (RESEARCH_WEEKLY_MODE) {
+      setConversationCandidate(null);
+      setConversationMessage("");
+      setCandidateIssueMessage("");
+      setIssuedReceipt(null);
+      setLedgerMessage("");
+      setIsSettlementOpen(false);
+      setActiveTab("weekly");
+      scrollScreenToTop("auto");
+      clearDraftQueryParam();
+      return;
     }
 
     setConversationCandidate(classifyConversation(draftConversation));
@@ -714,7 +1133,12 @@ function App() {
 
   function loadSampleReceipt() {
     const savedReceipt = receiptData.find(receipt => receipt.id === sampleScannedReceipt.id);
-    setScannedReceipt(normalizeReceipt(savedReceipt ?? sampleScannedReceipt));
+    const now = new Date();
+    const currentSampleReceipt = {
+      ...sampleScannedReceipt,
+      date: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`,
+    };
+    setScannedReceipt(normalizeReceipt(savedReceipt ?? currentSampleReceipt));
     setReaderError("");
     setReaderStep("confirm");
     scrollScreenToTop("auto");
@@ -726,21 +1150,20 @@ function App() {
     scrollScreenToTop("auto");
   }
 
-  function saveScannedReceipt() {
+  async function saveScannedReceipt() {
     if (!scannedReceipt) return;
     const receiptToSave = { ...normalizeReceipt(scannedReceipt), journal: getReceiptJournal(scannedReceipt) };
-
-    const exists = receiptData.some(receipt => receipt.id === receiptToSave.id);
-    const updated = exists
-      ? receiptData.map(receipt => receipt.id === receiptToSave.id ? { ...receipt, journal: receiptToSave.journal } : receipt)
-      : [receiptToSave, ...receiptData];
+    let updated: readonly ThoughtReceipt[];
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    } catch {
-      setReaderError("保存できませんでした。ブラウザの保存設定を確認して、もう一度お試しください。調整した数値はこの画面に残っています。");
+      updated = await saveThoughtJournalRecord(receiptToSave, {
+        storageKey: STORAGE_KEY,
+        periodStorageKey: TIME_ACCOUNTING_STORAGE_KEY,
+      });
+    } catch (error) {
+      setReaderError(error instanceof Error ? error.message : "保存できませんでした。ブラウザの保存設定を確認して、もう一度お試しください。調整した数値はこの画面に残っています。");
       return;
     }
-    setReceiptData(updated);
+    setReceiptData([...updated]);
     setReaderError("");
     setReaderStep("closed");
     setScannedReceipt(null);
@@ -927,14 +1350,15 @@ function App() {
     scrollScreenToTop("smooth");
   }
 
-  function resetDemoData() {
+  async function resetDemoData() {
     if (!window.confirm("デモデータをリセットしますか？")) return;
 
     try {
+      const cleared = await clearThinkingLedgerRecords(thinkingMutationOptions());
       localStorage.removeItem(RAW_CONVERSATION_KEY);
-      localStorage.removeItem(THINKING_LEDGER_KEY);
+      applyThinkingLedger(cleared);
     } catch {
-      showToast("保存先にアクセスできないため、リセットできませんでした。");
+      showToast("締め済み月を含むか保存先にアクセスできないため、リセットできませんでした。");
       return;
     }
 
@@ -999,34 +1423,23 @@ function App() {
     scrollScreenToTop("auto");
   }
 
-  function saveIssuedReceiptToLedger() {
+  async function saveIssuedReceiptToLedger() {
     if (!issuedReceipt) return;
 
     try {
-      const receiptData = issuedReceipt;
-      const current = loadThinkingLedger();
-      const exists = current.some((receipt) => receipt.receiptNo === receiptData.receiptNo);
-      const updatedLedger = exists ? current : [receiptData, ...current];
-      persistLedger(updatedLedger);
-      setLedgerMessage("思考帳簿に保存しました");
+      applyThinkingLedger(await addThinkingLedgerRecords([issuedReceipt], thinkingMutationOptions()));
       setLedgerMessage("帳簿に保存しました。");
-    } catch {
-      setLedgerMessage("帳簿に保存できませんでした。ブラウザの保存設定を確認してください。");
+    } catch (error) {
+      setLedgerMessage(error instanceof Error ? error.message : "帳簿に保存できませんでした。ブラウザの保存設定を確認してください。");
     }
   }
 
-  function addSampleLedgerData() {
+  async function addSampleLedgerData() {
     try {
-      const current = loadThinkingLedger();
-      const receiptNos = new Set(current.map((receipt) => receipt.receiptNo));
-      const samplesToAdd = sampleThinkingLedgerReceipts.filter(
-        (receipt) => !receiptNos.has(receipt.receiptNo),
-      );
-      const updatedLedger = [...samplesToAdd, ...current];
-      persistLedger(updatedLedger);
+      applyThinkingLedger(await addThinkingLedgerRecords(sampleThinkingLedgerReceipts, thinkingMutationOptions()));
       showToast("開発確認用のサンプル帳簿データを追加しました。");
-    } catch {
-      showToast("サンプル帳簿データを追加できませんでした。");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "サンプル帳簿データを追加できませんでした。");
     }
   }
 
@@ -1068,22 +1481,92 @@ function App() {
     }
   }
 
+  const weeklyPrimaryView = toWeeklyPrimaryView(activeTab);
+  const hasPendingRecordWork = pendingTimeAcknowledgement.length > 0 || timeRecordPreview.length > 0;
+  const timeRecordTransferTools = <>
+    {pendingTimeAcknowledgement.length > 0 && (
+      <section className="extension-import-card time-record-preview" aria-label="利用時間の完了通知待ち">
+        <div className="import-card-heading">
+          <strong>会計保存済み・拡張機能への完了通知待ち</strong>
+          <p>会計への保存は完了しています。通知だけを再試行しても、仕訳や利用時間は増えません。</p>
+        </div>
+        <p className="time-record-preview-total" role="status">
+          <strong>{pendingTimeAcknowledgement.length}件</strong>
+          <span>合計 {formatTimeRecordDuration(pendingTimeAcknowledgement.reduce((sum, record) => sum + record.durationSeconds, 0))}</span>
+        </p>
+        <button className="extension-import-button" type="button" disabled={timeImportBusy} onClick={retryTimeRecordAcknowledgement}>
+          完了通知を再試行
+        </button>
+        {timeImportMessage && <p className="candidate-message" role="status">{timeImportMessage}</p>}
+      </section>
+    )}
+    {timeRecordPreview.length > 0 && pendingTimeAcknowledgement.length === 0 && (
+      <section className="extension-import-card time-record-preview" aria-label="利用時間の連携内容">
+        <div className="import-card-heading">
+          <strong>利用時間の連携内容を確認</strong>
+          <p>受信した実測時間は、本人が確認するまで活動・仕訳・決算に反映されません。</p>
+        </div>
+        <p className="time-record-preview-total" role="status">
+          <strong>{timeRecordPreview.length}件</strong>
+          <span>合計 {formatTimeRecordDuration(timeRecordTotalSeconds)}</span>
+        </p>
+        <button className="extension-import-button" type="button" disabled={timeImportBusy} onClick={importTimeRecordPreview}>
+          会計に取り込む
+        </button>
+        {timeImportMessage && <p className="candidate-message" role="status">{timeImportMessage}</p>}
+      </section>
+    )}
+    <details className="extension-import-card manual-time-transfer" aria-label="実測記録の手動連携">
+      <summary>自動連携できない場合：実測記録を手動で読み込む</summary>
+      <p>拡張機能の「実測記録をコピー」でコピーしたデータを貼り付けます。ID・日時・秒数を検証し、既存IDは保存時に照合します。会話本文やAPIキーは受け付けません。</p>
+      <label>
+        手動連携用データ
+        <textarea
+          value={manualTimeTransferText}
+          onChange={(event) => setManualTimeTransferText(event.target.value)}
+          placeholder="拡張機能からコピーしたデータを貼り付け"
+          rows={4}
+        />
+      </label>
+      <button className="secondary-action" type="button" disabled={!manualTimeTransferText.trim()} onClick={loadManualTimeRecords}>
+        内容を確認する
+      </button>
+      {manualTimeTransferMessage && <p className="candidate-message" role="status">{manualTimeTransferMessage}</p>}
+    </details>
+  </>;
+
   return (
     <div className="app-shell">
-      <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}`}>
-        <Header onOpenSettlement={openSettlement} />
+      <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}${RESEARCH_WEEKLY_MODE ? " research-frame" : ""}`}>
+        <Header onOpenSettlement={openSettlement} onOpenSettings={() => handleTabChange("settings")} researchMode={RESEARCH_WEEKLY_MODE} />
         <div className="screen" ref={screenRef}>
-          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
+          {!isSettlementOpen && RESEARCH_WEEKLY_MODE && (
+            <WeeklyWorkspaceScreen
+              view={weeklyPrimaryView}
+              onNavigate={(view) => handleTabChange(fromWeeklyPrimaryView(view))}
+              hasPendingRecordWork={hasPendingRecordWork}
+              recordTools={timeRecordTransferTools}
+            />
+          )}
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && timeRecordTransferTools}
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && !issuedReceipt && !conversationCandidate && !conversationMessage && (
             <HomeScreen
               stats={stats}
-              receipts={receiptData}
+              receipts={currentReceiptData}
+              monthLabel={currentMonthLabel}
+              allReceiptMinutes={allReceiptStats.totalMinutes}
+              measuredTimeSeconds={timeAccountingView.currentMonthSeconds}
+              measuredTimeRecordCount={timeAccountingView.currentMonthRecordCount}
+              automaticTimeImportEnabled={automaticTimeImportEnabled}
+              automaticTimeImportBusy={automaticTimeImportBusy}
+              automaticTimeImportMessage={automaticTimeImportMessage}
+              onAutomaticTimeImportChange={updateAutomaticTimeImport}
               onShowAnalysis={showAnalysis}
               onShowReceipts={showReceipts}
-              onStartReader={openReader}
               onOpenReceipt={setSelectedReceipt}
             />
           )}
-          {!isSettlementOpen && activeTab === "home" && !issuedReceipt && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && !issuedReceipt && (
             <section className="extension-import-card extension-import-card-top" aria-label="Chrome拡張機能との連携">
               <div className="import-card-heading">
                 <strong>{conversationCandidate ? "取り込んだ会話を確認" : "Chrome拡張機能から取り込む"}</strong>
@@ -1095,14 +1578,21 @@ function App() {
                 <button className="secondary-action" type="button" onClick={() => { setConversationCandidate(null); setConversationMessage(""); }}>レシート画面に戻る</button>
               </> : <>
                 <button className="extension-import-button" type="button" onClick={loadExtensionConversation}><ScanLine size={18} />拡張機能データを読み込む</button>
-                <button className="secondary-action" type="button" onClick={loadDemoConversation}>サンプル会話を読み込む</button>
                 <a className="secondary-action" href="./ai-thought-receipt-bridge.zip" download>Chrome拡張機能をダウンロード</a>
-                <p className="extension-setup-hint">ZIPを展開し、Chromeの拡張機能管理画面で「デベロッパーモード」→「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。導入済みの場合は更新版のフォルダーに入れ替えて、拡張機能を再読み込みしてください。</p>
+                <details className="extension-help">
+                  <summary>拡張機能の設定方法</summary>
+                  <p className="extension-setup-hint">ZIPを展開し、Chromeの拡張機能管理画面で「デベロッパーモード」→「パッケージ化されていない拡張機能を読み込む」からフォルダーを選択します。</p>
+                </details>
+                {SHOW_DEMO_TOOLS && <details className="dev-tools">
+                  <summary>開発用デモ</summary>
+                  <button className="secondary-action" type="button" onClick={loadDemoConversation}>サンプル会話を読み込む</button>
+                  <button className="secondary-action" type="button" onClick={openReader}>サンプルレシートを読み込む</button>
+                </details>}
                 {conversationMessage && <button className="secondary-action" type="button" onClick={() => setConversationMessage("")}>レシート画面に戻る</button>}
               </>}
             </section>
           )}
-          {!isSettlementOpen && activeTab === "home" && issuedReceipt && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "home" && issuedReceipt && (
             <section className="extension-import-card extension-import-card-top print-receipt-host">
               <IssuedReceiptPanel
                 receipt={issuedReceipt}
@@ -1118,7 +1608,7 @@ function App() {
                 />
             </section>
           )}
-          {!isSettlementOpen && activeTab === "tax" && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "tax" && (
             <div className="stack">
               <SettlementPeriodNavigation
                 value={settlementView}
@@ -1152,10 +1642,20 @@ function App() {
               )}
             </div>
           )}
-          {!isSettlementOpen && activeTab === "journal" && (
-            <JournalScreen receipts={receiptData} highlightedReceiptId={highlightedReceiptId} />
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "weekly" && <WeeklyWorkspaceScreen />}
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "journal" && (
+            <JournalScreen
+              receipts={currentReceiptData}
+              monthLabel={currentMonthLabel}
+              highlightedReceiptId={highlightedReceiptId}
+              timeRows={timeAccountingView.rows}
+              timeImportHistory={timeImportHistory}
+              onCancelTimeRecord={cancelTimeRecord}
+              onReregisterTimeRecord={reregisterTimeRecord}
+              onCorrectTimeRecord={correctTimeRecord}
+            />
           )}
-          {!isSettlementOpen && activeTab === "receipts" && (
+          {!isSettlementOpen && !RESEARCH_WEEKLY_MODE && activeTab === "receipts" && (
             ledgerStatus !== "ready" ? <LedgerLoadState status={ledgerStatus} onRetry={refreshLedger} /> : <ReceiptsScreen
               receipts={receiptData}
               thinkingLedger={thinkingLedger}
@@ -1193,7 +1693,7 @@ function App() {
           onJournalChange={updateScannedJournalAmount}
           error={readerError}
         />
-        {analysisFocus === "analysis-screen-time" && <ScreenTimeModal stats={stats} onClose={() => setAnalysisFocus(null)} />}
+        {analysisFocus === "analysis-screen-time" && <ScreenTimeModal stats={allReceiptStats} onClose={() => setAnalysisFocus(null)} />}
         <ReceiptDetailModal receipt={selectedReceipt} onClose={closeReceiptDetail} />
         <BottomNav activeTab={activeTab} onChange={handleTabChange} />
       </main>
@@ -1201,7 +1701,7 @@ function App() {
   );
 }
 
-function Header({ onOpenSettlement }: { onOpenSettlement: () => void }) {
+function Header({ onOpenSettlement, onOpenSettings, researchMode }: { onOpenSettlement: () => void; onOpenSettings: () => void; researchMode: boolean }) {
   return (
     <header className="top-header">
       <div>
@@ -1209,14 +1709,14 @@ function Header({ onOpenSettlement }: { onOpenSettlement: () => void }) {
         <h1>私とAIの確定申告</h1>
         {IS_PREVIEW && <p className="preview-notice">確認用プレビュー · 本番の記録には影響しません</p>}
       </div>
-      <AiSettingsButton />
+      {!researchMode && <AiSettingsButton />}
       <button
         className="icon-button"
         type="button"
-        aria-label="決算を開く"
-        onClick={onOpenSettlement}
+        aria-label={researchMode ? "設定を開く" : "決算を開く"}
+        onClick={researchMode ? onOpenSettings : onOpenSettlement}
       >
-        <BookOpenText size={20} />
+        {researchMode ? <Settings size={20} /> : <BookOpenText size={20} />}
       </button>
     </header>
   );
@@ -1650,13 +2150,14 @@ function ScreenTimeModal({ stats, onClose }: { stats: ReturnType<typeof buildSta
       <div className="reader-modal">
         <button className="reader-close" type="button" aria-label="閉じる" onClick={onClose} autoFocus><X size={18} /></button>
         <div className="reader-panel" id="analysis-screen-time">
-          <h2 id="screen-time-title">AIスクリーンタイム</h2>
-          <p className="reader-description">保存済みの思考レシートに記録された合計時間です。</p>
+          <h2 id="screen-time-title">レシート記載時間（目安）</h2>
+          <p className="reader-description">思考レシートに記載された時間の合計です。拡張機能が計測した実測利用時間とは別の値です。</p>
           <strong className="screen-time-total">{formatHours(stats.totalMinutes)}</strong>
           <section className="card screen-time-chart">
-            <SectionTitle icon={<Clock3 size={18} />} title="月別AIスクリーンタイム" />
-            <MonthlyBars data={stats.monthlyScreenTime} />
-            <p className="reader-description">2〜5月は既存の見本データです。</p>
+            <SectionTitle icon={<Clock3 size={18} />} title="月別レシート記載時間" />
+            {stats.monthlyScreenTime.length > 0
+              ? <MonthlyBars data={stats.monthlyScreenTime} />
+              : <p className="reader-description">時間が記載された思考レシートはまだありません。</p>}
           </section>
           <button className="secondary-action" type="button" onClick={onClose}>レシートに戻る</button>
         </div>
@@ -1725,75 +2226,93 @@ function PreviousSettlementModal({ onClose }: { onClose: () => void }) {
 function HomeScreen({
   stats,
   receipts,
+  monthLabel,
+  allReceiptMinutes,
+  measuredTimeSeconds,
+  measuredTimeRecordCount,
+  automaticTimeImportEnabled,
+  automaticTimeImportBusy,
+  automaticTimeImportMessage,
+  onAutomaticTimeImportChange,
   onShowAnalysis,
   onShowReceipts,
-  onStartReader,
   onOpenReceipt,
 }: {
   stats: ReturnType<typeof buildStats>;
   receipts: ThoughtReceipt[];
+  monthLabel: string;
+  allReceiptMinutes: number;
+  measuredTimeSeconds: number;
+  measuredTimeRecordCount: number;
+  automaticTimeImportEnabled: boolean;
+  automaticTimeImportBusy: boolean;
+  automaticTimeImportMessage: string;
+  onAutomaticTimeImportChange: (enabled: boolean) => void;
   onShowAnalysis: (focus?: AnalysisFocus) => void;
   onShowReceipts: (filter?: ReceiptFilter | null) => void;
-  onStartReader: () => void;
   onOpenReceipt: (receipt: ThoughtReceipt) => void;
 }) {
-  const latestReceipt = receipts[0];
-
   return (
     <section className="stack">
       <div className="hero-ledger">
         <div className="hero-copy">
-          <p className="eyebrow light">2026年6月</p>
-          <h2>今月は、企画・制作の場面でAIとの距離が近めでした。</h2>
-          <p>
-            AIに整理を頼る一方で、最後の判断は自分の言葉で残せています。
-          </p>
+          <p className="eyebrow light">{monthLabel}</p>
+          <h2>{stats.receiptCount > 0
+            ? "AIとの時間と思考の記録を、今月の帳簿にまとめています。"
+            : "AIとの記録を、ここから始められます。"}</h2>
+          <p>{stats.receiptCount > 0
+            ? "実測した利用時間と、自分で残した思考レシートを分けて確認できます。"
+            : "利用時間は拡張機能で、考えた内容は思考レシートで記録できます。"}</p>
         </div>
-        <button
-          className="hero-total pressable-surface"
-          type="button"
-          onClick={() => onShowAnalysis("analysis-screen-time")}
-        >
+        <div className="hero-total">
           <Clock3 size={18} />
-          <span>{formatHours(stats.totalMinutes)}</span>
-          <small>AIスクリーンタイム</small>
-          <em className="tap-hint hero-hint">見る</em>
-        </button>
+          <span>{formatTimeRecordDuration(measuredTimeSeconds)}</span>
+          <small>今月のAI実測利用時間</small>
+          <em>{measuredTimeRecordCount}件</em>
+        </div>
       </div>
 
-      <button
-        className="home-reader-card pressable-surface"
-        type="button"
-        onClick={onStartReader}
-      >
-        <span className="home-reader-icon">
-          <Plus size={21} />
-        </span>
-        <span className="home-reader-copy">
-          <strong>思考レシートを読み取る</strong>
-          <small>AIとの会話を、思考帳簿に追加します。</small>
-        </span>
-        <ChevronRight size={20} />
-      </button>
+      <section className="card auto-time-import-card" aria-labelledby="autoTimeImportTitle">
+        <div>
+          <strong id="autoTimeImportTitle">自動取り込み</strong>
+          <p>Webアプリを開いたとき、確定済みで未取り込みの利用時間だけを帳簿へ保存します。</p>
+        </div>
+        <label className="auto-time-import-toggle">
+          <input
+            type="checkbox"
+            checked={automaticTimeImportEnabled}
+            onChange={(event) => onAutomaticTimeImportChange(event.target.checked)}
+          />
+          <span aria-hidden="true" />
+          <b>{automaticTimeImportEnabled ? "ON" : "OFF"}</b>
+        </label>
+        <small>初期設定はOFFです。手動の「会計に取り込む」も引き続き利用できます。</small>
+        {automaticTimeImportBusy && !automaticTimeImportMessage && (
+          <p className="auto-time-import-status" role="status">確認しています…</p>
+        )}
+        {automaticTimeImportMessage && (
+          <p className="auto-time-import-status" role="status">{automaticTimeImportMessage}</p>
+        )}
+      </section>
 
       <div className="metric-grid">
         <MetricCard
           icon={<ReceiptText size={18} />}
-          label="思考レシート"
+          label="今月の思考レシート"
           value={`${stats.receiptCount}枚`}
           tone="blue"
-          onClick={() => onShowReceipts(null)}
+          onClick={stats.receiptCount > 0 ? () => onShowReceipts(null) : undefined}
         />
         <MetricCard
-          icon={<Coins size={18} />}
-          label="今日の思考残高"
-          value="納得 +3"
+          icon={<Clock3 size={18} />}
+          label="保存済みレシート記載時間（目安）"
+          value={formatHours(allReceiptMinutes)}
           tone="sky"
-          onClick={() => latestReceipt && onOpenReceipt(latestReceipt)}
+          onClick={() => onShowAnalysis("analysis-screen-time")}
         />
       </div>
 
-      <section className="card">
+      {stats.receiptCount > 0 ? <><section className="card">
         <SectionTitle icon={<WalletCards size={18} />} title="今月のまとめ" />
         <div className="summary-list">
           <SummaryRow
@@ -1808,7 +2327,7 @@ function HomeScreen({
             value={stats.topRole}
             onClick={() => onShowReceipts({ type: "role", value: stats.topRole })}
           />
-          <SummaryRow label="AIとの距離感" value="近め / ほどよい中心" />
+          <SummaryRow label="AIとの距離感" value={stats.topDistance} />
           <SummaryRow
             label="自己判断残高"
             value={`${stats.selfDecisionCount}件 記録`}
@@ -1820,8 +2339,7 @@ function HomeScreen({
       <section className="card soft-blue">
         <SectionTitle icon={<Sparkles size={18} />} title="今月の振り返り" />
         <p className="reflection">
-          今週は、気持ちを整えるためにAIを使う場面もありました。相談後の
-          「自分で決めたこと」が残っているので、思考の流れをあとから見返せます。
+          保存した思考レシートから、AIに求めた役割と自分で決めたことを振り返れます。
         </p>
       </section>
 
@@ -1837,6 +2355,10 @@ function HomeScreen({
           ))}
         </div>
       </section>
+      </> : <section className="card home-empty-state">
+        <SectionTitle icon={<ReceiptText size={18} />} title="今月の思考レシート" />
+        <p>今月の思考レシートはまだありません。AIとの会話を取り込んで保存すると、ここにまとめが表示されます。</p>
+      </section>}
     </section>
   );
 }
@@ -2132,13 +2654,13 @@ function LedgerEmptyState({ onAddSamples }: { onAddSamples: () => void }) {
   return (
     <section className="ledger-empty-state">
       <p>{emptyLedgerMessage}</p>
-      <details className="dev-tools">
+      {SHOW_DEMO_TOOLS && <details className="dev-tools">
         <summary>開発用</summary>
         <button className="secondary-action" type="button" onClick={onAddSamples}>
           サンプル帳簿データを追加
         </button>
         <small>thinkingLedger に複数件のサンプルを保存します。</small>
-      </details>
+      </details>}
     </section>
   );
 }
@@ -2172,8 +2694,8 @@ function LedgerBreakdown({
 function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
   receipt: IssuedThinkingReceipt;
   onClose: () => void;
-  onUpdate: (receipt: IssuedThinkingReceipt) => void;
-  onDelete: (receiptNo: string) => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => Promise<void>;
+  onDelete: (receiptNo: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(receipt);
   const [editing, setEditing] = useState(false);
@@ -2191,10 +2713,10 @@ function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
   return (
     <section className="ledger-detail-card" ref={detailRef} tabIndex={-1} aria-label="レシート詳細">
       <SectionTitle icon={<ReceiptText size={18} />} title="レシート詳細" />
-      {editing ? <form className="ledger-edit-form" onSubmit={(event) => {
+      {editing ? <form className="ledger-edit-form" onSubmit={async (event) => {
         event.preventDefault();
         if (!ledgerDate(draft)) { setError("発行日時または会話日時を、年月日まで入力してください。"); return; }
-        try { onUpdate(draft); setEditing(false); setError(""); } catch { setError("保存できませんでした。保存先を確認し、再読み込みしてからお試しください。"); }
+        try { await onUpdate(draft); setEditing(false); setError(""); } catch (error) { setError(error instanceof Error ? error.message : "保存できませんでした。保存先を確認し、再読み込みしてからお試しください。"); }
       }}>
         <p>レシート番号：{receipt.receiptNo}</p>
         {fields.map(({ key, label }) => <label key={key}>{label}<textarea aria-label={label} rows={key === "selfDecision" || key === "aiAdded" ? 3 : 1} value={draft[key]} onChange={(event) => setDraft((current) => ({ ...current, [key]: event.target.value }))} /></label>)}
@@ -2213,8 +2735,8 @@ function LedgerReceiptDetail({ receipt, onClose, onUpdate, onDelete }: {
       </>}
       {confirmDelete && <div className="report-delete-confirm" role="alert">
         <p>「{receipt.topic}」を帳簿から削除します。週間・月間・年間の集計からも除かれます。</p>
-        <button className="secondary-action" type="button" onClick={() => {
-          try { onDelete(receipt.receiptNo); onClose(); } catch { setError("削除できませんでした。保存先を確認してください。"); }
+        <button className="secondary-action" type="button" onClick={async () => {
+          try { await onDelete(receipt.receiptNo); onClose(); } catch (error) { setError(error instanceof Error ? error.message : "削除できませんでした。保存先を確認してください。"); }
         }}>削除を確定</button>
         <button className="secondary-action" type="button" onClick={() => setConfirmDelete(false)}>削除をキャンセル</button>
       </div>}
@@ -2234,8 +2756,8 @@ function SavedLedgerList({
   receipts: IssuedThinkingReceipt[];
   onAddSamples: () => void;
   initialReceiptNo?: string;
-  onUpdate: (receipt: IssuedThinkingReceipt) => void;
-  onDelete: (receiptNo: string) => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => Promise<void>;
+  onDelete: (receiptNo: string) => Promise<void>;
 }) {
   const [selectedReceiptNo, setSelectedReceiptNo] = useState<string | null>(initialReceiptNo ?? null);
   const selectedReceipt =
@@ -2299,12 +2821,12 @@ function SavedLedgerList({
               onClose={() => setSelectedReceiptNo(null)}
             />
           )}
-          <details className="dev-tools">
+          {SHOW_DEMO_TOOLS && <details className="dev-tools">
             <summary>開発用</summary>
             <button className="secondary-action" type="button" onClick={onAddSamples}>
               サンプル帳簿データを追加
             </button>
-          </details>
+          </details>}
         </>
       )}
     </section>
@@ -2313,22 +2835,63 @@ function SavedLedgerList({
 
 function JournalScreen({
   receipts,
+  monthLabel,
   highlightedReceiptId,
+  timeRows,
+  timeImportHistory,
+  onCancelTimeRecord,
+  onReregisterTimeRecord,
+  onCorrectTimeRecord,
 }: {
   receipts: ThoughtReceipt[];
+  monthLabel: string;
   highlightedReceiptId: string | null;
+  timeRows: readonly TimeJournalRow[];
+  timeImportHistory: readonly TimeImportHistoryRow[];
+  onCancelTimeRecord: (recordId: string) => Promise<void>;
+  onReregisterTimeRecord: (recordId: string) => Promise<void>;
+  onCorrectTimeRecord: (recordId: string, seconds: number, reason: string) => Promise<void>;
 }) {
   const [selectedReceipt, setSelectedReceipt] = useState<ThoughtReceipt | null>(null);
+  const [journalKind, setJournalKind] = useState<"thought" | "time">("thought");
   const journalStats = useMemo(() => buildJournalStats(receipts), [receipts]);
   const journalReceipts = useMemo(() => getJournalReceipts(receipts), [receipts]);
 
   return (
     <section className="stack journal-screen">
       <div className="journal-header">
-        <p className="eyebrow">思考仕訳帳</p>
-        <h2>6月の思考仕訳</h2>
-        <p>AIとの会話を、思考の取引として記帳します。</p>
+        <p className="eyebrow">{journalKind === "thought" ? "思考仕訳帳" : "時間仕訳帳"}</p>
+        <h2>{journalKind === "thought" ? `${monthLabel}の思考仕訳` : "AI実測利用時間の仕訳"}</h2>
+        <p>{journalKind === "thought"
+          ? "AIとの会話を、思考の取引として記帳します。"
+          : "拡張機能から手動または自動で取り込んだ利用時間を、専用の帳簿から表示します。"}</p>
       </div>
+
+      <div className="journal-kind-switch" role="group" aria-label="仕訳帳の種類">
+        <button
+          type="button"
+          className={journalKind === "thought" ? "active" : ""}
+          aria-pressed={journalKind === "thought"}
+          onClick={() => setJournalKind("thought")}
+        >
+          思考仕訳
+        </button>
+        <button
+          type="button"
+          className={journalKind === "time" ? "active" : ""}
+          aria-pressed={journalKind === "time"}
+          onClick={() => setJournalKind("time")}
+        >
+          時間仕訳
+        </button>
+      </div>
+
+      {journalKind === "thought" ? receipts.length === 0 ? (
+        <section className="card home-empty-state">
+          <SectionTitle icon={<NotebookTabs size={18} />} title="今月の思考仕訳" />
+          <p>今月の思考仕訳はまだありません。思考レシートを保存すると、仕訳の内訳と明細がここに表示されます。</p>
+        </section>
+      ) : <>
 
       <section className="journal-summary-card">
         <span>今月の思考量合計</span>
@@ -2382,8 +2945,239 @@ function JournalScreen({
         receipt={selectedReceipt}
         onClose={() => setSelectedReceipt(null)}
       />
+      </> : <TimeJournalEntries
+        rows={timeRows}
+        historyRows={timeImportHistory}
+        onCancel={onCancelTimeRecord}
+        onReregister={onReregisterTimeRecord}
+        onCorrect={onCorrectTimeRecord}
+      />}
     </section>
   );
+}
+
+function TimeJournalEntries({
+  rows,
+  historyRows,
+  onCancel,
+  onReregister,
+  onCorrect,
+}: {
+  rows: readonly TimeJournalRow[];
+  historyRows: readonly TimeImportHistoryRow[];
+  onCancel: (recordId: string) => Promise<void>;
+  onReregister: (recordId: string) => Promise<void>;
+  onCorrect: (recordId: string, seconds: number, reason: string) => Promise<void>;
+}) {
+  const usageRows = rows.filter((row) => row.entryKind === "usage");
+  const reversalRows = rows.filter((row) => row.entryKind === "reversal");
+  const reregistrationRows = rows.filter((row) => row.entryKind === "reregistration");
+  const correctionRows = rows.filter((row) => row.entryKind === "correction");
+  const measuredSeconds = usageRows.reduce((sum, row) => sum + row.durationSeconds, 0);
+  const effectiveSeconds = usageRows.reduce(
+    (sum, row) => sum + (row.isActive ? (row.effectiveSeconds ?? row.durationSeconds) : 0),
+    0,
+  );
+  return <>
+    <section className="journal-summary-card time-journal-summary">
+      <span>有効な会計上の利用時間</span>
+      <strong>{formatTimeRecordDuration(effectiveSeconds)}</strong>
+      <p>利用記録 {usageRows.length}件 / 訂正 {correctionRows.length}件 / 取消 {reversalRows.length}件 / 再登録 {reregistrationRows.length}件</p>
+      <small>実測した生データは {formatTimeRecordDuration(measuredSeconds)} のまま保持しています。</small>
+    </section>
+
+    <section className="section-block">
+      <SectionTitle icon={<Clock3 size={18} />} title="時間仕訳" />
+      {rows.length === 0 ? (
+        <div className="card time-journal-empty">
+          <p>保存済みの時間仕訳はまだありません。</p>
+          <small>Chrome拡張機能から受信し、「会計に取り込む」を押すと表示されます。</small>
+        </div>
+      ) : (
+        <div className="time-journal-list">
+          {rows.map((row) => (
+            <article className={`time-journal-entry ${row.entryKind === "reversal" ? "reversal" : row.entryKind === "reregistration" ? "reregistration" : row.entryKind === "correction" ? "correction" : row.status === "取消済み" ? "cancelled" : ""}`} key={row.id}>
+              <div className="time-journal-entry-heading">
+                <div>
+                  <span>{row.entryKind === "reversal" ? "取消日" : row.entryKind === "reregistration" ? "再登録日" : row.entryKind === "correction" ? "訂正日" : "利用日"}：{formatFullDate(row.postedOn)}</span>
+                  <strong>{row.serviceName}</strong>
+                </div>
+                <div className="time-journal-entry-status">
+                  <em>{row.status}</em>
+                  <b>{row.entryKind === "reversal" || row.status === "減額訂正" ? "−" : row.status === "増額訂正" ? "+" : ""}{formatTimeRecordDuration(row.durationSeconds)}</b>
+                </div>
+              </div>
+              <dl>
+                <div><dt>借方</dt><dd>{row.debitAccount}</dd></div>
+                <div><dt>貸方</dt><dd>{row.creditAccount}</dd></div>
+              </dl>
+              {row.relatedEntryId && <p className="time-journal-related-id">
+                {row.entryKind === "reversal" ? "直前の有効仕訳" : row.entryKind === "reregistration" ? "直前の取消仕訳" : row.entryKind === "correction" ? "訂正前の有効仕訳" : "最新の操作仕訳"}：{row.relatedEntryId}
+              </p>}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+
+    <TimeImportHistory rows={historyRows} onCancel={onCancel} onReregister={onReregister} onCorrect={onCorrect} />
+  </>;
+}
+
+function TimeImportHistory({
+  rows,
+  onCancel,
+  onReregister,
+  onCorrect,
+}: {
+  rows: readonly TimeImportHistoryRow[];
+  onCancel: (recordId: string) => Promise<void>;
+  onReregister: (recordId: string) => Promise<void>;
+  onCorrect: (recordId: string, seconds: number, reason: string) => Promise<void>;
+}) {
+  const [pending, setPending] = useState<{
+    row: TimeImportHistoryRow;
+    kind: "cancellation" | "reregistration" | "correction";
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [correctedSeconds, setCorrectedSeconds] = useState("");
+  const [correctionReason, setCorrectionReason] = useState("");
+
+  async function confirmOperation() {
+    if (!pending || busy) return;
+    setBusy(true);
+    setErrorMessage("");
+    try {
+      if (pending.kind === "cancellation") await onCancel(pending.row.recordId);
+      else if (pending.kind === "reregistration") await onReregister(pending.row.recordId);
+      else {
+        const seconds = Number(correctedSeconds);
+        if (!Number.isSafeInteger(seconds) || seconds < 0) {
+          setErrorMessage("新しい利用時間は0秒以上の整数で入力してください。");
+          return;
+        }
+        await onCorrect(pending.row.recordId, seconds, correctionReason);
+      }
+      setPending(null);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "操作仕訳を保存できませんでした。");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return <>
+    <details className="card time-import-history">
+      <summary>
+        <span>取り込み履歴を見る</span>
+        <small>{rows.length}件</small>
+        <ChevronRight size={18} aria-hidden="true" />
+      </summary>
+      <div className="time-import-history-list">
+        {rows.length === 0 ? (
+          <p className="time-import-history-empty">取り込み済みの利用時間はまだありません。</p>
+        ) : rows.map((row) => (
+          <details className="time-import-history-item" key={row.recordId}>
+            <summary>
+              <div>
+                <small>{formatFullDate(row.usedOn)}</small>
+                <strong>{row.serviceName}</strong>
+              </div>
+              <b>{formatTimeRecordDuration(row.effectiveSeconds)}</b>
+              <span className={row.status === "取消済み" ? "cancelled" : row.status === "再登録済み" ? "reregistered" : ""}>{row.status}</span>
+              <ChevronRight size={16} aria-hidden="true" />
+            </summary>
+            <dl>
+              <div><dt>借方</dt><dd>{row.debitAccount}</dd></div>
+              <div><dt>貸方</dt><dd>{row.creditAccount}</dd></div>
+              <div><dt>記録秒数</dt><dd>{row.durationSeconds}秒</dd></div>
+              <div><dt>現在の有効利用時間</dt><dd>{row.effectiveSeconds}秒</dd></div>
+              <div><dt>取り込み日時</dt><dd>{formatImportDateTime(row.importedAt)}</dd></div>
+              <div><dt>元仕訳ID</dt><dd>{row.entryId}</dd></div>
+              <div className="history-record-id"><dt>記録ID</dt><dd>{row.recordId}</dd></div>
+              {row.actions.map((action, index) => <div className="history-action" key={action.entryId}>
+                <dt>{index + 1}. {action.kind === "cancellation" ? "取消" : action.kind === "reregistration" ? "再登録" : "利用時間の訂正"}</dt>
+                <dd>{formatImportDateTime(action.actedAt)}
+                  {action.kind === "correction" && <><br />{action.beforeSeconds}秒 → {action.afterSeconds}秒（差分 {Number(action.deltaSeconds) > 0 ? "+" : ""}{action.deltaSeconds}秒）{action.reason && <><br />理由：{action.reason}</>}</>}
+                  <br />仕訳ID：{action.entryId}<br />関連先：{action.relatedEntryId}</dd>
+              </div>)}
+            </dl>
+            {row.status === "取消済み" ? (
+              <button className="time-reregistration-button" type="button" onClick={() => {
+                setErrorMessage("");
+                setPending({ row, kind: "reregistration" });
+              }}>
+                再登録する
+              </button>
+            ) : (
+              <div className="time-history-operation-buttons">
+                <button className="time-correction-button" type="button" onClick={() => {
+                  setErrorMessage("");
+                  setCorrectedSeconds(String(row.effectiveSeconds));
+                  setCorrectionReason("");
+                  setPending({ row, kind: "correction" });
+                }}>
+                  利用時間を訂正する
+                </button>
+                <button className="time-cancellation-button" type="button" onClick={() => {
+                  setErrorMessage("");
+                  setPending({ row, kind: "cancellation" });
+                }}>
+                  この取り込みを取り消す
+                </button>
+              </div>
+            )}
+          </details>
+        ))}
+      </div>
+    </details>
+    {pending && (
+      <div className="reader-backdrop" role="dialog" aria-modal="true" aria-labelledby="time-cancellation-title">
+        <div className="reader-modal time-cancellation-modal">
+          <button className="reader-close" type="button" aria-label="閉じる" disabled={busy} onClick={() => setPending(null)}><X size={18} /></button>
+          <div className="reader-panel">
+            <p className="eyebrow">{pending.kind === "cancellation" ? "時間仕訳の取り消し" : pending.kind === "reregistration" ? "時間仕訳の再登録" : "利用時間の部分訂正"}</p>
+            <h2 id="time-cancellation-title">{pending.kind === "cancellation" ? "この取り込みを取り消しますか？" : pending.kind === "reregistration" ? "この取り込みを再登録しますか？" : "有効な利用時間を訂正しますか？"}</h2>
+            <p className="reader-description">{pending.kind === "cancellation"
+              ? "元の利用記録と仕訳は削除せず、貸借を反転した同じ秒数の取消仕訳を追加します。"
+              : pending.kind === "reregistration"
+                ? "元仕訳と取消仕訳は残したまま、元と同じ秒数の再登録仕訳を追加します。"
+                : "Chrome拡張機能の元の計測記録は変更せず、現在との差分だけを訂正仕訳として追加します。"}</p>
+            <div className="time-cancellation-summary">
+              <span>{formatFullDate(pending.row.usedOn)} / {pending.row.serviceName}</span>
+              <strong>{formatTimeRecordDuration(pending.row.effectiveSeconds)}</strong>
+              <small>{pending.kind === "cancellation"
+                ? `借方「${pending.row.creditAccount}」／貸方「${pending.row.debitAccount}」を追加`
+                : pending.kind === "reregistration"
+                  ? `借方「${pending.row.debitAccount}」／貸方「${pending.row.creditAccount}」を追加`
+                  : `現在の有効時間：${pending.row.effectiveSeconds}秒`}</small>
+            </div>
+            {pending.kind === "correction" && <div className="time-correction-fields">
+              <label>新しい利用時間（秒）
+                <input type="number" min="0" step="1" inputMode="numeric" value={correctedSeconds} onChange={(event) => setCorrectedSeconds(event.target.value)} disabled={busy} />
+              </label>
+              <label>訂正理由（任意）
+                <textarea maxLength={500} value={correctionReason} onChange={(event) => setCorrectionReason(event.target.value)} disabled={busy} />
+              </label>
+            </div>}
+            <p className="time-cancellation-warning">{pending.kind === "cancellation"
+              ? "取消後に同じ記録を再送しても、自動で再登録されません。"
+              : pending.kind === "reregistration"
+                ? "再登録はこの確認操作でだけ実行されます。Chrome拡張機能からの再送では復元されません。"
+                : "訂正前後の秒数・差分・操作日時は履歴に残り、元の記録は保持されます。"}</p>
+            {errorMessage && <p className="candidate-message" role="alert">{errorMessage}</p>}
+            <div className="time-cancellation-actions">
+              <button className="secondary-action" type="button" disabled={busy} onClick={() => setPending(null)}>戻る</button>
+              <button className={pending.kind === "cancellation" ? "time-cancellation-confirm" : pending.kind === "reregistration" ? "time-reregistration-confirm" : "time-correction-confirm"} type="button" disabled={busy} onClick={confirmOperation}>
+                {busy ? "保存しています…" : pending.kind === "cancellation" ? "取消仕訳を追加する" : pending.kind === "reregistration" ? "再登録仕訳を追加する" : "差分の訂正仕訳を追加する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </>;
 }
 
 function JournalDonutChart({
@@ -2548,7 +3342,7 @@ function JournalDetailModal({
             <JournalInfoRow label="相談科目" value={receipt.category} />
             <JournalInfoRow label="AIに求めた役割" value={receipt.aiRole} />
             <JournalInfoRow
-              label="AIスクリーンタイム"
+              label="レシート記載時間（目安）"
               value={`${receipt.aiScreenTimeMinutes}分`}
             />
           </div>
@@ -2653,8 +3447,8 @@ function ReceiptsScreen({
   monthKey: string | null;
   range: { anchor: Date; kind: SettlementView; receiptNo?: string } | null;
   returnView: SettlementView;
-  onUpdate: (receipt: IssuedThinkingReceipt) => void;
-  onDelete: (receiptNo: string) => void;
+  onUpdate: (receipt: IssuedThinkingReceipt) => Promise<void>;
+  onDelete: (receiptNo: string) => Promise<void>;
   onBackAnnual: () => void;
   onClearMonth: () => void;
   filter: ReceiptFilter | null;
@@ -2868,7 +3662,7 @@ function ReceiptReaderModal({
               <ConfirmRow label="相談テーマ" value={receipt.topic} />
               <ConfirmRow label="相談科目" value={receipt.category} />
               <ConfirmRow label="AIに求めた役割" value={receipt.aiRole} />
-              <ConfirmRow label="AIスクリーンタイム" value={`${receipt.aiScreenTimeMinutes}分`} />
+              <ConfirmRow label="レシート記載時間（目安）" value={`${receipt.aiScreenTimeMinutes}分`} />
               <ConfirmRow label="思考収入" value={receipt.gained} />
               <ConfirmRow label="会話前の気持ち" value={receipt.feelingBefore} />
               <ConfirmRow label="会話後の気持ち" value={receipt.feelingAfter} />
@@ -2983,7 +3777,7 @@ function ReceiptDetailModal({
             <ConfirmRow label="相談テーマ" value={receipt.topic} />
             <ConfirmRow label="相談科目" value={receipt.category} />
             <ConfirmRow label="AIに求めた役割" value={receipt.aiRole} />
-            <ConfirmRow label="AIスクリーンタイム" value={`${receipt.aiScreenTimeMinutes}分`} />
+            <ConfirmRow label="レシート記載時間（目安）" value={`${receipt.aiScreenTimeMinutes}分`} />
             <ConfirmRow label="思考収入" value={receipt.gained} />
             <ConfirmRow label="会話前の気持ち" value={receipt.feelingBefore} />
             <ConfirmRow label="会話後の気持ち" value={receipt.feelingAfter} />
@@ -3009,10 +3803,11 @@ function BottomNav({
   onChange: (tab: TabKey) => void;
 }) {
   const tabs: Array<{ key: TabKey; icon: ReactNode }> = [
-    { key: "home", icon: <ReceiptText size={20} /> },
+    { key: "home", icon: <Home size={20} /> },
+    { key: "weekly", icon: <ReceiptText size={20} /> },
     { key: "journal", icon: <BookOpenText size={20} /> },
-    { key: "receipts", icon: <NotebookTabs size={20} /> },
     { key: "tax", icon: <CalendarDays size={20} /> },
+    { key: "settings", icon: <Settings size={20} /> },
   ];
 
   return (
@@ -3030,6 +3825,22 @@ function BottomNav({
       ))}
     </nav>
   );
+}
+
+function toWeeklyPrimaryView(tab: TabKey): WeeklyPrimaryView {
+  if (tab === "weekly") return "records";
+  if (tab === "journal") return "journal";
+  if (tab === "tax") return "settlement";
+  if (tab === "settings") return "settings";
+  return "home";
+}
+
+function fromWeeklyPrimaryView(view: WeeklyPrimaryView): TabKey {
+  if (view === "records") return "weekly";
+  if (view === "journal") return "journal";
+  if (view === "settlement") return "tax";
+  if (view === "settings") return "settings";
+  return "home";
 }
 
 function MetricCard({
@@ -3657,6 +4468,7 @@ function normalizeIssuedReceipt(receipt: unknown): IssuedThinkingReceipt | null 
     selfDecision: target.selfDecision,
     feelingAfter: target.feelingAfter,
     thinkingBalance: target.thinkingBalance,
+    ...(typeof target.accountingPostedOn === "string" ? { accountingPostedOn: target.accountingPostedOn } : {}),
   } as IssuedThinkingReceipt;
 }
 
@@ -3863,6 +4675,7 @@ function buildStats(data: ThoughtReceipt[]) {
   const roleCounts = countBy(data, "aiRole");
   const feelingBeforeCounts = countBy(data, "feelingBefore");
   const feelingAfterCounts = countBy(data, "feelingAfter");
+  const distanceCounts = countBy(data, "distanceLevel");
   const moodChangeReceipts = data.filter(hasMoodChange);
   const reframedMoodCount = data.filter(isReframedMoodChange).length;
   const colors = [
@@ -3890,6 +4703,7 @@ function buildStats(data: ThoughtReceipt[]) {
     selfDecisionCount: data.filter((item) => item.selfDecision).length,
     topCategory: categoryShare[0]?.label ?? "-",
     topRole: roleShare[0]?.label ?? "-",
+    topDistance: topCountLabel(distanceCounts),
     categoryShare,
     roleShare,
     monthlyScreenTime: buildMonthlyScreenTime(data),
@@ -3902,22 +4716,19 @@ function buildStats(data: ThoughtReceipt[]) {
 
 function buildMonthlyScreenTime(data: ThoughtReceipt[]) {
   const receiptMonths = data.reduce<Record<string, number>>((acc, receipt) => {
-    const [, month] = receipt.date.split("-");
-    const label = `${Number(month)}月`;
-    acc[label] = (acc[label] ?? 0) + receipt.aiScreenTimeMinutes;
+    const [year, month] = receipt.date.split("-");
+    if (!year || !month) return acc;
+    const key = `${year}-${month}`;
+    acc[key] = (acc[key] ?? 0) + receipt.aiScreenTimeMinutes;
     return acc;
   }, {});
 
-  const baseMonths = new Set(baseMonthlyScreenTime.map((item) => item.month));
-  const dynamicMonths = Object.entries(receiptMonths)
-    .filter(([month]) => !baseMonths.has(month))
-    .map(([month, minutes]) => ({ month, minutes }))
-    .sort((a, b) => Number(a.month.replace("月", "")) - Number(b.month.replace("月", "")));
-
-  return [
-    ...baseMonthlyScreenTime,
-    ...dynamicMonths,
-  ];
+  return Object.entries(receiptMonths)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, minutes]) => {
+      const [year, month] = key.split("-");
+      return { month: `${year}年${Number(month)}月`, minutes };
+    });
 }
 
 function applyReceiptFilter(data: ThoughtReceipt[], filter: ReceiptFilter) {
@@ -4165,16 +4976,16 @@ function topTagsForJournal(data: ThoughtReceipt[], key: JournalCategoryKey) {
 }
 
 function loadReceipts() {
-  if (typeof window === "undefined") return initialReceipts.map(addSampleJournal);
+  if (typeof window === "undefined") return [];
 
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    if (!stored) return initialReceipts.map(addSampleJournal);
+    if (!stored) return [];
     const parsed = JSON.parse(stored) as ThoughtReceipt[];
-    if (!Array.isArray(parsed)) return initialReceipts.map(addSampleJournal);
+    if (!Array.isArray(parsed)) return [];
     return parsed.map(normalizeReceipt);
   } catch {
-    return initialReceipts.map(addSampleJournal);
+    return [];
   }
 }
 
@@ -4223,6 +5034,23 @@ function formatDate(date: string) {
 function formatFullDate(date: string) {
   const [year, month, day] = date.split("-");
   return `${year}年${Number(month)}月${Number(day)}日`;
+}
+
+function formatMonthLabel(date: Date) {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+}
+
+function formatImportDateTime(value: string) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ja-JP", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(date);
 }
 
 function getJournalNumber(receiptId: string) {

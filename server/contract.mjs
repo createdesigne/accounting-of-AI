@@ -17,5 +17,15 @@ export function parseResult(value) {
 }
 
 export class AiError extends Error {
-  constructor(code) { super(code); this.code = code; this.name = 'AiError'; }
+  constructor(code, { diagnosticStage, providerHttpStatus, providerErrorCode, timedOut, validationField, validationRule } = {}) {
+    super(code);
+    this.code = code;
+    this.name = 'AiError';
+    if (diagnosticStage !== undefined) this.diagnosticStage = diagnosticStage;
+    if (providerHttpStatus !== undefined) this.providerHttpStatus = providerHttpStatus;
+    if (providerErrorCode !== undefined) this.providerErrorCode = providerErrorCode;
+    if (timedOut !== undefined) this.timedOut = timedOut;
+    if (validationField !== undefined) this.validationField = validationField;
+    if (validationRule !== undefined) this.validationRule = validationRule;
+  }
 }

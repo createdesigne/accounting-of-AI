@@ -3,9 +3,16 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const assert = require('node:assert/strict');
-const { providers, conversationMarkup } = require('./aiConversationFixtures.cjs');
+const { providers, conversationMarkup, currentChatGptMarkup, liveChatGptMarkup } = require('./aiConversationFixtures.cjs');
 const script = fs.readFileSync(process.env.EXTRACTOR_SOURCE || path.resolve(__dirname, '../../chrome-extension/popup.js'), 'utf8');
-const sandbox = vm.createContext({ document: { getElementById: () => ({ addEventListener() {} }) } });
+const popupElement = { addEventListener() {}, value: 'production', textContent: '', disabled: false };
+const sandbox = vm.createContext({
+  document: {
+    getElementById: id => ['trackingStart', 'trackingStop', 'trackingStatus', 'timeLedgerTransfer', 'timeTransferStatus'].includes(id)
+      ? null
+      : popupElement,
+  },
+});
 vm.runInContext(script, sandbox);
 const extractor = vm.runInContext('extractConversationFromPage.toString()', sandbox);
 (async () => {
@@ -13,11 +20,11 @@ const extractor = vm.runInContext('extractConversationFromPage.toString()', sand
   let checks = 0;
   try {
     const page = await browser.newPage();
-    async function extract(url, body, setup) {
+    async function extract(url, body, setup, options) {
       await page.route(url, route => route.fulfill({ contentType: 'text/html; charset=utf-8', body }));
       await page.goto(url);
       if (setup) await setup(page);
-      const data = await page.evaluate(`(${extractor})()`);
+      const data = await page.evaluate(`(${extractor})(${JSON.stringify(options)})`);
       await page.unroute(url); checks++; return data;
     }
     const repeated = [{ role: 'user', text: '同じ質問です。' }, { role: 'assistant', text: '同じ回答です。' }, { role: 'user', text: '同じ質問です。' }, { role: 'assistant', text: '同じ回答です。' }, { role: 'user', text: '?' }];
@@ -53,6 +60,19 @@ const extractor = vm.runInContext('extractConversationFromPage.toString()', sand
         assert.deepEqual((await extract(url, '<main>' + turns + '</main>')).messages, repeated, 'ChatGPT: turn-level roles, regular/shared routes');
       }
     }
+    const currentChatGpt = await extract(providers.ChatGPT.url, currentChatGptMarkup(repeated, '現在のChatGPT'));
+    assert.deepEqual(currentChatGpt.messages, repeated, 'ChatGPT: current turn wrappers use explicit accessibility speaker headings and keep DOM order');
+    const currentChatGptJa = await extract(providers.ChatGPT.url, currentChatGptMarkup(repeated, '日本語UI', { user: 'あなたの発言：', assistant: 'ChatGPT の発言：' }));
+    assert.deepEqual(currentChatGptJa.messages, repeated, 'ChatGPT: localized explicit speaker headings are accepted');
+    const liveChatGpt = await extract(providers.ChatGPT.url, liveChatGptMarkup(repeated, '実ページ形式'));
+    assert.deepEqual(liveChatGpt.messages, repeated, 'ChatGPT: live data-conversation-role headings and adjacent bodies keep roles and order');
+    const liveDiagnostic = await extract(providers.ChatGPT.url, liveChatGptMarkup(repeated, '診断対象'), null, { diagnosticOnly: true });
+    assert.equal(liveDiagnostic.diagnostic.currentRoleMarkers, repeated.length);
+    assert.equal(liveDiagnostic.diagnostic.nonEmptyBodies, repeated.length);
+    assert.equal(liveDiagnostic.diagnostic.extractedMessages, repeated.length);
+    assert.equal(JSON.stringify(liveDiagnostic).includes(repeated[0].text), false, 'diagnostic must not contain conversation text');
+    const hiddenCurrentTurn = await extract(providers.ChatGPT.url, '<main><article data-testid="conversation-turn-0" hidden><h5>You said:</h5><div data-testid="user-message">Hidden</div></article><article data-testid="conversation-turn-1"><h5>Unknown speaker:</h5><div class="markdown">Do not guess</div><textarea>Unsent draft</textarea></article></main>');
+    assert.deepEqual(hiddenCurrentTurn.messages, [], 'ChatGPT: hidden turns, unsent drafts and unknown speaker labels are never collected or guessed');
     const nested = await extract(providers.ChatGPT.url, '<main><article data-turn="user"><div data-message-author-role="user"><div class="whitespace-pre-wrap">質問</div></div></article><article data-turn="assistant"><div data-message-author-role="assistant"><div class="markdown">回答</div></div></article><article data-turn="tool">Not a speaker</article></main>');
     assert.deepEqual(nested.messages, [{ role: 'user', text: '質問' }, { role: 'assistant', text: '回答' }], 'nested old/new markers must not duplicate messages or guess tool roles');
     const hydrated = await extract(providers.ChatGPT.url, '<main id="chat"></main>', async p => {
