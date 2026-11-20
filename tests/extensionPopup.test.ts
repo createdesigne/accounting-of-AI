@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const script = readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
 const protocolScript = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const conversation = { aiService: 'ChatGPT', conversationTitle: '相談 + 100% & 日本語', messages: [{ role: 'user', text: '実際の会話本文' }] };
-function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', storedDestination = '', failure = '', injectionFailure = '', trackingSession = '' } = {}) {
+function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', storedDestination = '', failure = '', injectionFailure = '', trackingSession = '', trackingSessions = null } = {}) {
   let click: () => Promise<void>;
   let changeDestination: () => Promise<void>;
   const created: string[] = [];
@@ -14,10 +14,11 @@ function popup({ source = 'https://chatgpt.com/c/example', result = conversation
   if (storedDestination) stored.selectedWebAppDestinationV1 = storedDestination;
   let injected = 0;
   let captureCounter = 0;
+  let trackingRequestCount = 0;
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination, disabled: false, addEventListener: (_event: string, handler: typeof changeDestination) => { changeDestination = handler; } } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
-    chrome: { runtime: { getManifest: () => ({ version: '0.5.5' }), sendMessage: async () => ({ ok: true, currentSessionId: trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
+    chrome: { runtime: { getManifest: () => ({ version: '0.5.12' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
     URL, URLSearchParams, Date, Error, crypto: { randomUUID: () => `capture-test-${++captureCounter}` }, console: { error() {} },
   });
   return { run: () => click(), changeDestination: async (value: string) => { elements.destination.value = value; await changeDestination(); }, created, elements, stored, injections: () => injected };
@@ -47,6 +48,16 @@ test('an active tracker session is attached as an exact linking hint without cha
   const page = popup({ trackingSession: 'session-exact-1' }); await page.run();
   const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
   assert.equal(raw.measurementSessionId, 'session-exact-1');
+});
+test('a session captured before extraction remains linked when tracking is stopped during extraction', async () => {
+  const page = popup({ trackingSessions: ['session-stop-race', ''] }); await page.run();
+  const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
+  assert.equal(raw.measurementSessionId, 'session-stop-race');
+});
+test('a session change during extraction is never guessed as the conversation measurement', async () => {
+  const page = popup({ trackingSessions: ['session-before', 'session-after'] }); await page.run();
+  const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
+  assert.equal(raw.measurementSessionId, undefined);
 });
 test('legacy/preview/local/research destinations preserve the application base path', async () => {
   for (const [destination, expected] of [['researchPreview', 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/'], ['legacy', 'https://createdesigne.github.io/accounting-of-AI/'], ['preview', 'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/'], ['local', 'http://localhost:5173/accounting-of-AI/'], ['research', 'http://localhost:5174/accounting-of-AI/']]) {
@@ -85,7 +96,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
   assert.equal(page.elements.createReceipt.disabled, false);
-  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.5/);
+  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.12/);
   assert.match(page.elements.status.textContent, /回答の生成が終わってから/);
 });
 test('unsupported or lookalike domains are not read', async () => {
@@ -152,6 +163,7 @@ test('privacy-safe diagnostic reports stages and counts without conversation tex
 
 function transferPopup(destinationValue = 'production', options: {
   existingUrl?: string;
+  activeTab?: { id: number; url: string; status: string };
   failuresBeforeSuccess?: number;
   alwaysFail?: boolean;
   injectionFailure?: string;
@@ -205,7 +217,9 @@ function transferPopup(destinationValue = 'production', options: {
         },
       },
       tabs: {
-        query: async () => [{ id: 7, url: options.existingUrl || 'https://accounting-of-ai.vercel.app/accounting-of-AI/', status: 'complete' }],
+        query: async (queryInfo: any) => queryInfo?.active
+          ? [options.activeTab || { id: 7, url: options.existingUrl || 'https://accounting-of-ai.vercel.app/accounting-of-AI/', status: 'complete' }]
+          : [{ id: 7, url: options.existingUrl || 'https://accounting-of-ai.vercel.app/accounting-of-AI/', status: 'complete' }],
         create: async ({ url }: { url: string }) => { createdUrl = url; return { id: 8, url, status: 'loading' }; },
         get: async (tabId: number) => {
           const configured = options.targetStates?.[Math.min(targetStateIndex, options.targetStates.length - 1)];
@@ -261,6 +275,18 @@ test('time transfer sends finalized records to an existing approved Web app tab'
   assert.equal(page.activated[0], 7);
   assert.match(page.elements.timeTransferStatus.textContent, /1件/);
   assert.match(page.elements.timeTransferStatus.textContent, /まだ帳簿には保存されていません/);
+});
+
+test('time transfer prefers the active conversation destination over an older matching tab', async () => {
+  const previewUrl = 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/';
+  const page = transferPopup('researchPreview', {
+    existingUrl: previewUrl,
+    activeTab: { id: 9, url: previewUrl, status: 'complete' },
+  });
+  await page.run();
+  assert.equal(page.delivered.length, 1);
+  assert.equal(page.delivered[0].tabId, 9);
+  assert.equal(page.activated[0], 9);
 });
 
 test('time transfer can open the added research-local destination without changing production', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { WeeklyDashboardScreen } from "./WeeklyDashboardScreen.tsx";
 import { WeeklyExtensionImportScreen } from "./WeeklyExtensionImportScreen.tsx";
 import { WeeklyJournalScreen } from "./WeeklyJournalScreen.tsx";
@@ -7,13 +7,26 @@ import { WeeklyReflectionScreen } from "./WeeklyReflectionScreen.tsx";
 import { WeeklySettlementScreen } from "./WeeklySettlementScreen.tsx";
 import { WeeklySettingsScreen } from "./WeeklySettingsScreen.tsx";
 import "./weeklyWorkspaceScreen.css";
+import "./weeklyResearchTypography.css";
 
 export type WeeklyPrimaryView = "home" | "records" | "journal" | "settlement" | "settings";
 type RecordView = "import" | "manual";
 type ClosingView = "settlement" | "reflection";
 
-export function WeeklyWorkspaceScreen({ view = "home", onNavigate = () => undefined }: { view?: WeeklyPrimaryView; onNavigate?: (view: WeeklyPrimaryView) => void }) {
+export function WeeklyWorkspaceScreen({
+  view = "home",
+  onNavigate = () => undefined,
+  recordTools = null,
+  hasPendingRecordWork = false,
+}: {
+  view?: WeeklyPrimaryView;
+  onNavigate?: (view: WeeklyPrimaryView) => void;
+  recordTools?: ReactNode;
+  hasPendingRecordWork?: boolean;
+}) {
   const [recordView, setRecordView] = useState<RecordView>("import");
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [selectedRecordScreen, setSelectedRecordScreen] = useState<"detail" | "accounting">("detail");
   const [closingView, setClosingView] = useState<ClosingView>("settlement");
   const [reflectionAnchor, setReflectionAnchor] = useState(() => new Date());
   const requestedRecordView = useRef<RecordView | null>(null);
@@ -26,6 +39,15 @@ export function WeeklyWorkspaceScreen({ view = "home", onNavigate = () => undefi
 
   function openRecords(manual = false) {
     requestedRecordView.current = manual ? "manual" : "import";
+    setSelectedRecordId(null);
+    setSelectedRecordScreen("detail");
+    onNavigate("records");
+  }
+
+  function openRecordAccounting(recordId: string) {
+    requestedRecordView.current = "manual";
+    setSelectedRecordId(recordId);
+    setSelectedRecordScreen("accounting");
     onNavigate("records");
   }
 
@@ -35,26 +57,25 @@ export function WeeklyWorkspaceScreen({ view = "home", onNavigate = () => undefi
     onNavigate("settlement");
   }
 
-  if (view === "home") return <WeeklyDashboardScreen onOpenRecords={() => openRecords()} onOpenSavedRecords={() => openRecords(true)} onOpenReflection={openReflection} />;
-  if (view === "journal") return <WeeklyJournalScreen onOpenRecords={() => openRecords(true)} />;
+  if (view === "home") return <WeeklyDashboardScreen onOpenRecords={() => openRecords()} onOpenSavedRecords={() => openRecords(true)} onOpenReflection={openReflection} hasPendingRecordWork={hasPendingRecordWork} />;
+  if (view === "journal") return <WeeklyJournalScreen onOpenRecords={() => openRecords(true)} onOpenRecordAccounting={openRecordAccounting} />;
   if (view === "settings") return <WeeklySettingsScreen onOpenRecords={() => openRecords(true)} />;
   if (view === "settlement") return <div className="weekly-workspace">
     <nav className="weekly-context-tabs" aria-label="週次決算の切り替え">
       <button type="button" aria-pressed={closingView === "settlement"} onClick={() => setClosingView("settlement")}>決算・B/S・P/L</button>
       <button type="button" aria-pressed={closingView === "reflection"} onClick={() => setClosingView("reflection")}>本人の振り返り</button>
     </nav>
-    {closingView === "settlement" ? <WeeklySettlementScreen onOpenRecords={() => openRecords(true)} onOpenReflection={openReflection} /> : <WeeklyReflectionScreen initialAnchor={reflectionAnchor} onOpenRecords={() => openRecords(true)} />}
+    {closingView === "settlement" ? <WeeklySettlementScreen onOpenRecordAccounting={openRecordAccounting} /> : <WeeklyReflectionScreen initialAnchor={reflectionAnchor} onOpenRecords={() => openRecords(true)} />}
   </div>;
 
   return <div className="weekly-workspace">
-    <section className="weekly-flow-guide" aria-label="日常利用の流れ">
-      <p className="eyebrow">日常利用は3ステップ</p>
-      <ol><li><b>会話と時間を取り込む</b><span>拡張機能の実測を本人が確認</span></li><li><b>分析候補を確認</b><span>同意した会話だけGemini分析</span></li><li><b>仕訳へ反映</b><span>分類は本人が確認・修正</span></li></ol>
-    </section>
-    <nav className="weekly-context-tabs" aria-label="記録方法の切り替え">
-      <button type="button" aria-pressed={recordView === "import"} onClick={() => setRecordView("import")}>拡張から取り込む</button>
-      <button type="button" aria-pressed={recordView === "manual"} onClick={() => setRecordView("manual")}>保存済み記録・手入力</button>
+    <nav className="weekly-record-shortcuts" aria-label="記録の関連メニュー">
+      {recordView === "import"
+        ? <><button type="button" onClick={() => { setSelectedRecordId(null); setRecordView("manual"); }}>保存済み活動を見る</button><a href="#weekly-record-help">連携方法・補助メニュー</a></>
+        : <button type="button" onClick={() => setRecordView("import")}>新しい会話を記録する</button>}
     </nav>
-    {recordView === "import" ? <WeeklyExtensionImportScreen onOpenRecords={() => setRecordView("manual")} /> : <WeeklyManualScreen />}
+    {hasPendingRecordWork && recordTools && <aside id="weekly-record-support" className="weekly-record-tools priority" aria-label="記録連携の続き">{recordTools}</aside>}
+    {recordView === "import" ? <WeeklyExtensionImportScreen onOpenRecords={(recordId) => { setSelectedRecordId(recordId ?? null); setSelectedRecordScreen("detail"); setRecordView("manual"); }} /> : <WeeklyManualScreen initialRecordId={selectedRecordId} initialScreen={selectedRecordScreen} />}
+    {!hasPendingRecordWork && recordTools && <aside id="weekly-record-support" className="weekly-record-tools" aria-label="記録の補助メニュー"><p className="eyebrow">補助メニュー</p>{recordTools}</aside>}
   </div>;
 }

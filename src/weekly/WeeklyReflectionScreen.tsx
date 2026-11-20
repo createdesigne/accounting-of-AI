@@ -178,12 +178,16 @@ export function WeeklyReflectionScreen({
   const missingSelections = draft.selectedActivities.filter((reference) => (
     !dashboard.records.some(({ record }) => record.id === reference.recordId)
   ));
+  const hasUnsavedChanges = !draftMatchesReflection(draft, savedReflection);
+  const saveState = savedReflection
+    ? hasUnsavedChanges ? "未保存の変更あり" : "保存済み"
+    : "未保存";
 
   return (
     <div className="weekly-reflection stack">
       <section className="weekly-reflection-hero">
         <div><p className="eyebrow light">本人による記録</p><h2>{navigation.isNextWeek ? "翌週の準備表示" : navigation.isCurrentWeek ? "今週の振り返り" : "選択した週の振り返り"}</h2><p>{formatPeriod(anchor, "weekly")}</p></div>
-        <span>{savedReflection ? "保存済み" : "未保存"}</span>
+        <span className={hasUnsavedChanges ? "unsaved" : "saved"} aria-live="polite">{saveState}</span>
       </section>
 
       {navigation.isNextWeek && <section className="weekly-reflection-preparation" aria-label="翌週の準備表示について">
@@ -200,75 +204,93 @@ export function WeeklyReflectionScreen({
       {error && <p className="weekly-reflection-alert error" role="alert">{error}</p>}
       {message && <p className="weekly-reflection-alert success" role="status">{message}</p>}
 
-      <section className="weekly-reflection-panel previous-challenge" aria-labelledby="previous-challenge-heading">
+      {previousReflection?.nextWeekChallenge && <section className="weekly-reflection-previous-challenge" aria-labelledby="previous-challenge-heading">
         <div><p className="eyebrow">前週からの引き継ぎ</p><h3 id="previous-challenge-heading">前週に設定した小さな挑戦</h3></div>
-        <p>{previousReflection?.nextWeekChallenge || "前週に保存された挑戦はありません。"}</p>
-      </section>
+        <p>{previousReflection.nextWeekChallenge}</p>
+      </section>}
 
       <section className="weekly-reflection-panel" aria-labelledby="reflection-input-heading">
         <div className="weekly-reflection-heading"><div><p className="eyebrow">自分の言葉で記録</p><h3 id="reflection-input-heading">週を振り返る</h3></div></div>
-        <p className="weekly-reflection-note">すべて本人が入力する欄です。AIによる自動生成・採点・成長評価は行いません。</p>
+        <p className="weekly-reflection-note">本人が自分の言葉で入力します。AIが自動生成したり、内容を上書きしたりすることはありません。</p>
         <div className="weekly-reflection-fields">
           <label>今週の大きな発見・学び<textarea disabled={navigation.isFutureWeek} value={draft.discoveryLearning} onChange={(event) => setDraft({ ...draft, discoveryLearning: event.target.value })} placeholder="気づいたこと、学んだことを自分の言葉で記録" /></label>
           <label>AIの提案に対して自分が判断・修正したこと<textarea disabled={navigation.isFutureWeek} value={draft.humanJudgment} onChange={(event) => setDraft({ ...draft, humanJudgment: event.target.value })} placeholder="採用しなかった案、修正した点、最後に自分で決めたこと" /></label>
-          <label>今週のAIとの関わり方についての振り返り<textarea disabled={navigation.isFutureWeek} value={draft.relationshipReflection} onChange={(event) => setDraft({ ...draft, relationshipReflection: event.target.value })} placeholder="AIに任せた範囲と、自分で考えた範囲を振り返る" /></label>
           <label>来週の小さな挑戦<textarea disabled={navigation.isFutureWeek} value={draft.nextWeekChallenge} onChange={(event) => setDraft({ ...draft, nextWeekChallenge: event.target.value })} placeholder="来週試したい、小さく具体的な行動" /></label>
         </div>
+        <details className="weekly-reflection-extra-question">
+          <summary>AIとの関わり方も振り返る（任意）</summary>
+          <label>今週のAIとの関わり方についての振り返り<textarea disabled={navigation.isFutureWeek} value={draft.relationshipReflection} onChange={(event) => setDraft({ ...draft, relationshipReflection: event.target.value })} placeholder="AIに任せた範囲と、自分で考えた範囲を振り返る" /></label>
+        </details>
       </section>
 
-      <section className="weekly-reflection-panel" aria-labelledby="important-activities-heading">
-        <div className="weekly-reflection-heading"><div><p className="eyebrow">思考レシートと関連付け</p><h3 id="important-activities-heading">代表的な活動を選ぶ</h3></div><strong>{draft.selectedActivities.length}/3件</strong></div>
-        <p className="weekly-reflection-note">その週の活動から最大3件を選べます。AIAS Levelは課題でのAIの役割設定であり、能力や成長の点数ではありません。</p>
-        {dashboard.records.length === 0 ? <p className="weekly-reflection-empty">この週の活動は0件です。活動がなくても振り返りを保存できます。</p> : (
-          <div className="weekly-reflection-activities">
-            {dashboard.records.map(({ record, allocatedSeconds }) => {
-              const selected = draft.selectedActivities.some((item) => item.recordId === record.id);
-              const task = record.taskId ? records.tasks.find((item) => item.id === record.taskId) : undefined;
-              return <label key={record.id} className={`${selected ? "selected" : ""}${navigation.isFutureWeek ? " disabled" : ""}`}>
-                <input type="checkbox" checked={selected} onChange={() => toggleActivity(record)} disabled={navigation.isFutureWeek || (!selected && draft.selectedActivities.length >= 3)} />
-                <span className="weekly-reflection-activity-copy">
-                  <span><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong><b>{formatDuration(allocatedSeconds)}</b></span>
-                  <small>{formatActivityDate(record.recordedAt)}・{record.activityCategory ?? "未分類"}・{sourceLabel(record.timeSource)}</small>
-                  <small>{task ? `AIAS Level ${task.plannedAiasLevel ?? "未設定"}（課題でのAIの役割）` : "AIAS課題設定なし"}</small>
-                  <p>{record.manualNotes?.discovery ?? record.manualNotes?.ownThoughts ?? "本人による活動メモなし"}</p>
-                </span>
-              </label>;
-            })}
-          </div>
-        )}
-        {missingSelections.length > 0 && <div className="weekly-reflection-missing">
-          <h4>現在の活動一覧にない保存済みリンク</h4>
-          {missingSelections.map((reference) => <div key={reference.recordId}><span>以前選択した活動（現在の活動一覧にはありません）</span><button type="button" onClick={() => removeActivityReference(reference.recordId)}>選択から外す</button></div>)}
-        </div>}
-      </section>
+      <details className="weekly-reflection-panel weekly-reflection-disclosure">
+        <summary><span><small>任意・最大3件</small><strong id="important-activities-heading">代表的な活動を選ぶ</strong></span><b>{draft.selectedActivities.length}/3件</b></summary>
+        <div className="weekly-reflection-disclosure-body">
+          <p className="weekly-reflection-note">選択した活動は思考レシートと関連付けて研究データに保持します。選ばなくても保存できます。</p>
+          {dashboard.records.length === 0 ? <p className="weekly-reflection-empty compact">この週の活動は0件です。</p> : (
+            <div className="weekly-reflection-activities">
+              {dashboard.records.map(({ record, allocatedSeconds }) => {
+                const selected = draft.selectedActivities.some((item) => item.recordId === record.id);
+                const task = record.taskId ? records.tasks.find((item) => item.id === record.taskId) : undefined;
+                return <label key={record.id} className={`${selected ? "selected" : ""}${navigation.isFutureWeek ? " disabled" : ""}`}>
+                  <input type="checkbox" checked={selected} onChange={() => toggleActivity(record)} disabled={navigation.isFutureWeek || (!selected && draft.selectedActivities.length >= 3)} />
+                  <span className="weekly-reflection-activity-copy">
+                    <span><strong>{task?.title ?? record.activityCategory ?? "未分類の活動"}</strong><b>{formatDuration(allocatedSeconds)}</b></span>
+                    <small>{formatActivityDate(record.recordedAt)}・{record.activityCategory ?? "未分類"}・{sourceLabel(record.timeSource)}</small>
+                    <small>{task ? `AIAS Level ${task.plannedAiasLevel ?? "未設定"}（課題でのAIの役割）` : "AIAS課題設定なし"}</small>
+                    <p>{record.manualNotes?.discovery ?? record.manualNotes?.ownThoughts ?? "本人による活動メモなし"}</p>
+                  </span>
+                </label>;
+              })}
+            </div>
+          )}
+          {missingSelections.length > 0 && <div className="weekly-reflection-missing">
+            <h4>現在の活動一覧にない保存済みリンク</h4>
+            {missingSelections.map((reference) => <div key={reference.recordId}><span>以前選択した活動（現在の活動一覧にはありません）</span><button type="button" onClick={() => removeActivityReference(reference.recordId)}>選択から外す</button></div>)}
+          </div>}
+        </div>
+      </details>
 
-      <section className="weekly-reflection-panel" aria-labelledby="reflection-aias-heading">
-        <div className="weekly-reflection-heading"><div><p className="eyebrow">活動前の課題設計</p><h3 id="reflection-aias-heading">この週のAIAS課題設定</h3></div><strong>{dashboard.tasks.length}件</strong></div>
-        <p className="weekly-reflection-note">課題で設定したAIの役割と、本人が判断する点を実際の活動と照らして確認します。Levelは利用者の能力評価ではありません。</p>
-        {dashboard.tasks.length === 0 ? <p className="weekly-reflection-empty">この週に登録・使用されたAIAS課題設定はありません。</p> : (
-          <div className="weekly-reflection-task-list">
-            {dashboard.tasks.map((task) => <article key={task.id}>
-              <div><strong>{task.title}</strong><span>Level {task.plannedAiasLevel ?? "未設定"}</span></div>
-              <p>{task.goal ?? "活動目的なし"}</p>
-              <small>課題で設定したAIの役割：{task.plannedAiasLevel === 1 ? "AI不使用" : task.delegatedToAi ?? "未設定"}</small>
-              <small>本人が判断する点：{task.humanDecision ?? "未設定"}</small>
-            </article>)}
-          </div>
-        )}
-      </section>
-
-      <section className="weekly-reflection-context" aria-label="AIAS課題設定と分析状態">
-        <p><strong>AI分析：</strong>分析済み {analysisCounts.complete}件／一部未評価 {analysisCounts.partial}件／未分析 {analysisCounts["not-connected"]}件／分析待ち {analysisCounts.pending}件／分析失敗 {analysisCounts.failed}件／対象外 {analysisCounts["not-applicable"]}件</p>
-        <p>一部未評価は、分析自体は完了し、根拠不足の項目だけを保留した状態です。分析失敗とは区別します。</p>
-        <p>本人の入力内容は将来の分析結果で上書きしません。現在のAI分析とも別に保存します。</p>
-      </section>
+      <details className="weekly-reflection-panel weekly-reflection-disclosure">
+        <summary><span><small>研究用・入力内容は変更しません</small><strong>研究用の補助情報を見る</strong></span><b>{dashboard.tasks.length > 0 ? `AIAS ${dashboard.tasks.length}件` : "分析状態"}</b></summary>
+        <div className="weekly-reflection-disclosure-body weekly-reflection-research-details">
+          {dashboard.tasks.length > 0 && <section aria-labelledby="reflection-aias-heading">
+            <div className="weekly-reflection-heading"><div><p className="eyebrow">活動前の課題設計</p><h3 id="reflection-aias-heading">この週のAIAS課題設定</h3></div><strong>{dashboard.tasks.length}件</strong></div>
+            <p className="weekly-reflection-note">AIAS Levelは課題でのAIの役割設定であり、利用者の能力評価ではありません。</p>
+            <div className="weekly-reflection-task-list">
+              {dashboard.tasks.map((task) => <article key={task.id}>
+                <div><strong>{task.title}</strong><span>Level {task.plannedAiasLevel ?? "未設定"}</span></div>
+                <p>{task.goal ?? "活動目的なし"}</p>
+                <small>課題で設定したAIの役割：{task.plannedAiasLevel === 1 ? "AI不使用" : task.delegatedToAi ?? "未設定"}</small>
+                <small>本人が判断する点：{task.humanDecision ?? "未設定"}</small>
+              </article>)}
+            </div>
+          </section>}
+          <section className="weekly-reflection-context" aria-label="AI分析状態の詳細">
+            <p><strong>AI分析：</strong>分析済み {analysisCounts.complete}件／一部未評価 {analysisCounts.partial}件／未分析 {analysisCounts["not-connected"]}件／分析待ち {analysisCounts.pending}件／分析失敗 {analysisCounts.failed}件／対象外 {analysisCounts["not-applicable"]}件</p>
+            <p>一部未評価は根拠不足の項目だけを保留した状態で、分析失敗とは異なります。</p>
+            <p>本人の入力はAI分析と別に保存し、分析結果で上書きしません。</p>
+          </section>
+        </div>
+      </details>
 
       <div className="weekly-reflection-actions">
-        <button type="button" className="secondary" onClick={onOpenRecords}>活動記録を確認する</button>
-        <button type="button" className="primary" disabled={saving || navigation.isFutureWeek} onClick={save}>{navigation.isFutureWeek ? "翌週開始後に保存できます" : saving ? "保存中…" : savedReflection ? "振り返りを更新する" : "振り返りを保存する"}</button>
+        <button type="button" className="primary" disabled={saving || navigation.isFutureWeek} onClick={save}>{navigation.isFutureWeek ? "翌週開始後に保存できます" : saving ? "保存中…" : "振り返りを保存する"}</button>
+        <button type="button" className="weekly-reflection-record-link" onClick={onOpenRecords}>活動記録を確認する</button>
       </div>
     </div>
   );
+}
+
+function draftMatchesReflection(draft: ReflectionDraft, saved: ReturnType<typeof reflectionForWeek>) {
+  if (!saved) return false;
+  return draft.discoveryLearning === saved.discoveryLearning
+    && draft.humanJudgment === saved.humanJudgment
+    && draft.relationshipReflection === saved.relationshipReflection
+    && draft.nextWeekChallenge === saved.nextWeekChallenge
+    && draft.selectedActivities.length === saved.selectedActivities.length
+    && draft.selectedActivities.every((item, index) => item.recordId === saved.selectedActivities[index]?.recordId
+      && item.thoughtReceiptId === saved.selectedActivities[index]?.thoughtReceiptId);
 }
 
 function loadRecordsSafely(): WeeklyRecordStoreV1 {

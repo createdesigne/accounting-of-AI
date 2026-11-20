@@ -1,9 +1,21 @@
 .research-export-scope,
 .research-export-check,
-.research-export-standard {
+.research-export-standard,
+.research-export-confirmation {
   border: 1px solid #cbd5e1;
   border-radius: 13px;
   background: #f8fafc;
+}
+
+.research-export-backup-note {
+  margin: 0;
+  padding: 12px 14px;
+  border-left: 4px solid #2563eb;
+  border-radius: 9px;
+  color: #334155;
+  background: #f8fafc;
+  font-size: 0.95rem;
+  line-height: 1.65;
 }
 
 .research-export-scope {
@@ -52,6 +64,20 @@
   color: #334155;
 }
 
+.research-export-refresh {
+  margin-top: 12px;
+  padding: 7px 2px;
+  border: 0;
+  color: #1e40af;
+  background: transparent;
+  font: inherit;
+  font-size: 0.92rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
 .research-export-standard,
 .research-export-check {
   padding: 13px;
@@ -78,9 +104,46 @@
   flex: 1 1 180px;
 }
 
+.research-export-actions .research-export-json {
+  flex-basis: 100%;
+  min-height: 50px;
+  font-size: 1.1rem;
+}
+
+.research-export-confirmation {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 13px;
+}
+
+.research-export-confirmation > div {
+  padding: 10px;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.research-export-confirmation dt {
+  color: #64748b;
+  font-size: 0.86rem;
+  font-weight: 750;
+}
+
+.research-export-confirmation dd {
+  margin: 4px 0 0;
+  color: #0f172a;
+  font-size: 0.96rem;
+  line-height: 1.55;
+}
+
 @media (max-width: 390px) {
   .research-export-week-nav strong {
     flex-basis: 100%;
     order: -1;
+  }
+
+  .research-export-confirmation {
+    grid-template-columns: 1fr;
   }
 }

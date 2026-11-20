@@ -15,6 +15,13 @@ test("weekly workspace exposes explicit week/all CSV and JSON research exports",
   assert.match(screen, /研究データJSON/);
   assert.match(screen, /週次振り返りCSV/);
   assert.match(screen, /週次B\/S・P\/L CSV/);
+  assert.match(screen, /className="primary-action research-export-json"/);
+  assert.match(screen, /対象期間/);
+  assert.match(screen, /対象データ/);
+  assert.match(screen, /出力形式/);
+  assert.match(screen, /最新の保存内容を読み直す/);
+  assert.match(screen, /データの復元や初期化は行いません/);
+  assert.match(screen, /完全バックアップや復元用ファイルではありません/);
 });
 
 test("sensitive text needs a second confirmation and conversation bodies and keys remain excluded", () => {

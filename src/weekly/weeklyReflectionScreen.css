@@ -10,8 +10,8 @@
   padding: 24px;
   border-radius: 24px;
   color: #f8fafc;
-  background: linear-gradient(135deg, #164e63, #0e7490 58%, #0891b2);
-  box-shadow: 0 18px 44px rgba(14, 116, 144, 0.2);
+  background: linear-gradient(135deg, #1e3a8a, #1d4ed8);
+  box-shadow: 0 16px 38px rgba(30, 64, 175, 0.18);
 }
 
 .weekly-reflection-hero h2,
@@ -21,6 +21,8 @@
 
 .weekly-reflection-hero h2 {
   margin: 5px 0 8px;
+  font-size: clamp(1.85rem, 3vw, 2.1rem);
+  line-height: 1.25;
 }
 
 .weekly-reflection-hero > span {
@@ -28,14 +30,26 @@
   padding: 7px 12px;
   border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 999px;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   font-weight: 800;
   background: rgba(255, 255, 255, 0.14);
 }
 
+.weekly-reflection-hero > span.unsaved {
+  color: #422006;
+  border-color: #fde68a;
+  background: #fef3c7;
+}
+
+.weekly-reflection-hero > span.saved {
+  color: #052e16;
+  border-color: #86efac;
+  background: #dcfce7;
+}
+
 .weekly-reflection-panel {
   padding: 22px;
-  border: 1px solid #cffafe;
+  border: 1px solid #e2e8f0;
   border-radius: 22px;
   background: #fff;
   box-shadow: 0 10px 28px rgba(15, 23, 42, 0.06);
@@ -43,10 +57,10 @@
 
 .weekly-reflection-preparation {
   padding: 15px 17px;
-  border: 1px solid #a5f3fc;
+  border: 1px solid #bfdbfe;
   border-radius: 16px;
-  color: #155e75;
-  background: #ecfeff;
+  color: #1e3a8a;
+  background: #eff6ff;
 }
 
 .weekly-reflection-preparation p {
@@ -54,12 +68,31 @@
   line-height: 1.6;
 }
 
-.weekly-reflection-panel.previous-challenge {
+.weekly-reflection-previous-challenge {
   display: grid;
-  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
-  gap: 20px;
+  grid-template-columns: minmax(170px, 0.55fr) minmax(0, 1.45fr);
+  gap: 16px;
   align-items: center;
-  background: #ecfeff;
+  padding: 14px 16px;
+  border: 1px solid #bfdbfe;
+  border-radius: 16px;
+  background: #eff6ff;
+}
+
+.weekly-reflection-previous-challenge h3,
+.weekly-reflection-previous-challenge p {
+  margin: 0;
+}
+
+.weekly-reflection-previous-challenge h3 {
+  color: #1e3a8a;
+  font-size: 1rem;
+}
+
+.weekly-reflection-previous-challenge > p {
+  color: #334155;
+  font-size: 1rem;
+  line-height: 1.65;
 }
 
 .weekly-reflection-panel h3,
@@ -80,13 +113,13 @@
 }
 
 .weekly-reflection-heading > strong {
-  color: #0e7490;
+  color: #1d4ed8;
 }
 
 .weekly-reflection-note {
   margin-top: 10px !important;
   color: #64748b;
-  font-size: 0.84rem;
+  font-size: 0.96rem;
   line-height: 1.65;
 }
 
@@ -101,25 +134,26 @@
   display: grid;
   gap: 8px;
   color: #334155;
-  font-size: 0.88rem;
+  font-size: 1.05rem;
   font-weight: 800;
 }
 
 .weekly-reflection-fields textarea {
-  min-height: 128px;
-  padding: 12px 13px;
+  min-height: 145px;
+  padding: 14px 15px;
   border: 1px solid #cbd5e1;
   border-radius: 13px;
   resize: vertical;
   color: #0f172a;
-  background: #f8fafc;
+  background: #fff;
   font: inherit;
-  line-height: 1.6;
+  font-size: 1rem;
+  line-height: 1.7;
 }
 
 .weekly-reflection-fields textarea:focus {
-  border-color: #0891b2;
-  outline: 3px solid rgba(8, 145, 178, 0.12);
+  border-color: #2563eb;
+  outline: 3px solid rgba(37, 99, 235, 0.12);
 }
 
 .weekly-reflection-fields textarea:disabled {
@@ -127,6 +161,107 @@
   border-color: #e2e8f0;
   background: #f1f5f9;
   cursor: not-allowed;
+}
+
+.weekly-reflection-extra-question {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.weekly-reflection-extra-question > summary {
+  color: #1e40af;
+  font-size: 1rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.weekly-reflection-extra-question > label {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  color: #334155;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.weekly-reflection-extra-question textarea {
+  min-height: 145px;
+  padding: 14px 15px;
+  border: 1px solid #cbd5e1;
+  border-radius: 13px;
+  resize: vertical;
+  color: #0f172a;
+  background: #fff;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.weekly-reflection-extra-question textarea:focus {
+  border-color: #2563eb;
+  outline: 3px solid rgba(37, 99, 235, 0.12);
+}
+
+.weekly-reflection-extra-question textarea:disabled {
+  color: #64748b;
+  border-color: #e2e8f0;
+  background: #f1f5f9;
+}
+
+.weekly-reflection-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.weekly-reflection-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.weekly-reflection-disclosure > summary::after {
+  content: "開く";
+  flex: 0 0 auto;
+  color: #1d4ed8;
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.weekly-reflection-disclosure[open] > summary::after {
+  content: "閉じる";
+}
+
+.weekly-reflection-disclosure > summary span {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.weekly-reflection-disclosure > summary small {
+  color: #64748b;
+  font-size: 0.9rem;
+  font-weight: 750;
+}
+
+.weekly-reflection-disclosure > summary strong {
+  color: #0f172a;
+  font-size: 1.18rem;
+}
+
+.weekly-reflection-disclosure > summary b {
+  margin-left: auto;
+  color: #1e3a8a;
+  font-size: 0.95rem;
+  white-space: nowrap;
+}
+
+.weekly-reflection-disclosure-body {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
 }
 
 .weekly-reflection-activities {
@@ -148,8 +283,8 @@
 }
 
 .weekly-reflection-activities > label.selected {
-  border-color: #22d3ee;
-  background: #ecfeff;
+  border-color: #60a5fa;
+  background: #eff6ff;
 }
 
 .weekly-reflection-activities > label.disabled {
@@ -161,7 +296,7 @@
   width: 18px;
   height: 18px;
   margin-top: 2px;
-  accent-color: #0891b2;
+  accent-color: #2563eb;
 }
 
 .weekly-reflection-activity-copy {
@@ -193,6 +328,11 @@
   color: #64748b;
   text-align: center;
   background: #f8fafc;
+}
+
+.weekly-reflection-empty.compact {
+  padding: 12px 14px;
+  text-align: left;
 }
 
 .weekly-reflection-missing {
@@ -250,7 +390,7 @@
 
 .weekly-reflection-task-list article > div span {
   flex: 0 0 auto;
-  color: #0e7490;
+  color: #1d4ed8;
   font-weight: 800;
 }
 
@@ -268,37 +408,57 @@
 
 .weekly-reflection-context p {
   margin: 4px 0;
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.weekly-reflection-research-details {
+  display: grid;
+  gap: 18px;
+}
+
+.weekly-reflection-research-details > section + section {
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
 }
 
 .weekly-reflection-actions {
   display: grid;
-  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
-  gap: 10px;
+  justify-items: center;
+  gap: 9px;
 }
 
 .weekly-reflection-actions button {
-  min-height: 44px;
-  padding: 11px 15px;
+  min-height: 50px;
+  padding: 12px 18px;
   border-radius: 13px;
+  font-size: 1.12rem;
   font-weight: 800;
   cursor: pointer;
 }
 
-.weekly-reflection-actions .secondary {
-  color: #0e7490;
-  border: 1px solid #67e8f9;
-  background: #ecfeff;
-}
-
 .weekly-reflection-actions .primary {
+  width: min(100%, 640px);
   color: #fff;
-  border: 1px solid #0891b2;
-  background: #0891b2;
+  border: 1px solid #1d4ed8;
+  background: #1d4ed8;
 }
 
 .weekly-reflection-actions .primary:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.weekly-reflection-record-link {
+  min-height: auto !important;
+  padding: 5px 8px !important;
+  border: 0;
+  color: #475569;
+  background: transparent;
+  font-size: 0.9rem !important;
+  font-weight: 750 !important;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .weekly-reflection-alert {
@@ -319,7 +479,7 @@
 
 @media (max-width: 720px) {
   .weekly-reflection-fields,
-  .weekly-reflection-panel.previous-challenge,
+  .weekly-reflection-previous-challenge,
   .weekly-reflection-task-list {
     grid-template-columns: 1fr;
   }
@@ -328,7 +488,8 @@
 @media (max-width: 390px) {
   .weekly-reflection-hero,
   .weekly-reflection-heading,
-  .weekly-reflection-activity-copy > span {
+  .weekly-reflection-activity-copy > span,
+  .weekly-reflection-previous-challenge {
     align-items: stretch;
     flex-direction: column;
   }
@@ -339,8 +500,13 @@
     border-radius: 18px;
   }
 
-  .weekly-reflection-actions {
-    grid-template-columns: 1fr;
+  .weekly-reflection-disclosure > summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .weekly-reflection-disclosure > summary b {
+    margin-left: 0;
   }
 
   .weekly-reflection-missing > div {

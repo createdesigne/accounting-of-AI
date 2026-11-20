@@ -223,3 +223,39 @@ test('persists only validated completion-pending records and restores them after
   clearPendingTimeRecordAcknowledgement(storage);
   assert.deepEqual(loadPendingTimeRecordAcknowledgement(storage), []);
 });
+
+test('keeps an earlier completion notification pending when a later record is queued', () => {
+  const values = new Map<string, string>();
+  const storage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  };
+  const first = record({
+    recordId: 'session-24:day:2026-11-20',
+    sessionId: 'session-24',
+    localDate: '2026-11-20',
+    durationSeconds: 24,
+  }) as any;
+  const second = record({
+    recordId: 'session-31:day:2026-11-20',
+    sessionId: 'session-31',
+    localDate: '2026-11-20',
+    startedAt: 70_000,
+    endedAt: 101_000,
+    durationSeconds: 31,
+  }) as any;
+
+  savePendingTimeRecordAcknowledgement([first], storage);
+  const queue = mergeTimeRecordPreviews(
+    [...loadPendingTimeRecordAcknowledgement(storage)],
+    [second],
+  );
+  savePendingTimeRecordAcknowledgement(queue, storage);
+
+  assert.deepEqual(
+    loadPendingTimeRecordAcknowledgement(storage).map(item => item.recordId),
+    [first.recordId, second.recordId],
+  );
+  assert.equal(loadPendingTimeRecordAcknowledgement(storage).reduce((sum, item) => sum + item.durationSeconds, 0), 55);
+});

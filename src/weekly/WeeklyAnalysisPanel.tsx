@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useAiSettings } from "../AiSettings.tsx";
+import { AiSettingsButton, useAiSettings } from "../AiSettings.tsx";
 import { buildWeeklyAnalysisRequest } from "../integrations/weeklyAnalysisAdapter.ts";
 import type { AnalysisActivityCategory, AnalysisScore } from "../integrations/analysisContract.ts";
 import {
@@ -146,40 +146,43 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
     }
   }
 
+  const heading = analysisHeading(state.analysisStatus);
+  const hasPriorReflection = Boolean(record.manualNotes?.interactionSummary || record.manualNotes?.ownThoughts || record.manualNotes?.discovery || record.selfReflection);
+
   return <div className={`weekly-analysis-state compact${state.analysisStatus === "complete" ? " complete" : state.analysisStatus === "partial" ? " partial" : state.analysisStatus === "failed" ? " failed" : ""}${response?.origin === "test-fixture" ? " fixture" : ""}`}>
-    <strong>思考レシート分析：{statusLabel(state.analysisStatus)}</strong>
-    <span>AIAS Levelは活動前の役割設定です。以下はAIAS公式評価ではなく、会話内の行動を対象にした研究独自分析です。</span>
-    <details className="weekly-analysis-technical">
-      <summary>分析の技術情報</summary>
-      <span>思考レシートID：{record.links.thoughtReceiptId}</span>
+    <header className="weekly-analysis-heading"><p className="eyebrow">Gemini分析・任意</p><h3>{heading}</h3><p>分析しなくても、本人の記録・会計・週次決算は利用できます。</p></header>
+    {response?.origin === "test-fixture" && <p className="weekly-analysis-fixture-label">テスト用分析です。実際のGemini分析結果ではありません。</p>}
+    <div className="weekly-analysis-guide" aria-label="3つの思考指標">
+      <article><strong>自発性</strong><span>本人から問い・仮説・アイデアを出したか</span></article>
+      <article><strong>論理性</strong><span>理由や条件を整理し、筋道を立てたか</span></article>
+      <article><strong>独立性</strong><span>方向性や最終判断を本人が担ったか</span></article>
+    </div>
+    <details className="weekly-analysis-method">
+      <summary>評価方法を見る</summary>
+      <p>AIAS Levelは活動前に設定したAIの役割であり、能力の点数ではありません。この分析は、会話から観察できる行動を研究用ルーブリックで整理します。</p>
+      <p>未評価は根拠不足による点数なし、0点は「本人が考えず全面委任した」などの明確な根拠がある場合です。</p>
       <span>適用する評価基準：{WEEKLY_ANALYSIS_RUBRIC_VERSION}</span>
     </details>
-
-    {state.analysisStatus === "not-connected" && <span>評価値：— / — / —（根拠不足は点数なしであり、0点ではありません）</span>}
+    {hasPriorReflection && <details className="weekly-analysis-prior"><summary>本人の事前記録を見る</summary><dl><Row label="やり取りの概要" value={record.manualNotes?.interactionSummary ?? "未入力"} /><Row label="考えたこと・判断したこと" value={record.manualNotes?.ownThoughts ?? record.selfReflection ?? "未入力"} /><Row label="発見・学び" value={record.manualNotes?.discovery ?? "未入力"} /></dl></details>}
     {pending && <span>分析待ちです。本人入力と会計データは変更しません。</span>}
-    {unavailable ? <p className="weekly-analysis-warning">保存範囲がfullの会話本文がないため、外部分析は実行できません。</p> : <>
+    {unavailable ? <p className="weekly-analysis-warning">この活動は「時間のみ保存」のため会話本文がなく、Gemini分析を実行できません。本人の記録と会計はそのまま利用できます。</p> : !credentials.apiKey ? <div className="weekly-analysis-settings-needed"><p>Gemini分析を使うにはAI設定が必要です。設定後はこの分析画面に戻り、その都度送信へ同意してから実行します。APIキーは保存されません。</p><AiSettingsButton label="AI設定を開く" /></div> : <>
       <label className="weekly-analysis-consent"><input type="checkbox" checked={consented} disabled={busy || pending} onChange={(event) => setConsented(event.target.checked)} />
-        <span>この活動の保存済み会話本文を、設定中のGeminiモデルへ今回だけ送信することに同意します。API方式：{apiMethodLabel(credentials.apiMethod)}</span>
+        <span>この活動の保存済み会話本文をGeminiへ今回だけ送信することに同意します。</span>
       </label>
-      <button className="secondary-action weekly-analysis-run" type="button" disabled={busy || pending || !consented || !credentials.apiKey} onClick={() => void analyze()}>
-        {busy ? "処理中…" : state.analysisStatus === "failed" && response?.error?.retryable ? "同じ方式で明示的に再試行" : ["complete", "partial"].includes(state.analysisStatus) ? "Geminiで再分析" : "Geminiで構造化分析"}
+      <button className="primary-action weekly-analysis-run" type="button" disabled={busy || pending || !consented} onClick={() => void analyze()}>
+        {busy ? "分析中…" : state.analysisStatus === "failed" && response?.error?.retryable ? "Geminiで再試行する" : ["complete", "partial"].includes(state.analysisStatus) ? "Geminiで再分析する" : "Geminiで分析する"}
       </button>
-      {!credentials.apiKey && <span>実行前に画面上部のAI設定でAPIキーを設定してください。キーは保存されません。</span>}
     </>}
 
     {state.analysisStatus === "failed" && <>
       <span>{sourceLabel}に失敗しました。手入力の記録・仕訳・決算は引き続き利用できます。</span>
       <details className="weekly-analysis-technical error-details">
-        <summary>通信エラーの詳細と再確認情報</summary>
+        <summary>エラーの詳細を見る</summary>
         <span>アプリ内エラー種別：{response?.error?.code ?? "INVALID_OUTPUT"}</span>
         {response?.error?.diagnosticStage && <span>失敗した段階：{diagnosticStageLabel(response.error.diagnosticStage)}（APIキー・会話本文は含みません）</span>}
         {response?.error?.providerHttpStatus && <span>Gemini HTTPステータス：{response.error.providerHttpStatus}</span>}
         {response?.error?.providerErrorCode && <span>Geminiエラー種別：{response.error.providerErrorCode}</span>}
         {typeof response?.error?.timedOut === "boolean" && <span>タイムアウト：{response.error.timedOut ? "発生" : "未発生"}</span>}
-        {response?.apiMethod && <span>API方式：{apiMethodLabel(response.apiMethod)}</span>}
-        {response?.error?.providerApiVersion && <span>APIバージョン：{response.error.providerApiVersion}</span>}
-        {response?.error?.providerSdkVersion && <span>SDK：{response.error.providerSdkVersion}</span>}
-        {response?.model && <span>使用モデル：{response.model}</span>}
         {response?.error?.validationField && <span>検証フィールド：{response.error.validationField}</span>}
         {response?.error?.validationRule && <span>違反条件：{validationRuleLabel(response.error.validationRule)}</span>}
       </details>
@@ -190,14 +193,19 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
       <ul>{(response.unresolvedFields ?? []).map(item => <li key={item.field}>{unresolvedFieldLabel(item.field)}：{partialReasonLabel(item.reason)}</li>)}</ul>
     </div>}
     {analysis && response && <>
-      <details className="weekly-analysis-metadata weekly-analysis-technical">
-        <summary>{sourceLabel}の実行情報</summary>
-        <span>モデル：{response.model ?? "旧テスト形式"}</span>
-        <span>API方式：{response.apiMethod ? apiMethodLabel(response.apiMethod) : "旧形式（未記録）"}</span>
-        <span>基準版：{response.rubricVersion ?? "legacy-v1"}</span>
-        <span>分析日時：{formatDateTime(response.analyzedAt ?? response.receivedAt)}</span>
-      </details>
-      <dl className="weekly-analysis-details">
+      <div className="weekly-analysis-metrics" aria-label="研究指標と評価根拠">
+        {analysisV2 ? <>
+          <MetricEvidenceV2 label="自発性" assessment={analysisV2.metricAssessments.initiative} />
+          <MetricEvidenceV2 label="論理性" assessment={analysisV2.metricAssessments.reasoning} />
+          <MetricEvidenceV2 label="独立性" assessment={analysisV2.metricAssessments.independence} />
+        </> : <>
+          <MetricEvidence label="自発性" score={legacyAnalysis?.initiative ?? null} target="initiative" evidence={legacyAnalysis?.evidence ?? []} />
+          <MetricEvidence label="論理性" score={legacyAnalysis?.reasoning ?? null} target="reasoning" evidence={legacyAnalysis?.evidence ?? []} />
+          <MetricEvidence label="批判的判断（旧v1。独立性へ変換しません）" score={legacyAnalysis?.criticalJudgment ?? null} target="critical-judgment" evidence={legacyAnalysis?.evidence ?? []} />
+        </>}
+      </div>
+      {analysisV2 && <details className="weekly-analysis-supporting"><summary>独立性の検討過程と最終判断を見る</summary><div className="weekly-analysis-submetrics"><MetricEvidenceV2 label="検討過程" assessment={analysisV2.metricAssessments.independence.deliberation} compact /><MetricEvidenceV2 label="最終判断・意図的保留" assessment={analysisV2.metricAssessments.independence.finalDecision} compact /></div></details>}
+      <details className="weekly-analysis-supporting"><summary>活動テーマ・AIの役割などを見る</summary><dl className="weekly-analysis-details">
         <Row label="活動テーマ候補" value={analysis.activityCategory ?? "判定不可"} />
         <Row label="勘定科目候補" value={analysis.accountCandidate ?? "判定不可"} />
         <Row label="会計区分候補" value={dispositionLabel(analysis.accountingDispositionCandidate)} />
@@ -205,30 +213,9 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
         <Row label="協働行動" value={analysis.collaborationBehaviors?.map((item) => item.description).join("／") || "判定不可"} />
         <Row label="思考の変化" value={analysis.thinkingChange ?? "判定不可"} />
         <Row label="発見・学び" value={analysis.discovery ?? "判定不可"} />
-      </dl>
-      <div className="weekly-analysis-metrics" aria-label="研究指標と評価根拠">
-        {analysisV2 ? <>
-          <MetricEvidenceV2 label="自発性" assessment={analysisV2.metricAssessments.initiative} />
-          <MetricEvidenceV2 label="論理性" assessment={analysisV2.metricAssessments.reasoning} />
-          <MetricEvidenceV2 label="独立性" assessment={analysisV2.metricAssessments.independence} />
-          <MetricEvidenceV2 label="独立性（検討過程）" assessment={analysisV2.metricAssessments.independence.deliberation} compact />
-          <MetricEvidenceV2 label="独立性（最終判断・意図的保留）" assessment={analysisV2.metricAssessments.independence.finalDecision} compact />
-        </> : <>
-          <MetricEvidence label="自発性" score={legacyAnalysis?.initiative ?? null} target="initiative" evidence={legacyAnalysis?.evidence ?? []} />
-          <MetricEvidence label="論理性" score={legacyAnalysis?.reasoning ?? null} target="reasoning" evidence={legacyAnalysis?.evidence ?? []} />
-          <MetricEvidence label="批判的判断（旧v1。独立性へ変換しません）" score={legacyAnalysis?.criticalJudgment ?? null} target="critical-judgment" evidence={legacyAnalysis?.evidence ?? []} />
-        </>}
-      </div>
-      {analysisV2 && <dl className="weekly-analysis-details">
-        <Row label="課題の複雑さ" value={complexityLabel(analysisV2.taskComplexity.level)} />
-        <Row label="複雑さの理由" value={analysisV2.taskComplexity.reason} />
-        <Row label="検討要素と相互関係" value={analysisV2.taskComplexity.considerationFactors} />
-        <Row label="不確実性" value={analysisV2.taskComplexity.uncertainty} />
-        <Row label="必要な思考過程" value={analysisV2.taskComplexity.reasoningProcess} />
-        <Row label="本人の主観的難しさ" value="未提供（AIは推測しません）" />
-      </dl>}
+        {analysisV2 && <><Row label="課題の複雑さ" value={complexityLabel(analysisV2.taskComplexity.level)} /><Row label="複雑さの理由" value={analysisV2.taskComplexity.reason} /><Row label="検討要素と相互関係" value={analysisV2.taskComplexity.considerationFactors} /><Row label="不確実性" value={analysisV2.taskComplexity.uncertainty} /><Row label="必要な思考過程" value={analysisV2.taskComplexity.reasoningProcess} /><Row label="本人の主観的難しさ" value="未提供（AIは推測しません）" /></>}
+      </dl>{analysis.evidence.length > 0 && <div className="weekly-analysis-evidence"><b>分析根拠となる会話箇所</b><ul>{analysis.evidence.map((evidence, index) => <li key={`${evidence.target}:${evidence.messageIndex}:${index}`}>会話 {evidence.messageIndex + 1}：「{evidence.quote}」</li>)}</ul></div>}</details>
       <p className="weekly-analysis-advisory">活動テーマ・勘定科目・会計区分は候補です。保存済み活動、利用時間、仕訳、週次決算には自動反映しません。</p>
-      {analysis.evidence.length > 0 && <div className="weekly-analysis-evidence"><b>分析根拠となる会話箇所</b><ul>{analysis.evidence.map((evidence, index) => <li key={`${evidence.target}:${evidence.messageIndex}:${index}`}>会話 {evidence.messageIndex + 1}：「{evidence.quote}」</li>)}</ul></div>}
 
       {!analysisV2 && <details className="weekly-analysis-review" open={!!review}>
         <summary>本人が確認・修正する</summary>
@@ -259,12 +246,12 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
 }
 
 function MetricEvidenceV2({ label, assessment, compact = false }: { label: string; assessment: WeeklyAnalysisMetricAssessmentV2; compact?: boolean }) {
-  return <article className={compact ? "compact" : ""}>
-    <div><strong>{label}</strong><b>{scoreLabel(assessment.score)} · {metricStatusLabel(assessment.status)}</b></div>
-    <p>評価理由：{assessment.reason}</p>
-    <p>該当ルーブリック：{assessment.rubricLevel === null ? "なし" : `${assessment.rubricLevel}点基準`} ／ 証拠充足度：{sufficiencyLabel(assessment.evidenceSufficiency)}</p>
-    {assessment.evidence.map((item, index) => <p key={`${item.utteranceId}:${index}`}>根拠：{speakerLabel(item.speaker)}「{item.quote}」<br />観察特徴：{item.observedFeature}（{item.source === "self_report" ? "自己申告" : "会話から観察"}）</p>)}
-    {assessment.unconfirmed.length > 0 && <p>確認できない点：{assessment.unconfirmed.join("／")}</p>}
+  return <article className={`${compact ? "compact " : ""}metric-${assessment.status}`}>
+    <header><strong>{label}</strong><span><b>{scoreLabel(assessment.score)}</b><em>{metricStatusLabel(assessment.status)}</em></span></header>
+    <p><b>評価理由</b><br />{assessment.reason}</p>
+    <p className="weekly-metric-basis">基準：{assessment.rubricLevel === null ? "該当なし" : `${assessment.rubricLevel}点`} ／ 証拠充足度：{sufficiencyLabel(assessment.evidenceSufficiency)}</p>
+    {assessment.evidence.map((item, index) => <p className="weekly-metric-evidence" key={`${item.utteranceId}:${index}`}><b>根拠</b><br />{speakerLabel(item.speaker)}「{item.quote}」<br /><small>{item.observedFeature}（{item.source === "self_report" ? "本人の自己申告" : "会話から観察"}）</small></p>)}
+    {assessment.unconfirmed.length > 0 && <p className="weekly-metric-unconfirmed"><b>確認できない点</b><br />{assessment.unconfirmed.join("／")}</p>}
   </article>;
 }
 
@@ -358,8 +345,8 @@ function reviewFields(review: WeeklyAnalysisReviewV1 | null, analysis: NonNullab
     reviewerNote: null,
   });
 }
-function statusLabel(value: WeeklyAnalysisDisplayState["analysisStatus"]) { return ({ "not-connected": "未接続・未評価", pending: "分析待ち", complete: "分析完了", partial: "一部未評価", failed: "分析失敗", "not-applicable": "対象外" } as const)[value]; }
-function scoreLabel(value: AnalysisScore) { return value === null ? "評価不可" : String(value); }
+function analysisHeading(value: WeeklyAnalysisDisplayState["analysisStatus"]) { return ({ "not-connected": "まだ分析していません", pending: "分析結果を待っています", complete: "分析が完了しました", partial: "一部の項目を評価できませんでした", failed: "分析を完了できませんでした", "not-applicable": "この活動は分析対象外です" } as const)[value]; }
+function scoreLabel(value: AnalysisScore) { return value === null ? "未評価（点数なし）" : `${value}点`; }
 function metricStatusLabel(value: "confirmed" | "provisional" | "hold" | "not_applicable") { return ({ confirmed: "確定", provisional: "暫定", hold: "評価保留", not_applicable: "評価対象外" } as const)[value]; }
 function sufficiencyLabel(value: "high" | "medium" | "low") { return ({ high: "高", medium: "中", low: "低" } as const)[value]; }
 function speakerLabel(value: "user" | "assistant" | "system" | "unknown") { return ({ user: "本人", assistant: "AI", system: "システム", unknown: "不明" } as const)[value]; }
@@ -371,7 +358,6 @@ function nullableAccount(value: string): WeeklyAnalysisAccountCandidate { return
 function nullableDisposition(value: string): WeeklyAnalysisDispositionCandidate { return value === "" ? null : value as Exclude<WeeklyAnalysisDispositionCandidate, null>; }
 function createId(prefix: string) { return `${prefix}:${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`; }
 function formatDateTime(value: string) { return new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)); }
-function apiMethodLabel(value: "interactions" | "generate-content") { return value === "interactions" ? "Interactions API" : "GenerateContent API"; }
 function diagnosticStageLabel(value: WeeklyAnalysisDiagnosticStage) {
   return ({
     "provider-response": "Gemini応答の受信段階",

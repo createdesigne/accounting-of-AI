@@ -1,12 +1,36 @@
 .weekly-import-summary {
-  padding: 14px;
+  display: grid;
+  gap: 7px;
+  padding: 12px 14px;
   border: 1px solid #bfdbfe;
   border-radius: 13px;
   background: #f8fbff;
 }
 
-.weekly-import-summary p {
-  margin: 6px 0 0;
+.weekly-import-summary > strong {
+  color: #0f172a;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.weekly-import-summary > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.weekly-import-summary > div span {
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #1e40af;
+  background: #dbeafe;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.weekly-import-summary > small {
+  color: #64748b;
+  font-size: 13px;
 }
 
 .weekly-import-linked {
@@ -14,9 +38,18 @@
   font-weight: 800;
 }
 
+.weekly-intro-card.weekly-extension-help {
+  color: #1e293b;
+  border-color: #bfdbfe;
+  background: #f8fbff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+}
+
 .weekly-extension-help > summary {
   cursor: pointer;
-  color: #1e40af;
+  color: #1e3a8a;
+  font-size: 16px;
+  line-height: 1.5;
   font-weight: 900;
 }
 
@@ -27,6 +60,20 @@
 .weekly-extension-help > div h2,
 .weekly-extension-help > div p {
   margin-top: 6px;
+}
+
+.weekly-extension-help > div p {
+  color: #334155;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.weekly-extension-help > div a {
+  display: inline-block;
+  margin-top: 10px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .weekly-measurement-usage {
@@ -72,8 +119,298 @@
   width: 100%;
 }
 
+.weekly-record-progress {
+  display: grid;
+  gap: 7px;
+  width: min(100%, 760px);
+  margin-inline: auto;
+  padding-inline: 2px;
+}
+
+.weekly-record-progress > p {
+  margin: 0;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.weekly-record-progress > div {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dbeafe;
+}
+
+.weekly-record-progress > div span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: #2563eb;
+  transition: width 180ms ease;
+}
+
+.weekly-record-step {
+  width: min(100%, 760px);
+  margin-inline: auto;
+}
+
+.weekly-record-step > header {
+  margin-bottom: 13px;
+}
+
+.weekly-record-step > header h2,
+.weekly-record-step > header p {
+  margin: 0;
+}
+
+.weekly-record-step > header > .eyebrow {
+  display: none;
+}
+
+.weekly-record-step > header h2 {
+  font-size: 30px;
+  line-height: 1.3;
+}
+
+.weekly-record-step > header > p:last-child {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.weekly-record-main-action {
+  width: min(100%, 420px);
+  min-height: 52px;
+  margin-inline: auto;
+  font-size: 18px;
+}
+
+.weekly-record-step-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 420px);
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+
+.weekly-record-back,
+.weekly-record-skip {
+  padding: 10px 12px;
+  border: 0;
+  color: #475569;
+  background: transparent;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.weekly-record-skip {
+  display: block;
+  margin: 8px auto 0;
+}
+
+.weekly-record-choice {
+  display: grid;
+  gap: 10px;
+  padding: 0;
+  border: 0;
+}
+
+.weekly-record-choice legend {
+  margin-bottom: 8px;
+  font-weight: 900;
+}
+
+.weekly-record-choice label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 13px;
+  background: #fff;
+}
+
+.weekly-record-choice label:has(input:checked) {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 2px #dbeafe;
+}
+
+.weekly-record-choice input {
+  width: auto;
+  margin-top: 4px;
+}
+
+.weekly-record-choice span {
+  display: grid;
+  gap: 3px;
+}
+
+.weekly-record-choice small,
+.weekly-save-summary small {
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.weekly-record-details {
+  margin-block: 10px 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.weekly-record-details > summary {
+  cursor: pointer;
+  color: #334155;
+  font-weight: 800;
+}
+
+.weekly-record-details > small {
+  display: block;
+  margin-top: 7px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.weekly-conversation-preview {
+  display: grid;
+  gap: 10px;
+  padding: 12px 0 0;
+  margin: 0;
+  list-style: none;
+}
+
+.weekly-conversation-preview li {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.weekly-conversation-preview span {
+  color: #475569;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.weekly-staged-analysis,
+.weekly-post-analysis {
+  display: grid;
+  gap: 12px;
+}
+
+.weekly-post-analysis {
+  margin-block: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.weekly-post-analysis h3,
+.weekly-post-analysis p {
+  margin: 0;
+}
+
+.weekly-post-analysis > p {
+  color: #475569;
+}
+
+.weekly-unresolved-list {
+  color: #92400e;
+  line-height: 1.6;
+}
+
+.weekly-analysis-advisory {
+  display: grid;
+  gap: 5px;
+  margin-bottom: 16px;
+  padding: 13px;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  color: #78350f;
+  background: #fffbeb;
+}
+
+.weekly-save-summary {
+  display: grid;
+  gap: 5px;
+  padding: 14px;
+  border: 1px solid #bbf7d0;
+  border-radius: 12px;
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.weekly-record-complete {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: min(100%, 680px);
+  margin-inline: auto;
+  text-align: center;
+}
+
+.weekly-record-complete > span:first-child {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  place-items: center;
+  border-radius: 999px;
+  color: #166534;
+  background: #dcfce7;
+  font-size: 1.7rem;
+  font-weight: 900;
+}
+
+.weekly-record-complete h2,
+.weekly-record-complete p {
+  margin: 0;
+}
+
+.weekly-record-complete > button {
+  width: min(100%, 420px);
+  margin-top: 8px;
+}
+
 @media (max-width: 390px) {
   .weekly-measurement-usage {
     grid-template-columns: 1fr;
+  }
+
+  .weekly-record-step > header h2 {
+    font-size: 28px;
+  }
+
+  .weekly-record-step > header > p:last-child {
+    font-size: 15px;
+  }
+
+  .weekly-record-main-action {
+    min-height: 50px;
+    font-size: 17px;
+  }
+
+  .weekly-record-step-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .weekly-record-step-actions .weekly-record-main-action {
+    grid-row: 1;
+  }
+
+  .weekly-record-step-actions .weekly-record-back {
+    grid-row: 2;
+  }
+
+  .weekly-record-step textarea,
+  .weekly-record-step select,
+  .weekly-record-step input {
+    width: 100%;
+    min-width: 0;
   }
 }

@@ -8,6 +8,7 @@ import type {
   WeeklyAiService,
   WeeklyPrivacy,
 } from "./weeklyData.ts";
+import type { WeeklyExpenseAccount } from "./weeklyAccountingTypes.ts";
 import type { AnalysisActivityCategory } from "./integrations/analysisContract.ts";
 
 export const EXTENSION_CONVERSATION_STORAGE_BASE_KEY = "aiConversationRaw";
@@ -31,6 +32,7 @@ export type ConfirmExtensionImportInput = Readonly<{
   taskId?: string | null;
   activityCategory: Exclude<AnalysisActivityCategory, null>;
   accountingDisposition: AccountingDisposition;
+  accountingAccount?: WeeklyExpenseAccount | null;
   interactionSummary?: string | null;
   ownThoughts?: string | null;
   discovery?: string | null;
@@ -110,6 +112,7 @@ export function buildConfirmedExtensionRecord(input: ConfirmExtensionImportInput
     taskId: input.taskId ?? null,
     activityCategory: input.activityCategory,
     accountingDisposition: input.accountingDisposition,
+    accountingAccount: input.accountingAccount ?? undefined,
     selfReflection: normalizeText(input.ownThoughts),
     manualNotes: Object.freeze({
       interactionSummary: normalizeText(input.interactionSummary),
@@ -145,6 +148,20 @@ export function selectSessionMatchedMeasurements(
 ) {
   if (!measurementSessionId) return Object.freeze([]) as readonly MeasuredTimeCandidate[];
   return Object.freeze(measurements.filter((item) => item.sessionId === measurementSessionId));
+}
+
+/**
+ * A capture carrying an exact tracker session must never offer another
+ * session's historical time. Legacy captures without a tracker hint retain
+ * the existing person-confirmed selection flow.
+ */
+export function selectConversationMeasuredTimeCandidates(
+  measurements: readonly MeasuredTimeCandidate[],
+  measurementSessionId: string | undefined,
+) {
+  return measurementSessionId
+    ? selectSessionMatchedMeasurements(measurements, measurementSessionId)
+    : Object.freeze([...measurements]);
 }
 
 /** Stable import identity. capturedAt is excluded so re-sending the same page is idempotent. */

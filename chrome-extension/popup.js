@@ -68,6 +68,11 @@ button.addEventListener("click", async () => {
     if (inferAiService(tab.url) === "その他") {
       throw new Error("ChatGPT・Claude・Geminiなど、対応するAIの会話ページで実行してください。");
     }
+    // Snapshot the tracker before reading the DOM. Conversation extraction can
+    // take a moment while the page hydrates, and the person may stop tracking
+    // immediately after pressing the button. Keep only an exact, unambiguous
+    // session identifier; never infer a match from time or tab information.
+    const trackingBeforeCapture = await getTrackingSnapshot();
     const [extracted] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractConversationFromPage,
@@ -75,12 +80,14 @@ button.addEventListener("click", async () => {
 
     const rawConversation = normalizeConversation(extracted?.result, tab);
     rawConversation.captureId = createCaptureId();
-    const tracking = await chrome.runtime?.sendMessage?.({ type: "tracking:get" }).catch(() => null);
+    const trackingAfterCapture = await getTrackingSnapshot();
+    const measurementSessionId = resolveCaptureMeasurementSession(
+      trackingBeforeCapture,
+      trackingAfterCapture,
+    );
     // This is an exact tracker identifier, not a date/title-based guess. The app still asks
     // the person to confirm the matching finalized measurement before saving an activity.
-    if (tracking?.ok && typeof tracking.currentSessionId === "string" && tracking.currentSessionId) {
-      rawConversation.measurementSessionId = tracking.currentSessionId;
-    }
+    if (measurementSessionId) rawConversation.measurementSessionId = measurementSessionId;
     const url = new URL(WEB_APP_URLS[destination.value] || WEB_APP_URLS.production);
     // A fragment is read by the app; conversation text is not sent to the server in the HTTP URL.
     url.hash = new URLSearchParams({ draft: JSON.stringify(rawConversation) }).toString();
@@ -98,6 +105,26 @@ function createCaptureId() {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (typeof uuid === "string" && uuid) return `capture-${uuid}`;
   return `capture-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+async function getTrackingSnapshot() {
+  try {
+    const state = await chrome.runtime?.sendMessage?.({ type: "tracking:get" });
+    return state?.ok ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveCaptureMeasurementSession(before, after) {
+  const beforeId = typeof before?.currentSessionId === "string" && before.currentSessionId
+    ? before.currentSessionId
+    : null;
+  const afterId = typeof after?.currentSessionId === "string" && after.currentSessionId
+    ? after.currentSessionId
+    : null;
+  if (beforeId && afterId && beforeId !== afterId) return null;
+  return beforeId || afterId;
 }
 
 function setStatus(message, busy) {
@@ -252,6 +279,11 @@ async function persistDestination() {
 }
 
 async function findOrCreateTimeDestination(destinationName, targetUrl) {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id && activeTab.url
+    && timeRecordProtocol.isDestinationUrl(activeTab.url, destinationName)) {
+    return activeTab;
+  }
   const tabs = await chrome.tabs.query({});
   const existing = tabs.find((tab) => tab.id && tab.url
     && timeRecordProtocol.isDestinationUrl(tab.url, destinationName));

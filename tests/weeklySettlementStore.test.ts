@@ -33,9 +33,13 @@ class SerialLocks {
 
 const anchor = new Date(2026, 10, 12);
 
-function wallball(seconds: number, disposition: "expense" | "unclassified" = "expense") {
+function wallball(
+  seconds: number,
+  disposition: "expense" | "asset" | "work-in-progress" | "unclassified" = "expense",
+  id = "wallball-720",
+) {
   return buildManualWeeklyRecord({
-    id: "wallball-720",
+    id,
     recordedAt: new Date(2026, 10, 10, 12).toISOString(),
     activeSeconds: seconds,
     aiService: "chatgpt",
@@ -63,6 +67,50 @@ test("720 seconds preview posts clearing, contribution and thought exploration e
   assert.equal(preview.settlement.trialBalance.isBalanced, true);
 });
 
+test("48 seconds remains one 48-second activity when recognition and classification are both displayed", () => {
+  const preview = previewWeeklySettlement([wallball(48)], [], anchor);
+  assert.equal(preview.journalEntries.length, 2);
+  assert.equal(preview.settlement.totals.recordSeconds, 48);
+  assert.equal(preview.settlement.totals.expenseSeconds, 48);
+  assert.equal(preview.settlement.profitAndLoss.totalExpenseSeconds, 48);
+  assert.equal(preview.journalEntries[0].lines[0].seconds, 48);
+  assert.equal(preview.journalEntries[1].lines[0].seconds, 48);
+  assert.equal(preview.settlement.trialBalance.isBalanced, true);
+});
+
+test("empty and mixed-classification previews keep each second in exactly one classification", () => {
+  const empty = previewWeeklySettlement([], [], anchor);
+  assert.deepEqual(empty.settlement.totals, {
+    recordCount: 0,
+    recordSeconds: 0,
+    expenseSeconds: 0,
+    assetSeconds: 0,
+    workInProgressSeconds: 0,
+    unclassifiedSeconds: 0,
+  });
+
+  const mixed = previewWeeklySettlement([
+    wallball(10, "expense", "expense-10"),
+    wallball(20, "asset", "asset-20"),
+    wallball(30, "work-in-progress", "wip-30"),
+    wallball(40, "unclassified", "unclassified-40"),
+  ], [], anchor);
+  assert.equal(mixed.settlement.totals.recordSeconds, 100);
+  assert.equal(mixed.settlement.totals.expenseSeconds, 10);
+  assert.equal(mixed.settlement.totals.assetSeconds, 20);
+  assert.equal(mixed.settlement.totals.workInProgressSeconds, 30);
+  assert.equal(mixed.settlement.totals.unclassifiedSeconds, 40);
+  assert.equal(
+    mixed.settlement.totals.expenseSeconds
+      + mixed.settlement.totals.assetSeconds
+      + mixed.settlement.totals.workInProgressSeconds
+      + mixed.settlement.totals.unclassifiedSeconds,
+    mixed.settlement.totals.recordSeconds,
+  );
+  assert.equal(mixed.settlement.trialBalance.isBalanced, true);
+  assert.equal(mixed.settlement.balanceSheet.isBalanced, true);
+});
+
 test("confirmation is idempotent and an edit or deletion creates an auditable revision", async () => {
   const storage = new MemoryStorage();
   const locks = new SerialLocks();
@@ -75,6 +123,7 @@ test("confirmation is idempotent and an edit or deletion creates an auditable re
   const repeated = await confirmWeeklySettlement([wallball(720)], [], anchor, { storage, locks });
   assert.equal(repeated.inserted, false);
   assert.equal(loadWeeklySettlementStore(storage).weeks[0].revisions.length, 1);
+  assert.equal(previewWeeklySettlement([wallball(720)], [], anchor, repeated.store).confirmationStatus, "confirmed");
 
   const editedPreview = previewWeeklySettlement([wallball(600)], [], anchor, repeated.store);
   assert.equal(editedPreview.confirmationStatus, "needs-reconfirmation");

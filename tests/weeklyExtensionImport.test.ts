@@ -8,6 +8,7 @@ import {
   extensionConversationFingerprint,
   extensionConversationSourceEventId,
   loadExtensionConversationDraft,
+  selectConversationMeasuredTimeCandidates,
   selectUnlinkedMeasuredTimeCandidates,
   selectSessionMatchedMeasurements,
 } from "../src/weeklyExtensionImport.ts";
@@ -223,6 +224,20 @@ test("only an exact measurement session is suggested; another session requires p
   assert.equal(selectSessionMatchedMeasurements([context.measurement], "another-session").length, 0);
   assert.deepEqual(selectSessionMatchedMeasurements([context.measurement], "research-session"), [context.measurement]);
   assert.equal(selectSessionMatchedMeasurements([context.measurement], undefined).length, 0);
+
+  const historicalMeasurement = Object.freeze({
+    ...context.measurement,
+    measurementRecordId: "historical-session:day:2026-11-18",
+    sessionId: "historical-session",
+    localDate: "2026-11-18",
+  });
+  const mixed = [historicalMeasurement, context.measurement];
+  assert.deepEqual(
+    selectConversationMeasuredTimeCandidates(mixed, "research-session"),
+    [context.measurement],
+  );
+  assert.deepEqual(selectConversationMeasuredTimeCandidates(mixed, "missing-session"), []);
+  assert.deepEqual(selectConversationMeasuredTimeCandidates(mixed, undefined), mixed);
 });
 
 test("conversation-first and time-first delivery both retain the exact session candidate", async () => {

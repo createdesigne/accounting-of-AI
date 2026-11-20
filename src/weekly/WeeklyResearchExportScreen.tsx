@@ -56,7 +56,7 @@ export function WeeklyResearchExportScreen() {
 
   function refresh() {
     setRevision((value) => value + 1);
-    setMessage("保存済みの週次データを再読み込みしました。");
+    setMessage("端末内に保存されている最新データを読み直しました。");
   }
 
   function exportFile(kind: "csv" | "json" | "accounting" | "reflection") {
@@ -91,11 +91,12 @@ export function WeeklyResearchExportScreen() {
 
   return <div className="weekly-research-export stack">
     <section className="weekly-intro-card">
-      <p className="eyebrow">論文用データ</p>
-      <h2>研究データをCSV・JSONで出力</h2>
+      <p className="eyebrow light">論文用データ</p>
+      <h2>研究データを出力する</h2>
       <p>本人がボタンを押したときだけ端末へファイルを作成します。APIキーと会話本文は、設定にかかわらず出力しません。</p>
-      <button type="button" className="secondary-action" onClick={refresh}>保存データを再読み込み</button>
     </section>
+
+    <p className="research-export-backup-note"><strong>これは研究用エクスポートです。</strong> アプリ全体の完全バックアップや復元用ファイルではありません。</p>
 
     {snapshot.error && <p className="weekly-form-message error" role="alert">{snapshot.error}</p>}
     {preview && "error" in preview && <p className="weekly-form-message error" role="alert">{preview.error}</p>}
@@ -118,6 +119,8 @@ export function WeeklyResearchExportScreen() {
         <span>週次集計 <b>{preview.weeklyStatements.length}週</b></span>
         <span>振り返り <b>{preview.reflections.length}週</b></span>
       </div>}
+      <button type="button" className="research-export-refresh" onClick={refresh}>最新の保存内容を読み直す</button>
+      <p className="weekly-muted">端末内の保存データをもう一度読み込む操作です。データの復元や初期化は行いません。</p>
     </section>
 
     <section className="weekly-panel" aria-labelledby="research-export-privacy-heading">
@@ -137,9 +140,15 @@ export function WeeklyResearchExportScreen() {
 
     <section className="weekly-panel" aria-labelledby="research-export-download-heading">
       <div className="weekly-section-heading"><span>3</span><div><p className="eyebrow">本人の明示操作</p><h3 id="research-export-download-heading">ファイルを作成</h3></div></div>
+      {preview && !("error" in preview) && <dl className="research-export-confirmation">
+        <div><dt>対象期間</dt><dd>{scopeKind === "all" ? "全期間" : selectedWeek}</dd></div>
+        <div><dt>対象データ</dt><dd>活動 {preview.activities.length}件・週次集計 {preview.weeklyStatements.length}週・振り返り {preview.reflections.length}週</dd></div>
+        <div><dt>自由記述・評価根拠</dt><dd>{includeSensitiveText ? "含める（確認が必要）" : "含めない"}</dd></div>
+        <div><dt>出力形式</dt><dd>研究データJSON、または用途別CSV</dd></div>
+      </dl>}
       <div className="research-export-actions">
-        <button type="button" className="primary-action" disabled={exportDisabled} onClick={() => exportFile("csv")}>活動データCSV</button>
-        <button type="button" className="secondary-action" disabled={exportDisabled} onClick={() => exportFile("json")}>研究データJSON</button>
+        <button type="button" className="primary-action research-export-json" disabled={exportDisabled} onClick={() => exportFile("json")}>研究データJSON</button>
+        <button type="button" className="secondary-action" disabled={exportDisabled} onClick={() => exportFile("csv")}>活動データCSV</button>
         <button type="button" className="secondary-action" disabled={exportDisabled} onClick={() => exportFile("reflection")}>週次振り返りCSV</button>
         <button type="button" className="secondary-action" disabled={exportDisabled} onClick={() => exportFile("accounting")}>週次B/S・P/L CSV</button>
       </div>
