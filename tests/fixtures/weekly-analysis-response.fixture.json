@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "analysisId": "fixture-analysis-1",
+  "requestId": "request-1",
+  "recordId": "record-1",
+  "conversationId": "conversation-1",
+  "thoughtReceiptId": "record-1:receipt",
+  "conversationFingerprint": "fnv1a32:d735595d",
+  "origin": "test-fixture",
+  "analysisStatus": "complete",
+  "receivedAt": "2026-11-10T02:00:05.000Z",
+  "analysis": {
+    "activityCategory": "壁打ち",
+    "aiRole": "比較軸を示す整理役",
+    "initiative": 75,
+    "reasoning": 75,
+    "criticalJudgment": 100,
+    "thinkingChange": "速さだけでなく検証可能性を重視した",
+    "discovery": "比較軸を先に決めると判断しやすい",
+    "evidence": [
+      {
+        "target": "critical-judgment",
+        "conversationId": "conversation-1",
+        "messageIndex": 2,
+        "quote": "根拠を確認したうえで、今回は案Bを選びます。"
+      }
+    ]
+  },
+  "error": null
+}

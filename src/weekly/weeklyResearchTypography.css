@@ -1,0 +1,120 @@
+/* Shared readability rules for the weekly research mode. */
+.research-frame .weekly-workspace,
+.research-frame .weekly-panel,
+.research-frame .weekly-form,
+.research-frame .weekly-form label {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.research-frame .weekly-panel,
+.research-frame .weekly-intro-card {
+  overflow-wrap: anywhere;
+}
+
+.research-frame .weekly-intro-card h2 {
+  font-size: 30px;
+  line-height: 1.3;
+}
+
+.research-frame .weekly-intro-card > p:last-child,
+.research-frame .weekly-panel > header > p:last-child {
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.research-frame .weekly-section-heading h3,
+.research-frame .weekly-panel h3 {
+  font-size: 22px;
+  line-height: 1.4;
+}
+
+.research-frame .weekly-form label,
+.research-frame .aias-levels legend {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.research-frame .weekly-form input,
+.research-frame .weekly-form select,
+.research-frame .weekly-form textarea {
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.research-frame .weekly-form small,
+.research-frame .weekly-record-details > small,
+.research-frame .weekly-save-summary small,
+.research-frame .weekly-muted,
+.research-frame .weekly-empty {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.research-frame .weekly-panel .primary-action,
+.research-frame .weekly-record-main-action {
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.research-frame .secondary-action {
+  color: #1e3a8a;
+  background: #dbeafe;
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.research-frame .weekly-form-message,
+.research-frame .weekly-no-ai-notice,
+.research-frame .weekly-privacy-notice {
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.research-frame .weekly-analysis-state strong {
+  font-size: 16px;
+}
+
+.research-frame .weekly-analysis-state span,
+.research-frame .weekly-analysis-partial ul {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.research-frame .weekly-record-back,
+.research-frame .weekly-record-skip,
+.research-frame .weekly-record-shortcuts button,
+.research-frame .weekly-record-shortcuts a,
+.research-frame .weekly-context-tabs button {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.research-frame .bottom-nav button.active {
+  color: #1e3a8a;
+  background: #dbeafe;
+}
+
+.research-frame .bottom-nav span {
+  font-size: 14px;
+}
+
+@media (max-width: 390px) {
+  .research-frame .weekly-intro-card h2 {
+    font-size: 28px;
+  }
+
+  .research-frame .weekly-section-heading h3,
+  .research-frame .weekly-panel h3 {
+    font-size: 21px;
+  }
+
+  .research-frame .weekly-form label,
+  .research-frame .weekly-form input,
+  .research-frame .weekly-form select,
+  .research-frame .weekly-form textarea {
+    font-size: 17px;
+  }
+
+  .research-frame .bottom-nav span { font-size: 14px; }
+}

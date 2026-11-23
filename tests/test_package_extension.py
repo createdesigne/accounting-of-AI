@@ -43,8 +43,11 @@ class PackageExtensionTests(unittest.TestCase):
             target = root / "extension.zip"
             with ZipFile(target, "w", ZIP_DEFLATED) as archive:
                 for name in PACKAGE_EXTENSION.FILES:
-                    (source_dir / name).write_bytes(b"first\r\nsecond\r\n")
-                    archive.writestr(PACKAGE_EXTENSION.ARCHIVE_ROOT + name, b"first\nsecond\n")
+                    source = (ROOT / "chrome-extension" / name).read_bytes()
+                    canonical = PACKAGE_EXTENSION.normalize_text_bytes(source)
+                    crlf = canonical.replace(b"\n", b"\r\n")
+                    (source_dir / name).write_bytes(crlf)
+                    archive.writestr(PACKAGE_EXTENSION.ARCHIVE_ROOT + name, canonical)
 
             PACKAGE_EXTENSION.check_archive(root, target)
 
@@ -63,6 +66,21 @@ class PackageExtensionTests(unittest.TestCase):
 
             with self.assertRaises(SystemExit):
                 PACKAGE_EXTENSION.check_archive(root, target)
+
+    def test_extracted_extension_has_every_service_worker_dependency(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_dir = root / "chrome-extension"
+            source_dir.mkdir()
+            for name in PACKAGE_EXTENSION.FILES:
+                (source_dir / name).write_bytes(
+                    (ROOT / "chrome-extension" / name).read_bytes()
+                )
+
+            PACKAGE_EXTENSION.validate_extracted_extension(source_dir)
+            (source_dir / "activityTracker.js").unlink()
+            with self.assertRaisesRegex(ValueError, "activityTracker.js"):
+                PACKAGE_EXTENSION.validate_extracted_extension(source_dir)
 
 
 if __name__ == "__main__":

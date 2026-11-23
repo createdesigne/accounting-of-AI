@@ -13,16 +13,17 @@ async function start(options) {
   return { baseUrl: `http://127.0.0.1:${server.address().port}/api/ai`, close: () => new Promise(resolve => { server.close(resolve); server.closeAllConnections(); }) };
 }
 const input = { text: 'テスト文章' };
-test('two concurrent users keep keys and models isolated; no shared fallback or health disclosure', async () => {
+test('two concurrent users keep keys, models and explicit API methods isolated; no shared fallback or health disclosure', async () => {
   const seen = [];
-  const app = await start({ providerFactory: ({ apiKey, model }) => ({ rewrite: async value => {
-    seen.push({ apiKey, model, value }); await new Promise(resolve => setTimeout(resolve, apiKey === 'test-user-a' ? 30 : 1));
+  const app = await start({ providerFactory: ({ apiKey, model, apiMethod }) => ({ rewrite: async value => {
+    seen.push({ apiKey, model, apiMethod, value }); await new Promise(resolve => setTimeout(resolve, apiKey === 'test-user-a' ? 30 : 1));
     return { text: model };
   } }) });
   try {
-    const results = await Promise.all(['a', 'b'].map(user => createAiClient({ baseUrl: app.baseUrl, apiKey: `test-user-${user}`, model: `gemini-test-${user}` }).rewrite(input)));
+    const results = await Promise.all(['a', 'b'].map(user => createAiClient({ baseUrl: app.baseUrl, apiKey: `test-user-${user}`, model: `gemini-test-${user}`, apiMethod: user === 'a' ? 'interactions' : 'generate-content' }).rewrite(input)));
     assert.deepEqual(results, [{ text: 'gemini-test-a' }, { text: 'gemini-test-b' }]);
     assert.deepEqual(seen.map(x => [x.apiKey, x.model]).sort(), [['test-user-a', 'gemini-test-a'], ['test-user-b', 'gemini-test-b']]);
+    assert.deepEqual(seen.map(x => x.apiMethod).sort(), ['generate-content', 'interactions']);
     assert.ok(seen.every(x => JSON.stringify(x.value) === JSON.stringify(input)));
     assert.deepEqual(await (await fetch(app.baseUrl + '/health')).json(), { status: 'requires_key', configured: false, credentialMode: 'per_request' });
     const response = await fetch(app.baseUrl + '/rewrite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
@@ -38,12 +39,16 @@ test('missing/invalid credentials never send; failed provider setup never reflec
     assert.equal(calls, 0);
     const post = headers => fetch(app.baseUrl + '/rewrite', { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(input) });
     for (const headers of [{ Authorization: 'Basic test' }, { Authorization: 'Bearer test', 'X-Gemini-Model': '../other' }]) assert.equal((await post(headers)).status, 400);
+    assert.equal((await post({ Authorization: 'Bearer test', 'X-Gemini-Model': 'gemini-test', 'X-Gemini-Api-Method': 'automatic' })).status, 400);
     assert.equal(calls, 0);
     const response = await post({ Authorization: 'Bearer test', 'X-Gemini-Model': 'gemini-test' });
     assert.equal(response.status, 400); assert.equal(await response.text(), '{"error":{"code":"INVALID_CREDENTIALS"}}');
     assert.equal(calls, 1);
-    const options = await fetch(app.baseUrl + '/rewrite', { method: 'OPTIONS', headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,x-gemini-model' } });
-    assert.equal(options.status, 204);
+    for (const origin of ['http://localhost:5173', 'http://localhost:5174']) {
+      const options = await fetch(app.baseUrl + '/rewrite', { method: 'OPTIONS', headers: { Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization,x-gemini-model' } });
+      assert.equal(options.status, 204);
+      assert.equal(options.headers.get('access-control-allow-origin'), origin);
+    }
     assert.equal((await post({ Origin: 'https://evil.invalid', Authorization: 'Bearer test', 'X-Gemini-Model': 'gemini-test' })).status, 403);
     assert.equal(calls, 1);
   } finally { await app.close(); }
