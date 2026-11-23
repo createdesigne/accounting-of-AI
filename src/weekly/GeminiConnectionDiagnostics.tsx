@@ -3,6 +3,12 @@ import { useAiSettings } from "../AiSettings.tsx";
 import { createAiClient } from "../aiClient.ts";
 import type { GeminiApiMethod, WeeklyAnalysisRequestV1 } from "../integrations/weeklyAnalysisContract.ts";
 import { createWeeklyAnalysisClient } from "../weeklyAnalysisClient.ts";
+import {
+  AI_FETCH_CREDENTIALS,
+  AI_FETCH_REDIRECT,
+  assertNotDeploymentAuthenticationResponse,
+  DeploymentAuthenticationError,
+} from "../aiTransport.ts";
 
 const methods: readonly GeminiApiMethod[] = ["interactions", "generate-content"];
 type CheckKind = "text" | "minimal-json" | "weekly-analysis";
@@ -42,15 +48,21 @@ export function GeminiConnectionDiagnostics() {
       }
       if (kind === "minimal-json") {
         const response = await fetch(`${baseUrl.replace(/\/$/, "")}/test-structured`, {
-          method: "POST", credentials: "omit", redirect: "error", cache: "no-store",
+          method: "POST", credentials: AI_FETCH_CREDENTIALS, redirect: AI_FETCH_REDIRECT, cache: "no-store",
           headers: {
             "Content-Type": "application/json", Authorization: `Bearer ${credentials.apiKey}`,
             "X-Gemini-Model": credentials.model, "X-Gemini-Api-Method": apiMethod,
           },
           body: JSON.stringify({ schemaVersion: 1 }),
         });
+        assertNotDeploymentAuthenticationResponse(response);
         const value: unknown = await response.json();
-        if (!response.ok) throw new Error(errorCode(value));
+        if (!response.ok) {
+          const code = errorCode(value);
+          throw new Error(response.status === 401
+            ? `Gemini認証エラー: ${code}（HTTP 401、Vercel Preview認証とは別）`
+            : `${code}（HTTP ${response.status}）`);
+        }
         if (!isObject(value) || value.status !== "complete" || value.apiMethod !== apiMethod || value.model !== credentials.model) {
           throw new Error("INVALID_OUTPUT");
         }
@@ -64,7 +76,9 @@ export function GeminiConnectionDiagnostics() {
       }
       return { status: "success", detail: response.analysisStatus === "partial" ? `研究分析に成功（一部未評価 ${response.unresolvedFields?.length ?? 0}項目）` : "架空会話の研究分析に成功" };
     } catch (error) {
-      const detail = error instanceof Error && error.message ? error.message : "PROVIDER_ERROR";
+      const detail = error instanceof DeploymentAuthenticationError
+        ? "Vercel Preview認証が必要です。Previewを同じブラウザーで開いて認証後、再試行してください。"
+        : error instanceof Error && error.message ? error.message : "PROVIDER_ERROR";
       return { status: "failed", detail: `失敗: ${detail.slice(0, 96)}` };
     }
   }

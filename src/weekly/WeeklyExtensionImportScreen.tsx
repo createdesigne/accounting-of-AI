@@ -103,6 +103,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
     if (draft.privacy !== "full") { setMessage("時間のみ保存では会話本文を外部送信しません。"); return; }
     if (!credentials.apiKey) { setMessage("APIキーが未設定です。設定するか、分析をスキップして進めてください。"); return; }
     const now = new Date();
+    let clientFailureMessage = "";
     setBusy(true); setMessage("");
     try {
       const built = buildStagedRecord(draft, rawConversation, selectedMeasurement);
@@ -114,10 +115,11 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
         response = await createWeeklyAnalysisClient({ baseUrl, ...credentials }).analyze(request);
       } catch (error) {
         const failure = error instanceof WeeklyAnalysisClientError ? error : new WeeklyAnalysisClientError("PROVIDER_ERROR");
+        clientFailureMessage = failure.message;
         response = createClientFailureResponse(request, failure, credentials.model, new Date(), credentials.apiMethod);
       }
       changeDraft({ analysisState: response.analysisStatus, analysisRequest: Object.freeze({ requestId: request.requestId, requestedAt: request.requestedAt, consentedAt: request.consent.consentedAt }), analysisResponse: response });
-      setMessage(response.analysisStatus === "complete" ? "分析結果を受信しました。本人の事前回答と会計区分は変更していません。" : response.analysisStatus === "partial" ? "分析できた項目だけ表示します。根拠不足の項目は未評価のままです。" : "分析できませんでした。本人の記録と保存はそのまま続けられます。");
+      setMessage(response.analysisStatus === "complete" ? "分析結果を受信しました。本人の事前回答と会計区分は変更していません。" : response.analysisStatus === "partial" ? "分析できた項目だけ表示します。根拠不足の項目は未評価のままです。" : clientFailureMessage || "分析できませんでした。本人の記録と保存はそのまま続けられます。");
     } catch (error) { setMessage(messageOf(error, "分析を開始できませんでした。本人の記録と保存は続けられます。")); }
     finally { setBusy(false); }
   }
@@ -156,7 +158,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
   if (completed) return <CompletionScreen completed={completed} onOpenRecords={onOpenRecords} />;
   return <div className="weekly-extension-screen stack">
     {loadError && <p className="weekly-form-message error" role="alert">{loadError}</p>}
-    {!rawConversation || !draft ? <EmptyConversation onRefresh={refresh} /> : existing ? <ExistingConversation recordId={existing.id} onOpenRecords={onOpenRecords} /> : <>
+    {!rawConversation || !draft ? <EmptyConversation measurements={measurements} onRefresh={refresh} /> : existing ? <ExistingConversation recordId={existing.id} onOpenRecords={onOpenRecords} /> : <>
       <FlowProgress step={draft.step} />
       {draft.step === 1 && <ConversationStep rawConversation={rawConversation} draft={draft} onPrivacyChange={(privacy) => changeDraft({ privacy, analysisState: "not-started", analysisRequest: null, analysisResponse: null, postAnalysisSupplement: "", postAnalysisObjection: "" })} onSubmit={confirmConversation} />}
       {draft.step === 2 && <MeasurementStep measurements={selectableMeasurements} usedMeasurements={usedMeasurements} exactSessionMatches={exactSessionMatches} hasMeasurementSessionHint={hasMeasurementSessionHint} unrelatedUnusedCount={measurements.length - exactSessionMatches.length} selectedId={draft.measurementRecordId} onSelect={(measurementRecordId) => changeDraft({ measurementRecordId })} onSubmit={confirmMeasurement} onBack={() => moveTo(1)} />}
@@ -208,7 +210,10 @@ function AnalysisResult({ response }: { response: WeeklyAnalysisResponseV1 }) {
 
 function Metric({ label, assessment }: { label: string; assessment: WeeklyAnalysisMetricAssessmentV2 }) { return <article><div><strong>{label}</strong><b>{assessment.score === null ? "点数なし" : `${assessment.score}点`}・{metricStatusLabel(assessment.status)}</b></div><p>{assessment.reason}</p><small>証拠充足度：{sufficiencyLabel(assessment.evidenceSufficiency)}</small></article>; }
 function StepActions({ onBack, label, disabled = false }: { onBack: () => void; label: string; disabled?: boolean }) { return <div className="weekly-record-step-actions"><button className="weekly-record-back" type="button" onClick={onBack}>戻る</button><button className="primary-action weekly-record-main-action" type="submit" disabled={disabled}>{label}</button></div>; }
-function EmptyConversation({ onRefresh }: { onRefresh: () => void }) { return <section className="weekly-panel weekly-record-step"><header><p className="eyebrow">記録を始める</p><h2>会話を送信してください</h2><p>AI会話ページで拡張機能を開き、このアプリへ「思考レシート化」を実行します。</p></header><button className="primary-action weekly-record-main-action" type="button" onClick={onRefresh}>送信済みデータを確認</button></section>; }
+function EmptyConversation({ measurements, onRefresh }: { measurements: readonly MeasuredTimeCandidate[]; onRefresh: () => void }) {
+  const receivedSeconds = sumSeconds(measurements);
+  return <section className="weekly-panel weekly-record-step"><header><p className="eyebrow">記録を始める</p><h2>{measurements.length > 0 ? "実測時間は受信済みです" : "会話を送信してください"}</h2>{measurements.length > 0 ? <><p><strong>{measurements.length}件・{receivedSeconds}秒</strong>の実測時間を端末内の時間台帳に保持しています。会話はまだ受信していないため、活動・仕訳・決算には反映していません。</p><ol><li>同じChromeで研究用Vercel Previewを開き、ログイン後にアプリ画面が表示されることを確認します。</li><li>保存したいChatGPTの会話へ戻り、拡張機能から「思考レシート化する」を再実行します。</li><li>この画面で「送信済みデータを確認」を押します。</li></ol></> : <p>AI会話ページで拡張機能を開き、このアプリへ「思考レシート化」を実行します。</p>}</header><button className="primary-action weekly-record-main-action" type="button" onClick={onRefresh}>送信済みデータを確認</button></section>;
+}
 function ExistingConversation({ recordId, onOpenRecords }: { recordId: string; onOpenRecords: (recordId?: string) => void }) { return <section className="weekly-panel weekly-existing-import"><p className="eyebrow">保存済み</p><h2>この会話は活動として保存済みです</h2><p>新しい活動を重複登録せず、保存済み活動から分析・本人確認・会計区分を確認できます。</p><button className="primary-action" type="button" onClick={() => onOpenRecords(recordId)}>保存済み活動を確認する</button></section>; }
 function CompletionScreen({ completed, onOpenRecords }: { completed: { recordId: string; seconds: number; warning: string | null }; onOpenRecords: (recordId?: string) => void }) { return <section className="weekly-panel weekly-record-complete" aria-labelledby="record-complete"><span aria-hidden="true">✓</span><p className="eyebrow">保存完了</p><h2 id="record-complete">活動を保存しました</h2><p>{completed.seconds}秒の実測時間を1件の活動として保存しました。仕訳・決算にもこの1件だけが反映されます。</p>{completed.warning && <p className="weekly-form-message error" role="alert">{completed.warning}</p>}<button className="primary-action" type="button" onClick={() => onOpenRecords(completed.recordId)}>保存した活動の詳細を見る</button></section>; }
 

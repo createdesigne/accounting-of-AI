@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const script = readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
 const protocolScript = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
 const conversation = { aiService: 'ChatGPT', conversationTitle: '相談 + 100% & 日本語', messages: [{ role: 'user', text: '実際の会話本文' }] };
-function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', storedDestination = '', failure = '', injectionFailure = '', trackingSession = '', trackingSessions = null } = {}) {
+function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', storedDestination = '', failure = '', injectionFailure = '', trackingSession = '', trackingSessions = null, previewStates = null } = {}) {
   let click: () => Promise<void>;
   let changeDestination: () => Promise<void>;
   const created: string[] = [];
@@ -15,11 +15,12 @@ function popup({ source = 'https://chatgpt.com/c/example', result = conversation
   let injected = 0;
   let captureCounter = 0;
   let trackingRequestCount = 0;
+  let previewStateIndex = 0;
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination, disabled: false, addEventListener: (_event: string, handler: typeof changeDestination) => { changeDestination = handler; } } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
-    chrome: { runtime: { getManifest: () => ({ version: '0.5.12' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); } }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
-    URL, URLSearchParams, Date, Error, crypto: { randomUUID: () => `capture-test-${++captureCounter}` }, console: { error() {} },
+    chrome: { runtime: { getManifest: () => ({ version: '0.5.13' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); return previewStates ? { id: 2, url, status: 'loading' } : undefined; }, get: async () => { const states = previewStates as any[] | null; return states?.[Math.min(previewStateIndex++, states.length - 1)] ?? { id: 2, url: created.at(-1), status: 'complete' }; }, update: async () => {} }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
+    URL, URLSearchParams, Date, Error, crypto: { randomUUID: () => `capture-test-${++captureCounter}` }, setTimeout: (handler: () => void) => { handler(); return 1; }, console: { error() {} },
   });
   return { run: () => click(), changeDestination: async (value: string) => { elements.destination.value = value; await changeDestination(); }, created, elements, stored, injections: () => injected };
 }
@@ -96,7 +97,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
   assert.equal(page.elements.createReceipt.disabled, false);
-  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.12/);
+  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.13/);
   assert.match(page.elements.status.textContent, /回答の生成が終わってから/);
 });
 test('unsupported or lookalike domains are not read', async () => {
@@ -109,6 +110,18 @@ test('navigation failures show an error and allow retry', async () => {
   const page = popup({ failure: 'タブを開けませんでした' }); await page.run();
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /タブを開けませんでした/);
+  assert.equal(page.elements.createReceipt.disabled, false);
+});
+test('protected research Preview explains Vercel authentication and allows a safe retry', async () => {
+  const page = popup({
+    destination: 'researchPreview',
+    previewStates: [{ id: 2, url: 'https://vercel.com/sso-api?url=protected-preview', status: 'complete' }],
+  });
+  await page.run();
+  assert.equal(page.created.length, 1);
+  assert.match(page.elements.status.textContent, /Vercel Previewへのログインが必要/);
+  assert.match(page.elements.status.textContent, /元のAI会話へ戻って/);
+  assert.match(page.elements.status.textContent, /まだWebアプリへ保存されていません/);
   assert.equal(page.elements.createReceipt.disabled, false);
 });
 test('site access and missing receiver failures show current Japanese recovery steps', async () => {
@@ -325,6 +338,18 @@ test('time transfer can restore the bridge on an authenticated research Vercel P
     { origins: ['https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*'] },
   ]);
   assert.match(page.elements.timeTransferStatus.textContent, /1件/);
+});
+
+test('time transfer distinguishes a protected Preview login redirect and keeps finalized time pending', async () => {
+  const page = transferPopup('researchPreview', {
+    targetStates: [{ url: 'https://vercel.com/sso-api?url=protected-preview', status: 'complete' }],
+  });
+  await page.run();
+  assert.equal(page.delivered.length, 0);
+  assert.equal(page.activated[0], 8);
+  assert.equal(page.runtimeMessages.some((message) => message.type === 'time-records:ackImported'), false);
+  assert.match(page.elements.timeTransferStatus.textContent, /Vercel Previewへのログインが必要/);
+  assert.match(page.elements.timeTransferStatus.textContent, /確定済みの利用時間は保持/);
 });
 
 test('manual fallback copies only the validated minimal time payload and keeps the source records pending', async () => {

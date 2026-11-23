@@ -154,7 +154,7 @@ test('Server bounds concurrent requests and aborts Gemini when the deadline expi
   } finally { await app.close(); }
 });
 
-test('Client is opt-in, sends per-user header credentials without cookies, and normalizes cancellation, errors and invalid response', async () => {
+test('Client is opt-in, sends per-user header credentials with same-origin Preview auth only, and normalizes failures', async () => {
   let calls = 0;
   const mock = async () => { calls++; return Response.json(success()); };
   await assert.rejects(createAiClient({ fetchImpl: mock }).rewrite(input), e => e.code === 'AI_NOT_CONFIGURED');
@@ -162,9 +162,9 @@ test('Client is opt-in, sends per-user header credentials without cookies, and n
   assert.equal(calls, 0);
   for (const baseUrl of ['//evil.example', '/\\evil.example', 'http://public.example', 'https://user:password@example.com', 'https://example.com?key=secret']) assert.throws(() => createAiClient({ baseUrl }));
   await assert.rejects(createAiClient({ baseUrl: '/api/ai', apiKey: testKey, model, fetchImpl: async (_url, options) => {
-    assert.equal(options.credentials, 'omit');
+    assert.equal(options.credentials, 'same-origin');
     assert.deepEqual(options.headers, { 'Content-Type': 'application/json', Authorization: `Bearer ${testKey}`, 'X-Gemini-Model': model, 'X-Gemini-Api-Method': 'interactions' });
-    assert.equal(options.redirect, 'error'); assert.equal(options.cache, 'no-store');
+    assert.equal(options.redirect, 'manual'); assert.equal(options.cache, 'no-store');
     return Response.json({ error: { code: 'AUTH_ERROR', message: testKey } }, { status: 502 });
   } }).rewrite(input), e => e instanceof AiClientError && e.code === 'AUTH_ERROR' && !e.message.includes(testKey));
   const pending = async (_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true }));
@@ -173,4 +173,7 @@ test('Client is opt-in, sends per-user header credentials without cookies, and n
   const request = createAiClient({ baseUrl: '/api/ai', apiKey: testKey, model, fetchImpl: pending }).rewrite(input, { signal: controller.signal });
   controller.abort(); await assert.rejects(request, e => e.code === 'CANCELLED');
   await assert.rejects(createAiClient({ baseUrl: '/api/ai', apiKey: testKey, model, fetchImpl: async () => Response.json({ text: '', score: 3 }) }).rewrite(input), e => e.code === 'INVALID_OUTPUT');
+  await assert.rejects(createAiClient({ baseUrl: '/api/ai', apiKey: testKey, model, fetchImpl: async () => ({
+    type: 'opaqueredirect', status: 0, url: '', headers: new Headers(),
+  } as Response) }).rewrite(input), e => e instanceof AiClientError && e.code === 'PREVIEW_AUTH_REQUIRED' && !e.message.includes(testKey));
 });

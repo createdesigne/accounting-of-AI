@@ -1,3 +1,10 @@
+import {
+  AI_FETCH_CREDENTIALS,
+  AI_FETCH_REDIRECT,
+  assertNotDeploymentAuthenticationResponse,
+  DeploymentAuthenticationError,
+} from './aiTransport.ts';
+
 export type AiWritingRequest = { text: string; instruction?: string };
 export type AiWritingResult = { text: string };
 const errors = {
@@ -17,6 +24,7 @@ const errors = {
   PROVIDER_ERROR: 'AIサービスに接続できませんでした。元の文章は変更されていません。',
   TIMEOUT: 'AIの応答待ちが時間切れになりました。',
   CANCELLED: '生成を中止しました。',
+  PREVIEW_AUTH_REQUIRED: 'Vercel Previewへのログインが必要です。同じブラウザーでPreviewを開いて認証し、再試行してください。',
 } as const;
 type ErrorCode = keyof typeof errors;
 export class AiClientError extends Error {
@@ -48,8 +56,9 @@ export function createAiClient({ baseUrl = '', apiKey = '', model = 'gemini-3.5-
       const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
       try {
         const response = await fetchImpl(`${baseUrl.replace(/\/$/, '')}/rewrite`, {
-          method: 'POST', credentials: 'omit', redirect: 'error', cache: 'no-store', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'X-Gemini-Model': model, 'X-Gemini-Api-Method': apiMethod }, body: JSON.stringify(input), signal: controller.signal,
+          method: 'POST', credentials: AI_FETCH_CREDENTIALS, redirect: AI_FETCH_REDIRECT, cache: 'no-store', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}`, 'X-Gemini-Model': model, 'X-Gemini-Api-Method': apiMethod }, body: JSON.stringify(input), signal: controller.signal,
         });
+        assertNotDeploymentAuthenticationResponse(response);
         const result = await response.json();
         if (!response.ok) throw new AiClientError(typeof result?.error?.code === 'string' && Object.prototype.hasOwnProperty.call(errors, result.error.code) ? result.error.code : 'PROVIDER_ERROR');
         if (!result || typeof result.text !== 'string' || !result.text.trim() || result.text.length > 8000 || Object.keys(result).some(k => k !== 'text')) throw new AiClientError('INVALID_OUTPUT');
@@ -57,6 +66,7 @@ export function createAiClient({ baseUrl = '', apiKey = '', model = 'gemini-3.5-
       } catch (error) {
         if (controller.signal.aborted) throw new AiClientError(timedOut ? 'TIMEOUT' : 'CANCELLED');
         if (error instanceof AiClientError) throw error;
+        if (error instanceof DeploymentAuthenticationError) throw new AiClientError('PREVIEW_AUTH_REQUIRED');
         throw new AiClientError('PROVIDER_ERROR');
       } finally { clearTimeout(timer); signal?.removeEventListener('abort', cancel); }
     },

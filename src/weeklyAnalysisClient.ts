@@ -7,6 +7,12 @@ import {
   type WeeklyAnalysisResponseV1,
 } from "./integrations/weeklyAnalysisContract.ts";
 import { WEEKLY_ANALYSIS_RUBRIC_VERSION } from "./integrations/weeklyAnalysisRubric.ts";
+import {
+  AI_FETCH_CREDENTIALS,
+  AI_FETCH_REDIRECT,
+  assertNotDeploymentAuthenticationResponse,
+  DeploymentAuthenticationError,
+} from "./aiTransport.ts";
 
 const messages = {
   API_KEY_REQUIRED: "AI設定からGemini APIキーを入力してください。",
@@ -23,6 +29,7 @@ const messages = {
   PROVIDER_ERROR: "分析サービスに接続できませんでした。本人入力と会計データは変更されていません。",
   TIMEOUT: "分析の応答待ちが時間切れになりました。",
   CANCELLED: "分析を中止しました。",
+  PREVIEW_AUTH_REQUIRED: "Vercel Previewへのログインが必要です。同じブラウザーでPreviewを開いて認証し、再試行してください。",
 } as const;
 
 export type WeeklyAnalysisClientErrorCode = keyof typeof messages;
@@ -73,8 +80,8 @@ export function createWeeklyAnalysisClient({
       try {
         const response = await fetchImpl(`${baseUrl.replace(/\/$/, "")}/analyze-weekly`, {
           method: "POST",
-          credentials: "omit",
-          redirect: "error",
+          credentials: AI_FETCH_CREDENTIALS,
+          redirect: AI_FETCH_REDIRECT,
           cache: "no-store",
           headers: {
             "Content-Type": "application/json",
@@ -85,6 +92,7 @@ export function createWeeklyAnalysisClient({
           body: JSON.stringify(request),
           signal: controller.signal,
         });
+        assertNotDeploymentAuthenticationResponse(response);
         let value: unknown;
         try { value = await response.json(); }
         catch { throw new WeeklyAnalysisClientError("INVALID_OUTPUT"); }
@@ -100,6 +108,7 @@ export function createWeeklyAnalysisClient({
       } catch (error) {
         if (controller.signal.aborted) throw new WeeklyAnalysisClientError(timedOut ? "TIMEOUT" : "CANCELLED");
         if (error instanceof WeeklyAnalysisClientError) throw error;
+        if (error instanceof DeploymentAuthenticationError) throw new WeeklyAnalysisClientError("PREVIEW_AUTH_REQUIRED");
         throw new WeeklyAnalysisClientError("PROVIDER_ERROR");
       } finally {
         clearTimeout(timer);
@@ -139,7 +148,7 @@ export function createClientFailureResponse(
 }
 
 function mapFailureCode(code: WeeklyAnalysisClientErrorCode): WeeklyAnalysisErrorCode {
-  if (code === "API_KEY_REQUIRED" || code === "INVALID_CREDENTIALS" || code === "AUTH_ERROR") return "NOT_AUTHENTICATED";
+  if (code === "API_KEY_REQUIRED" || code === "INVALID_CREDENTIALS" || code === "AUTH_ERROR" || code === "PREVIEW_AUTH_REQUIRED") return "NOT_AUTHENTICATED";
   if (code === "FORBIDDEN") return "NOT_AUTHORIZED";
   if (code === "BUSY") return "RATE_LIMITED";
   if (code === "CANCELLED") return "PROVIDER_ERROR";

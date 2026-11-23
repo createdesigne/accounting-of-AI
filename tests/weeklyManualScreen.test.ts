@@ -44,7 +44,8 @@ test("the analysis UI requires explicit consent, reuses in-memory AI settings, a
   assert.match(analysisPanel, /useAiSettings/);
   assert.match(analysisPanel, /createWeeklyAnalysisClient/);
   assert.match(analysisClient, /\/analyze-weekly/);
-  assert.match(analysisClient, /credentials: "omit"/);
+  assert.match(analysisClient, /credentials: AI_FETCH_CREDENTIALS/);
+  assert.match(analysisClient, /redirect: AI_FETCH_REDIRECT/);
   assert.doesNotMatch(analysisClient, /localStorage|sessionStorage|document\.cookie/);
   assert.match(styles, /@media \(max-width: 370px\)/);
   assert.match(styles, /\.weekly-form-grid[\s\S]*grid-template-columns: repeat\(2/);

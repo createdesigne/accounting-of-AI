@@ -84,3 +84,11 @@ test("the record flow has explicit 360px responsive behavior and one primary act
   assert.match(styles, /\.weekly-record-step > header h2[\s\S]*font-size: 30px/);
   assert.match(styles, /\.weekly-record-main-action[\s\S]*font-size: 18px/);
 });
+
+test("the record flow distinguishes received time from a missing conversation without mutating the ledger", () => {
+  const source = readFileSync(new URL("../src/weekly/WeeklyExtensionImportScreen.tsx", import.meta.url), "utf8");
+  assert.match(source, /実測時間は受信済みです/);
+  assert.match(source, /会話はまだ受信していないため、活動・仕訳・決算には反映していません/);
+  assert.match(source, /「思考レシート化する」を再実行/);
+  assert.match(source, /<EmptyConversation measurements=\{measurements\}/);
+});

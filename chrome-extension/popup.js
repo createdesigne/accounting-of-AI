@@ -93,7 +93,19 @@ button.addEventListener("click", async () => {
     url.hash = new URLSearchParams({ draft: JSON.stringify(rawConversation) }).toString();
     if (url.href.length > 1500000) throw new Error("会話が長すぎるため送れません。短い会話でお試しください。");
 
-    await chrome.tabs.create({ url: url.href });
+    const opened = await chrome.tabs.create({
+      url: url.href,
+      ...(destination.value === "researchPreview" ? { active: false } : {}),
+    });
+    if (destination.value === "researchPreview" && opened?.id) {
+      try {
+        await waitForPreviewConversationDestination(opened.id);
+      } catch (error) {
+        await chrome.tabs.update?.(opened.id, { active: true });
+        throw error;
+      }
+      await chrome.tabs.update?.(opened.id, { active: true });
+    }
     setStatus("Webアプリを開きました。", false);
   } catch (error) {
     console.error(error);
@@ -105,6 +117,44 @@ function createCaptureId() {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (typeof uuid === "string" && uuid) return `capture-${uuid}`;
   return `capture-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
+}
+
+async function waitForPreviewConversationDestination(tabId) {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const tab = await chrome.tabs.get(tabId);
+    const currentUrl = typeof tab?.url === "string" && tab.url
+      ? tab.url
+      : typeof tab?.pendingUrl === "string" ? tab.pendingUrl : "";
+    if (isVercelAuthenticationUrl(currentUrl)) {
+      throw new Error("VERCEL_PREVIEW_AUTH_REQUIRED");
+    }
+    if (isSelectedWebAppUrl(currentUrl, "researchPreview") && tab?.status !== "loading") return;
+    if (currentUrl && tab?.status !== "loading" && !isSelectedWebAppUrl(currentUrl, "researchPreview")) {
+      throw new Error("研究用Vercel Previewとは異なるページへ移動しました。Previewを開いて認証後、会話ページから再送してください。");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error("研究用Vercel Previewの読み込みが完了しませんでした。Previewを開いて認証状態を確認してください。");
+}
+
+function isSelectedWebAppUrl(value, destinationName) {
+  try {
+    const actual = new URL(value);
+    const expected = new URL(WEB_APP_URLS[destinationName]);
+    return actual.origin === expected.origin && actual.pathname.startsWith(expected.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function isVercelAuthenticationUrl(value) {
+  try {
+    const url = new URL(value);
+    return (url.hostname === "vercel.com" || url.hostname === "www.vercel.com")
+      && (url.pathname.startsWith("/login") || url.pathname.startsWith("/sso-api") || url.pathname.startsWith("/api/auth"));
+  } catch {
+    return false;
+  }
 }
 
 async function getTrackingSnapshot() {
@@ -300,6 +350,10 @@ async function waitForTimeDestination(tabId, destinationName) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     lastAccess = await inspectTimeDestination(tabId, destinationName);
     if (lastAccess.urlMatches && lastAccess.status !== "loading") return lastAccess;
+    if (isVercelAuthenticationUrl(lastAccess.url)) {
+      await chrome.tabs.update?.(tabId, { active: true });
+      throw timeDeliveryError("preview-authentication", lastAccess, "VERCEL_PREVIEW_AUTH_REQUIRED");
+    }
     if (lastAccess.url && !lastAccess.urlMatches && lastAccess.status !== "loading") {
       throw timeDeliveryError("target-url", lastAccess, "選択した送信先とは異なるURLのタブです。");
     }
@@ -407,6 +461,9 @@ function timeDeliveryError(stage, access, detail) {
 function formatTimeTransferError(error) {
   const detail = error instanceof Error ? error.message : String(error || "");
   const selectedTarget = WEB_APP_URLS[destination?.value] || WEB_APP_URLS.production;
+  if (/VERCEL_PREVIEW_AUTH_REQUIRED|preview-authentication/i.test(detail)) {
+    return `研究用Vercel Previewへのログインが必要です。開いたタブでVercelにログインし、${selectedTarget} のアプリ画面が表示されたことを確認してから「帳簿へ連携」を再実行してください。確定済みの利用時間は保持されています。`;
+  }
   if (/cannot access contents|must request permission|not allowed to access|missing host permission/i.test(detail)) {
     return `${detail} Chromeで本拡張の「詳細」→「サイトへのアクセス」を開き、${new URL(selectedTarget).origin}が許可されているか確認してください。「すべてのサイト」の許可は不要です。`;
   }
@@ -426,6 +483,9 @@ function formatDuration(totalSeconds) {
 
 function formatAccessError(error, fallback) {
   const detail = error instanceof Error ? error.message : String(error || "");
+  if (/VERCEL_PREVIEW_AUTH_REQUIRED/i.test(detail)) {
+    return "研究用Vercel Previewへのログインが必要です。開いたタブでVercelにログインし、アプリ画面が表示された後、元のAI会話へ戻って「思考レシート化する」を再実行してください。会話はまだWebアプリへ保存されていません。";
+  }
   if (/cannot access contents|must request permission|not allowed to access|missing host permission/i.test(detail)) {
     return "現在、ChatGPTへのサイトアクセス権限がありません。Chromeの拡張機能管理画面で「AI Thought Receipt Bridge」→「詳細」→「サイトへのアクセス」を開き、chatgpt.com（またはchat.openai.com）で許可してから会話ページを再読み込みしてください。「すべてのサイト」の許可は不要です。";
   }
