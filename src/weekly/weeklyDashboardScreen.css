@@ -190,3 +190,14 @@
     font-size: 12px;
   }
 }
+
+/* First visit: concise journey, without a competing button or chart. */
+.weekly-home-guide { padding: 14px 18px; border: 1px solid #dbe7f6; border-radius: 16px; background: #fff; }
+.weekly-home-guide > p { margin: 0 0 9px; color: #334b70; font-size: 13px; font-weight: 800; }
+.weekly-home-guide ol { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 8px; margin: 0; padding: 0; counter-reset: guide; list-style: none; }
+.weekly-home-guide li { display: flex; align-items: center; gap: 6px; min-width: 0; color: #213b66; font-size: 13px; line-height: 1.45; }
+.weekly-home-guide li::before { counter-increment: guide; content: counter(guide); display: grid; flex: 0 0 24px; place-items: center; height: 24px; border-radius: 8px; color: #1d4ed8; background: #e9f1ff; font-size: 12px; font-weight: 900; }
+@media (max-width: 430px) {
+  .weekly-home-guide ol { grid-template-columns: 1fr; gap: 10px; }
+  .weekly-home-guide { padding: 13px 15px; }
+}
