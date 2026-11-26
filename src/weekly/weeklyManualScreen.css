@@ -1454,3 +1454,30 @@
     padding-inline: 0;
   }
 }
+
+
+/* Records and evaluation should prioritize names, actual time and evidence. */
+.weekly-activity-list-item { gap: 11px 15px; padding: 17px 18px; border-color: #d5e1f0; box-shadow: 0 3px 12px rgb(15 23 42 / 3%); }
+.weekly-activity-list-item strong { color: #182e52; font-size: 18px; line-height: 1.4; }
+.weekly-activity-list-item time { color: #58697f; font-size: 13px; }
+.weekly-activity-time { color: #1e49a2; font-size: 18px; line-height: 1.4; font-variant-numeric: tabular-nums; }
+.weekly-activity-detail-link { font-size: 13px; }
+.weekly-activity-summary { gap: 12px; padding: 14px; border-color: #d8e5f6; background: #f7faff; }
+.weekly-activity-summary dt { color: #53657c; font-size: 13px; }
+.weekly-activity-summary dd { color: #172b4c; font-size: 16px; line-height: 1.55; }
+.weekly-detail-section h3 { color: #172b4c; line-height: 1.4; }
+.weekly-activity-focus .weekly-analysis-metrics article { border-radius: 14px; border-color: #d4e1ef; }
+.weekly-activity-focus .weekly-analysis-metrics article p { color: #334155; line-height: 1.75; }
+.weekly-activity-focus .weekly-analysis-metrics article > header > strong { color: #172b4c; }
+.weekly-activity-focus .weekly-analysis-metrics article > header b,
+.weekly-activity-focus .weekly-analysis-metrics article > header em { line-height: 1.55; }
+.weekly-activity-focus .weekly-metric-evidence { line-height: 1.7; overflow-wrap: anywhere; }
+.weekly-detail-main-actions { gap: 9px; }
+.weekly-detail-main-actions button { min-height: 48px; font-size: 16px; line-height: 1.4; }
+@media (max-width: 640px) {
+  .weekly-detail-main-actions { grid-template-columns: minmax(0, 1fr); }
+  .weekly-activity-list { grid-template-columns: minmax(0, 1fr); }
+  .weekly-activity-list-item { grid-template-columns: minmax(0, 1fr); }
+  .weekly-activity-time { justify-self: start; }
+  .weekly-activity-summary > div { min-width: min(120px, 45%); }
+}
