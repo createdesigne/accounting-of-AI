@@ -32,7 +32,14 @@ export function AiSettingsButton({ label }: { label?: string } = {}) {
       setDraftKey(''); setModel(credentials.model); setApiMethod(credentials.apiMethod); setError(''); setStatus(''); dialog.current?.showModal();
     }}><Settings size={20} />{label && <span>{label}</span>}</button>
     <dialog ref={dialog} className="ai-settings-dialog" aria-labelledby={titleId}
-      onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }}
+      onClick={event => {
+        // Native <dialog> retargets backdrop clicks to the dialog itself.
+        // A click inside the dialog padding must not discard an unsaved key.
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right
+          || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.current?.close();
+      }}
       onClose={() => { setDraftKey(''); setError(''); }}>
       <form onSubmit={event => {
         event.preventDefault();
