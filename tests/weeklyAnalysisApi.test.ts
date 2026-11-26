@@ -13,6 +13,7 @@ import {
   parseGeminiAnalysisCandidate,
   linkGeminiAnalysisCandidate,
   linkGeminiAnalysisCandidateWithPartial,
+  createWeeklySuccessResponse,
   parseWeeklyAnalysisRequest,
   WEEKLY_ANALYSIS_PROVIDER_API_VERSION,
   WEEKLY_ANALYSIS_PROVIDER_SDK_VERSION,
@@ -286,6 +287,49 @@ test("missing or invalid evidence nulls only the affected field and returns a pa
       assert.equal(result.analysis?.evidence.some((row) => row.target === "account-candidate"), false);
     } finally { await app.close(); }
   }
+});
+
+test("twelve unsupported evidence fields remain a partial analysis instead of failing", async () => {
+  const invalidQuote = "この引用は実際の会話に存在しません";
+  const corruptQuotes = <T extends { quote: string }>(rows: readonly T[]) =>
+    rows.map(row => ({ ...row, quote: invalidQuote }));
+  const invalidateMetric = <T extends { evidence: readonly { quote: string }[] }>(metric: T) =>
+    ({ ...metric, evidence: corruptQuotes(metric.evidence) });
+  const invalidAnalysis = {
+    ...candidateAnalysis,
+    evidence: corruptQuotes(candidateAnalysis.evidence),
+    metricAssessments: {
+      initiative: invalidateMetric(candidateAnalysis.metricAssessments.initiative),
+      reasoning: invalidateMetric(candidateAnalysis.metricAssessments.reasoning),
+      independence: {
+        ...invalidateMetric(candidateAnalysis.metricAssessments.independence),
+        deliberation: invalidateMetric(candidateAnalysis.metricAssessments.independence.deliberation),
+        finalDecision: invalidateMetric(candidateAnalysis.metricAssessments.independence.finalDecision),
+      },
+    },
+  };
+  const linked = linkGeminiAnalysisCandidateWithPartial(request, invalidAnalysis);
+  assert.equal(linked.unresolvedFields.length, 12);
+  assert.equal(linked.analysis.initiative, null);
+  assert.equal(linked.analysis.reasoning, null);
+  assert.equal(linked.analysis.independence, null);
+  assert.equal(linked.analysis.evidence.length, 0);
+  const response = createWeeklySuccessResponse(request, linked.analysis, {
+    model, apiMethod: "interactions", analysisId: "analysis-12-held-metrics",
+    now: new Date("2026-11-26T02:00:00.000Z"), unresolvedFields: linked.unresolvedFields,
+  });
+  assert.equal(response.analysisStatus, "partial");
+  assert.equal(parseWeeklyAnalysisResponseV1(response).unresolvedFields.length, 12);
+  const app = await start(createGeminiProvider({ apiKey: testKey, model, fetchImpl: async () =>
+    Response.json(interaction(invalidAnalysis)) }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model }).analyze(request);
+    assert.equal(result.analysisStatus, "partial");
+    assert.equal(result.error, null);
+    assert.equal(result.unresolvedFields.length, 12);
+    assert.equal(result.analysis?.initiative, null);
+    assert.equal(result.analysis?.metricAssessments.independence.finalDecision.status, "hold");
+  } finally { await app.close(); }
 });
 
 test("structured schema keeps null distinct from zero and constrains linked evidence IDs", () => {

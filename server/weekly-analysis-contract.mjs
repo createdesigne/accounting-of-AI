@@ -377,7 +377,7 @@ function providerCode(value) { return typeof value === 'string' && /^[a-z][a-z0-
 function safeValidationField(value) { return typeof value === 'string' && /^analysis(?:\.[a-zA-Z][a-zA-Z0-9]*|\[[0-9]{1,3}\]){0,8}$/.test(value) && value.length <= 192; }
 function validUnresolvedFields(value) {
   const allowedFields = [...Object.values(fieldByTarget).map(field => `analysis.${field}`), 'analysis.initiative', 'analysis.reasoning', 'analysis.independence', 'analysis.metricAssessments.independence.deliberation', 'analysis.metricAssessments.independence.finalDecision'];
-  return Array.isArray(value) && value.length <= 10
+  return Array.isArray(value) && value.length <= allowedFields.length
     && new Set(value.map(row => row?.field)).size === value.length
     && value.every(row => plain(row) && exact(row, ['field', 'reason'])
       && allowedFields.includes(row.field) && WEEKLY_ANALYSIS_PARTIAL_REASONS.includes(row.reason));
