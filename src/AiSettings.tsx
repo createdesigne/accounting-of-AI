@@ -1,5 +1,5 @@
 import { createContext, useContext, useId, useRef, useState, type ReactNode } from 'react';
-import { Settings } from 'lucide-react';
+import { Settings, X } from 'lucide-react';
 import type { GeminiApiMethod } from './integrations/weeklyAnalysisContract.ts';
 
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
@@ -31,7 +31,9 @@ export function AiSettingsButton({ label }: { label?: string } = {}) {
     <button className={label ? "secondary-action ai-settings-launch" : "icon-button"} type="button" aria-label={label ?? "AI設定を開く"} onClick={() => {
       setDraftKey(''); setModel(credentials.model); setApiMethod(credentials.apiMethod); setError(''); setStatus(''); dialog.current?.showModal();
     }}><Settings size={20} />{label && <span>{label}</span>}</button>
-    <dialog ref={dialog} className="ai-settings-dialog" aria-labelledby={titleId} onClose={() => { setDraftKey(''); setError(''); }}>
+    <dialog ref={dialog} className="ai-settings-dialog" aria-labelledby={titleId}
+      onClick={event => { if (event.target === event.currentTarget) dialog.current?.close(); }}
+      onClose={() => { setDraftKey(''); setError(''); }}>
       <form onSubmit={event => {
         event.preventDefault();
         const apiKey = draftKey.trim() || credentials.apiKey;
@@ -40,7 +42,7 @@ export function AiSettingsButton({ label }: { label?: string } = {}) {
         setCredentials({ apiKey, model: model.trim(), apiMethod }); setDraftKey(''); setError('');
         setStatus('この画面で使うキーを設定しました。接続はまだ行っていません。');
       }}>
-        <h2 id={titleId}>AI設定</h2>
+        <div className="ai-settings-dialog-heading"><div><p className="eyebrow">アプリの接続設定</p><h2 id={titleId}>AI設定</h2></div><button className="ai-settings-dialog-close" type="button" aria-label="AI設定を閉じる" onClick={() => dialog.current?.close()}><X size={20} aria-hidden="true" /></button></div>
         <p>自分のGemini APIキーで文章編集と、本人が明示同意した週次会話の研究用構造化分析を行います。利用料と利用上限は、このキーに紐づくGoogleのプロジェクトに適用されます。</p>
         <p className="ai-key-status">{credentials.apiKey ? 'APIキー：設定済み' : 'APIキー：未設定'}</p>
         <label className="candidate-field"><span>Gemini APIキー</span>
