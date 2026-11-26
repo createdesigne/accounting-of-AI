@@ -1481,3 +1481,29 @@
   .weekly-activity-time { justify-self: start; }
   .weekly-activity-summary > div { min-width: min(120px, 45%); }
 }
+
+
+/* Saved Gemini results: reason cards need width for the actual evidence text. */
+.weekly-activity-focus .weekly-analysis-metrics {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 12px;
+}
+.weekly-activity-focus .weekly-analysis-metrics article {
+  min-width: 0;
+  padding: 17px;
+  background: #fbfdff;
+}
+.weekly-activity-focus .weekly-analysis-metrics article p {
+  font-size: 15px;
+  line-height: 1.8;
+}
+.weekly-activity-focus .weekly-analysis-metrics article > header {
+  margin-bottom: 8px;
+}
+.weekly-activity-focus .weekly-analysis-metrics article > header > strong {
+  font-size: 18px;
+  line-height: 1.5;
+}
+@media(max-width: 720px) {
+  .weekly-activity-focus .weekly-analysis-metrics { grid-template-columns: minmax(0,1fr); }
+}
