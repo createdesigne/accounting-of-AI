@@ -486,3 +486,20 @@
   line-height: 1.5;
   color: #526278;
 }
+
+
+/* More legible progress, clear primary action, accessible narrow form controls. */
+.weekly-record-progress > p { color: #31527d; letter-spacing: .01em; font-size: 14px; }
+.weekly-record-progress > div { height: 5px; }
+.weekly-record-step > header h2 { font-size: clamp(24px, 4vw, 30px); line-height: 1.35; color: #182f54; }
+.weekly-record-step > header > p:last-child { color: #516278; line-height: 1.7; font-size: 15px; }
+.weekly-record-choice label { min-height: 52px; }
+.weekly-record-choice small { color: #586a81; font-size: 13px; }
+.weekly-record-details > summary { min-height: 40px; display: flex; align-items: center; color: #224778; line-height: 1.55; }
+.weekly-record-details > summary:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+.weekly-record-main-action { max-width: 100%; min-height: 50px; font-size: 17px; }
+.weekly-analysis-advisory span { overflow-wrap: anywhere; line-height: 1.65; }
+@media (max-width: 390px) {
+  .weekly-record-step > header h2 { font-size: 24px; }
+  .weekly-record-step > header > p:last-child { font-size: 15px; }
+}
