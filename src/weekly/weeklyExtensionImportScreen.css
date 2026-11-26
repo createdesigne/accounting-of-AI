@@ -450,3 +450,39 @@
   border-color: #2563eb;
 }
 .weekly-post-analysis > p { line-height: 1.7; }
+
+
+/* Analysis preview: reasons must be readable, not three tiny newspaper columns. */
+.weekly-staged-analysis .weekly-analysis-metrics {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article {
+  padding: 15px 16px;
+  border-color: #c8d8ef;
+  background: #f9fbff;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > div {
+  align-items: center;
+  gap: 8px;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > div > strong {
+  font-size: 17px;
+  line-height: 1.45;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > div > b {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: #334155;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > small {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #526278;
+}
