@@ -64,33 +64,33 @@
       #conversationDiagnostic { margin-top: 10px; color: #334155; background: #e2e8f0; }
 
       /* Minimal hierarchy: one clear primary action per step, detail on demand. */
-      body { width: 336px; box-sizing: border-box; padding: 16px; color: #17243c; background: #f3f7fc; font-size: 14px; }
+      body { width: 352px; box-sizing: border-box; padding: 16px; color: #17243c; background: #f3f7fc; font-size: 14px; }
       h1, h2, p { margin: 0; }
       .popup-header { display: flex; gap: 11px; align-items: center; margin: 0 0 14px; }
       .popup-mark { display: grid; place-items: center; flex: 0 0 38px; height: 38px; border-radius: 12px; color: #fff; background: #1d4ed8; font-size: 23px; }
       .eyebrow { margin: 0 0 5px; color: #355ea3; font-size: 11px; font-weight: 800; letter-spacing: .045em; }
       h1 { font-size: 18px; line-height: 1.3; letter-spacing: -.02em; }
       h2, .tracking h2 { margin: 0 0 8px; font-size: 17px; line-height: 1.4; letter-spacing: -.015em; }
-      .popup-panel { padding: 16px; margin-bottom: 12px; border: 1px solid #dce6f3; border-radius: 18px; background: #fff; box-shadow: 0 6px 22px rgb(18 52 94 / 5%); }
+      .popup-panel { padding: 15px 16px; margin-bottom: 10px; border: 1px solid #dce6f3; border-radius: 18px; background: #fff; box-shadow: 0 6px 22px rgb(18 52 94 / 5%); }
       .tracking { margin: 0 0 12px; padding-top: 16px; border-top: 1px solid #dce6f3; }
-      .popup-help, .popup-feedback, .disclosure p { margin: 4px 0 12px; color: #526278; font-size: 12px; line-height: 1.65; }
+      .popup-help, .popup-feedback, .disclosure p { margin: 4px 0 10px; color: #465971; font-size: 13px; line-height: 1.65; }
       .destination-field { margin: 12px 0 6px; color: #334155; font-size: 12px; font-weight: 750; }
       select { min-height: 42px; border-color: #aebfd5; font-size: 14px; font-weight: 500; }
       button { min-height: 46px; font-weight: 750; }
       #createReceipt { margin-top: 12px; background: #2259df; }
-      #timeLedgerTransfer { margin-top: 13px; background: #08675d; font-size: 13px; }
+      #timeLedgerTransfer { margin-top: 10px; background: #e7f4f1; color: #075b54; border: 1px solid #a9d6cb; font-size: 14px; }
       #conversationDiagnostic { margin-top: 10px; }
       .disclosure { margin-top: 12px; padding: 10px 0 0; border-top: 1px solid #e6edf6; }
       .disclosure.compact { margin: 6px 0; padding: 0; border: 0; }
-      .disclosure summary { color: #365783; font-size: 12px; font-weight: 700; cursor: pointer; line-height: 1.6; }
+      .disclosure summary { color: #365783; font-size: 13px; font-weight: 700; cursor: pointer; line-height: 1.6; }
       .disclosure p { margin-top: 8px; }
       .disclosure summary:focus-visible { outline: 3px solid #38bdf8; outline-offset: 3px; }
       .tracking-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 12px 0; }
-      .tracking-stat { display: grid; gap: 3px; min-width: 0; padding: 11px; border-radius: 13px; color: #334155; background: #f2f5fa; }
+      .tracking-stat { display: grid; gap: 3px; min-width: 0; padding: 10px 11px; border-radius: 13px; color: #334155; background: #f2f5fa; }
       .tracking-stat.primary { color: #153c8a; background: #e8f1ff; }
-      .tracking-stat span { color: #526278; font-size: 11px; }
+      .tracking-stat span { color: #526278; font-size: 12px; }
       .tracking-stat strong { font-size: 22px; line-height: 1.25; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
-      .tracking-status { margin: 4px 0 10px; color: #335f82; font-size: 12px; font-weight: 750; line-height: 1.6; }
+      .tracking-status { margin: 4px 0 9px; color: #335f82; font-size: 13px; font-weight: 750; line-height: 1.6; }
       .tracking-actions { margin-top: 0; }
       #trackingStop { background: #e9eff7; }
       #timeManualCopy { margin-top: 10px; }
@@ -111,7 +111,7 @@
       <section class="popup-panel" aria-labelledby="conversationHeading">
         <p class="eyebrow">STEP 01 · 会話を取り込む</p>
         <h2 id="conversationHeading">会話を思考レシートへ</h2>
-        <p class="popup-help">ChatGPTなどの会話を開き、回答が終わってから実行します。</p>
+        <p class="popup-help">会話を開き、回答が終わってから送信します。</p>
         <label class="destination-field">送信先
           <select id="destination">
             <option value="production">本番サイト</option>
@@ -128,8 +128,8 @@
           <summary>旧版・開発用の送信先を表示</summary>
           <p>必要な場合だけ上の送信先一覧に追加します。通常は本番または研究用Previewを選んでください。</p>
         </details>
-        <button id="createReceipt" type="button">この会話を送る</button>
-        <p id="status" class="popup-feedback" role="status" aria-live="polite">送信後、アプリ側で会話を確認してから保存します。</p>
+        <button id="createReceipt" type="button">会話をアプリへ送る</button>
+        <p id="status" class="popup-feedback" role="status" aria-live="polite">保存はアプリ側で内容を確認した後に行います。</p>
         <details class="disclosure">
           <summary>会話を読み取れない場合</summary>
           <button id="conversationDiagnostic" type="button">会話取得を診断</button>
@@ -138,7 +138,7 @@
       </section>
       <section class="popup-panel tracking" aria-labelledby="trackingHeading">
         <p class="eyebrow">STEP 02 · 利用時間</p>
-        <h2 id="trackingHeading">ChatGPTの時間を計測</h2>
+        <h2 id="trackingHeading">ChatGPT利用時間</h2>
         <div class="tracking-stats" aria-label="利用時間の状況">
           <div class="tracking-stat primary"><span>今回の計測</span><strong id="trackingSessionTime">0分00秒</strong></div>
           <div class="tracking-stat"><span>確定済み（累計）</span><strong id="trackingFinalizedTime">0分00秒</strong></div>
@@ -148,9 +148,9 @@
           <button id="trackingStart" type="button">計測を開始</button>
           <button id="trackingStop" type="button">計測を停止</button>
         </div>
-        <p class="popup-help">確定済みは過去の記録も含む累計です。未連携の時間だけを示すものではありません。</p>
-        <button id="timeLedgerTransfer" type="button">確定済み記録をアプリへ連携</button>
-        <p id="timeTransferStatus" class="popup-feedback" role="status" aria-live="polite">アプリで確認・取り込みするまで、帳簿には反映されません。</p>
+        <p class="popup-help">確定済みは過去分を含む累計です。未連携時間とは異なります。</p>
+        <button id="timeLedgerTransfer" type="button">時間をアプリへ連携</button>
+        <p id="timeTransferStatus" class="popup-feedback" role="status" aria-live="polite">帳簿への保存は、アプリで確認した後に行います。</p>
         <details class="disclosure">
           <summary>連携できないときは手動でコピー</summary>
           <p>自動連携に失敗した場合だけ使います。会話本文・APIキーは含みません。</p>
