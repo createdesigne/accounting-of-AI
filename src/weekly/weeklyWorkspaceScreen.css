@@ -90,3 +90,10 @@
     font-size: 12px;
   }
 }
+
+/* Readable shortcuts that do not compete with the 5-step primary action. */
+.weekly-record-shortcuts { align-items: center; flex-wrap: wrap; }
+.weekly-record-shortcuts button,
+.weekly-record-shortcuts a { min-height: 38px; display: inline-flex; align-items: center; padding: 6px 2px; font-size: 14px; line-height: 1.5; }
+.weekly-record-shortcuts button:focus-visible,
+.weekly-record-shortcuts a:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; border-radius: 5px; }

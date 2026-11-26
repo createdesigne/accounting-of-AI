@@ -514,3 +514,15 @@
     flex-direction: column;
   }
 }
+
+
+/* Reflection forms: writing comfort takes priority over decorative density. */
+.weekly-reflection-fields { gap: 19px; }
+.weekly-reflection-fields label { gap: 9px; color: #1b3458; line-height: 1.55; }
+.weekly-reflection-fields textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 126px; border-color: #b8cbe2; background: #fff; font-size: 16px; line-height: 1.7; padding: 13px 14px; }
+.weekly-reflection-fields textarea:focus-visible { outline: 3px solid #bfdbfe; outline-offset: 2px; }
+.weekly-reflection-note { font-size: 14px; line-height: 1.7; color: #566579; }
+.weekly-reflection-actions .primary { min-height: 50px; }
+@media (max-width: 480px) {
+  .weekly-reflection-fields textarea { min-height: 132px; }
+}

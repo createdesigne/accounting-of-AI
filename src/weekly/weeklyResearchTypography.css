@@ -118,3 +118,56 @@
 
   .research-frame .bottom-nav span { font-size: 14px; }
 }
+
+
+/* Shared week navigation: native buttons were previously unstyled. */
+.research-frame .weekly-week-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+.research-frame .weekly-week-navigation > button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 42px;
+  min-width: 86px;
+  padding: 9px 13px;
+  border: 1px solid #cad9eb;
+  border-radius: 11px;
+  background: #fff;
+  color: #1c477e;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.4;
+  cursor: pointer;
+  transition: border-color 140ms ease, background-color 140ms ease;
+}
+.research-frame .weekly-week-navigation > button:hover:not(:disabled) {
+  border-color: #7eaceb;
+  background: #edf5ff;
+}
+.research-frame .weekly-week-navigation > button.current-week-button {
+  background: #eaf2ff;
+}
+.research-frame .weekly-week-navigation > button:disabled {
+  color: #69788c;
+  background: #f3f5f9;
+  cursor: default;
+  opacity: .75;
+}
+.research-frame .weekly-week-navigation > button:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 2px;
+}
+@media(max-width: 390px) {
+  .research-frame .weekly-week-navigation { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .research-frame .weekly-week-navigation > button { min-width: 0; padding: 9px 5px; font-size: 13px; }
+  .research-frame .weekly-context-tabs { grid-template-columns: repeat(2, minmax(0,1fr)); }
+  .research-frame .weekly-context-tabs button { font-size: 13px; padding: 10px 6px; }
+}

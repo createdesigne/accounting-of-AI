@@ -5,6 +5,19 @@ import vm from 'node:vm';
 
 const script = readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
 const protocolScript = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
+const popupMarkup = readFileSync(new URL('../chrome-extension/popup.html', import.meta.url), 'utf8');
+
+test('popup presents measurement, conversation and transfer in that order without duplicating controls', () => {
+  const start = popupMarkup.indexOf('id="trackingStart"');
+  const send = popupMarkup.indexOf('id="createReceipt"');
+  const transfer = popupMarkup.indexOf('id="timeLedgerTransfer"');
+  assert.ok(start > -1 && start < send && send < transfer);
+  for (const id of ['trackingSessionTime','trackingFinalizedTime','trackingStop','timeTransferStatus','timeManualCopy']) {
+    assert.equal(popupMarkup.split(`id="${id}"`).length, 2);
+  }
+  assert.match(popupMarkup, /確定済み（累計）/);
+  assert.match(popupMarkup, /計測中に会話を送信/);
+});
 const conversation = { aiService: 'ChatGPT', conversationTitle: '相談 + 100% & 日本語', messages: [{ role: 'user', text: '実際の会話本文' }] };
 function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', storedDestination = '', failure = '', injectionFailure = '', trackingSession = '', trackingSessions = null, previewStates = null } = {}) {
   let click: () => Promise<void>;
@@ -19,7 +32,7 @@ function popup({ source = 'https://chatgpt.com/c/example', result = conversation
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination, disabled: false, addEventListener: (_event: string, handler: typeof changeDestination) => { changeDestination = handler; } } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
-    chrome: { runtime: { getManifest: () => ({ version: '0.5.13' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); return previewStates ? { id: 2, url, status: 'loading' } : undefined; }, get: async () => { const states = previewStates as any[] | null; return states?.[Math.min(previewStateIndex++, states.length - 1)] ?? { id: 2, url: created.at(-1), status: 'complete' }; }, update: async () => {} }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
+    chrome: { runtime: { getManifest: () => ({ version: '0.5.16' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); return previewStates ? { id: 2, url, status: 'loading' } : undefined; }, get: async () => { const states = previewStates as any[] | null; return states?.[Math.min(previewStateIndex++, states.length - 1)] ?? { id: 2, url: created.at(-1), status: 'complete' }; }, update: async () => {} }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
     URL, URLSearchParams, Date, Error, crypto: { randomUUID: () => `capture-test-${++captureCounter}` }, setTimeout: (handler: () => void) => { handler(); return 1; }, console: { error() {} },
   });
   return { run: () => click(), changeDestination: async (value: string) => { elements.destination.value = value; await changeDestination(); }, created, elements, stored, injections: () => injected };
@@ -97,7 +110,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
   assert.equal(page.elements.createReceipt.disabled, false);
-  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.13/);
+  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.16/);
   assert.match(page.elements.status.textContent, /回答の生成が終わってから/);
 });
 test('unsupported or lookalike domains are not read', async () => {
@@ -445,6 +458,7 @@ test('popup refreshes live tracking and separates current from finalized seconds
     destination: { value: 'production', disabled: false, addEventListener() {} },
     trackingStart: listenerElement(), trackingStop: listenerElement(),
     trackingStatus: { textContent: '' },
+    trackingSessionTime: { textContent: '' }, trackingFinalizedTime: { textContent: '' },
     timeLedgerTransfer: undefined, timeTransferStatus: undefined, version: { textContent: '' },
   };
   const sandbox: any = {
@@ -460,10 +474,12 @@ test('popup refreshes live tracking and separates current from finalized seconds
   vm.runInNewContext(script, sandbox);
   await new Promise(resolve => setImmediate(resolve));
   assert.match(elements.trackingStatus.textContent, /計測中/);
-  assert.match(elements.trackingStatus.textContent, /今回 0分12秒/);
-  assert.match(elements.trackingStatus.textContent, /確定済み 1分0秒/);
+  assert.equal(elements.trackingSessionTime.textContent, '0分12秒');
+  assert.equal(elements.trackingFinalizedTime.textContent, '1分0秒');
 
   state = { ok: true, enabled: false, active: false, sessionSeconds: 0, finalizedSeconds: 72, totalSeconds: 72 };
   await poll();
-  assert.equal(elements.trackingStatus.textContent, '停止中（確定済み 1分12秒）');
+  assert.match(elements.trackingStatus.textContent, /停止中/);
+  assert.equal(elements.trackingSessionTime.textContent, '0分0秒');
+  assert.equal(elements.trackingFinalizedTime.textContent, '1分12秒');
 });

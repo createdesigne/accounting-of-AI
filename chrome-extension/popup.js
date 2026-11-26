@@ -17,6 +17,13 @@ const timeRecordProtocol = globalThis.TimeRecordProtocol;
 const button = document.getElementById("createReceipt");
 const statusText = document.getElementById("status");
 const destination = document.getElementById("destination");
+const advancedDestinations = document.getElementById("advancedDestinations");
+const advancedDestinationOptions = document.getElementById("advancedDestinationOptions");
+function syncAdvancedDestinationOptions() {
+  if (advancedDestinationOptions) advancedDestinationOptions.hidden = !advancedDestinations?.open;
+}
+advancedDestinations?.addEventListener?.("toggle", syncAdvancedDestinationOptions);
+syncAdvancedDestinationOptions();
 const destinationReady = restoreDestination();
 destination?.addEventListener?.("change", persistDestination);
 const extensionVersion = globalThis.chrome?.runtime?.getManifest?.().version || "不明";
@@ -26,6 +33,8 @@ if (versionText) versionText.textContent = `バージョン ${extensionVersion}`
 const trackingStart = document.getElementById("trackingStart");
 const trackingStop = document.getElementById("trackingStop");
 const trackingStatus = document.getElementById("trackingStatus");
+const trackingSessionTime = document.getElementById("trackingSessionTime");
+const trackingFinalizedTime = document.getElementById("trackingFinalizedTime");
 const timeLedgerTransfer = document.getElementById("timeLedgerTransfer");
 const timeTransferStatus = document.getElementById("timeTransferStatus");
 const timeManualCopy = document.getElementById("timeManualCopy");
@@ -220,12 +229,14 @@ function renderTracking(state) {
   trackingStop.disabled = !state.enabled;
   const session = formatDuration(state.sessionSeconds);
   const finalized = formatDuration(state.finalizedSeconds);
+  if (trackingSessionTime) trackingSessionTime.textContent = session;
+  if (trackingFinalizedTime) trackingFinalizedTime.textContent = finalized;
   if (!state.enabled) {
-    trackingStatus.textContent = `停止中（確定済み ${finalized}）`;
+    trackingStatus.textContent = "停止中 · 計測を始めると時間が記録されます";
   } else if (state.active) {
-    trackingStatus.textContent = `計測中（今回 ${session}／確定済み ${finalized}／合計 ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = "計測中 · ChatGPTを操作している時間を記録";
   } else {
-    trackingStatus.textContent = `待機中：ChatGPTで操作すると計測します（今回 ${session}／確定済み ${finalized}／合計 ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = "待機中 · ChatGPTを操作すると計測を再開";
   }
 }
 
@@ -312,7 +323,13 @@ async function restoreDestination() {
   try {
     const stored = await chrome.storage?.local?.get?.(DESTINATION_STORAGE_KEY);
     const value = stored?.[DESTINATION_STORAGE_KEY];
-    if (destination && ALLOWED_DESTINATIONS.has(value)) destination.value = value;
+    if (destination && ALLOWED_DESTINATIONS.has(value)) {
+      destination.value = value;
+      if (!["production", "researchPreview"].includes(value) && advancedDestinations) {
+        advancedDestinations.open = true;
+        syncAdvancedDestinationOptions();
+      }
+    }
   } catch (error) {
     console.error("送信先を復元できませんでした。", error);
   }

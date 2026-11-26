@@ -89,6 +89,10 @@ export function WeeklyDashboardScreen({
       </div>
       <small>活動に未紐付けの実測時間は含みません。</small>
     </section>
+    {dashboard.recordCount === 0 && <aside className="weekly-home-guide" aria-label="はじめての方への操作案内">
+      <p>はじめての方へ</p>
+      <ol><li>拡張機能で計測</li><li>会話を記録</li><li>週末に振り返る</li></ol>
+    </aside>}
     {loadError && <p className="weekly-dashboard-error" role="alert">{loadError}</p>}
   </div>;
 }

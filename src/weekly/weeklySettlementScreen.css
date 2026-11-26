@@ -849,3 +849,26 @@
     white-space: normal;
   }
 }
+
+
+/* Closing screens: keep status and totals readable on narrow devices. */
+.weekly-settlement-hero { gap: 12px; padding: clamp(18px, 3vw, 24px); border-radius: 21px; box-shadow: 0 8px 22px rgb(26 67 155 / 10%); }
+.weekly-settlement-hero h2 { font-size: clamp(24px, 4vw, 32px); line-height: 1.35; overflow-wrap: anywhere; }
+.weekly-settlement-panel { padding: clamp(16px, 3vw, 22px); border-radius: 18px; box-shadow: 0 5px 16px rgb(15 23 42 / 4%); }
+.weekly-settlement-heading { gap: 10px; flex-wrap: wrap; }
+.weekly-settlement-heading > strong { font-variant-numeric: tabular-nums; }
+.weekly-settlement-summary-grid article { border-radius: 13px; }
+.weekly-settlement-summary-grid article strong { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.weekly-disclosure > summary { min-height: 45px; align-items: center; gap: 10px; }
+.weekly-disclosure > summary:focus-visible { outline: 3px solid #93c5fd; outline-offset: 4px; border-radius: 8px; }
+.weekly-disclosure > summary b { font-variant-numeric: tabular-nums; }
+.weekly-category-chart > div > div { font-size: 14px; line-height: 1.45; }
+@media (max-width: 480px) {
+  .weekly-settlement-hero { flex-wrap: wrap; }
+  .weekly-settlement-status { margin-top: 2px; }
+  .weekly-settlement-summary-grid { gap: 8px; }
+  .weekly-settlement-summary-grid article { padding: 12px; }
+  .weekly-settlement-summary-grid article strong { font-size: clamp(17px, 4vw, 21px); }
+  .weekly-disclosure > summary { flex-wrap: wrap; }
+  .weekly-disclosure > summary b { margin-left: 0; }
+}

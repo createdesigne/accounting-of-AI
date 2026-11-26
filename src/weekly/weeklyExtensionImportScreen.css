@@ -414,3 +414,92 @@
     min-width: 0;
   }
 }
+
+
+/* Keep post-analysis comments readable in the real 5-step flow. */
+.weekly-post-analysis > label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  color: #263b59;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.weekly-post-analysis > label > textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 110px;
+  padding: 13px 14px;
+  border: 1px solid #b8cae1;
+  border-radius: 12px;
+  background: #fff;
+  color: #17243c;
+  font: inherit;
+  font-weight: 400;
+  line-height: 1.65;
+  resize: vertical;
+}
+.weekly-post-analysis > label > textarea:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 2px;
+  border-color: #2563eb;
+}
+.weekly-post-analysis > p { line-height: 1.7; }
+
+
+/* Analysis preview: reasons must be readable, not three tiny newspaper columns. */
+.weekly-staged-analysis .weekly-analysis-metrics {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article {
+  padding: 15px 16px;
+  border-color: #c8d8ef;
+  background: #f9fbff;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > div {
+  align-items: center;
+  gap: 8px;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > div > strong {
+  font-size: 17px;
+  line-height: 1.45;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > div > b {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > p {
+  font-size: 14px;
+  line-height: 1.75;
+  color: #334155;
+}
+.weekly-staged-analysis .weekly-analysis-metrics article > small {
+  display: block;
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #526278;
+}
+
+
+/* More legible progress, clear primary action, accessible narrow form controls. */
+.weekly-record-progress > p { color: #31527d; letter-spacing: .01em; font-size: 14px; }
+.weekly-record-progress > div { height: 5px; }
+.weekly-record-step > header h2 { font-size: clamp(24px, 4vw, 30px); line-height: 1.35; color: #182f54; }
+.weekly-record-step > header > p:last-child { color: #516278; line-height: 1.7; font-size: 15px; }
+.weekly-record-choice label { min-height: 52px; }
+.weekly-record-choice small { color: #586a81; font-size: 13px; }
+.weekly-record-details > summary { min-height: 40px; display: flex; align-items: center; color: #224778; line-height: 1.55; }
+.weekly-record-details > summary:focus-visible { outline: 3px solid #93c5fd; outline-offset: 3px; }
+.weekly-record-main-action { max-width: 100%; min-height: 50px; font-size: 17px; }
+.weekly-analysis-advisory span { overflow-wrap: anywhere; line-height: 1.65; }
+@media (max-width: 390px) {
+  .weekly-record-step > header h2 { font-size: 24px; }
+  .weekly-record-step > header > p:last-child { font-size: 15px; }
+}
