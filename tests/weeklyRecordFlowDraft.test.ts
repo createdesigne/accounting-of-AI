@@ -89,6 +89,6 @@ test("the record flow distinguishes received time from a missing conversation wi
   const source = readFileSync(new URL("../src/weekly/WeeklyExtensionImportScreen.tsx", import.meta.url), "utf8");
   assert.match(source, /実測時間は受信済みです/);
   assert.match(source, /会話はまだ受信していないため、活動・仕訳・決算には反映していません/);
-  assert.match(source, /「思考レシート化する」を再実行/);
+  assert.match(source, /「会話をアプリへ送る」を再実行/);
   assert.match(source, /<EmptyConversation measurements=\{measurements\}/);
 });
