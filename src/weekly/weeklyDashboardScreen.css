@@ -201,3 +201,29 @@
   .weekly-home-guide ol { grid-template-columns: 1fr; gap: 10px; }
   .weekly-home-guide { padding: 13px 15px; }
 }
+
+
+/* Final pass: a quieter hero, clear reading rhythm and one visible next step. */
+.weekly-home { gap: 15px; }
+.weekly-home-action {
+  gap: 10px;
+  padding: clamp(20px, 4vw, 27px);
+  border-radius: 21px;
+  background: linear-gradient(125deg, #1d49b8 0%, #1169bb 100%);
+  box-shadow: 0 10px 24px rgb(29 78 216 / 12%);
+}
+.weekly-home-action.unfinished { background: linear-gradient(125deg, #183f87 0%, #225bd0 100%); }
+.weekly-home-action h2 { font-size: clamp(25px, 4vw, 29px); line-height: 1.32; letter-spacing: -.018em; }
+.weekly-home-action > p:not(.eyebrow) { font-size: 15px; line-height: 1.65; }
+.weekly-home-action > button { min-height: 52px; margin-top: 6px; font-size: 17px; border-radius: 13px; box-shadow: none; }
+.weekly-home-status { padding: clamp(16px, 3vw, 20px); box-shadow: 0 4px 16px rgb(15 23 42 / 4%); }
+.weekly-home-status-grid p:first-child { background: #eaf2ff; }
+.weekly-home-status-grid strong { color: #1c438e; font-size: clamp(23px, 4.5vw, 30px); line-height: 1.3; font-variant-numeric: tabular-nums; }
+.weekly-home-status-grid span { color: #475569; }
+.weekly-home-status > small { color: #56667b; line-height: 1.55; }
+@media(max-width: 390px) {
+  .weekly-home-action { border-radius: 18px; }
+  .weekly-home-status-heading { flex-wrap: wrap; gap: 4px; }
+  .weekly-home-status-heading > span { max-width: 100%; text-align: left; }
+  .weekly-home-status-grid strong { font-size: 23px; }
+}
