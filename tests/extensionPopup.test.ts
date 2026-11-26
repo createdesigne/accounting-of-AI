@@ -5,6 +5,19 @@ import vm from 'node:vm';
 
 const script = readFileSync(new URL('../chrome-extension/popup.js', import.meta.url), 'utf8');
 const protocolScript = readFileSync(new URL('../chrome-extension/timeRecordProtocol.js', import.meta.url), 'utf8');
+const popupMarkup = readFileSync(new URL('../chrome-extension/popup.html', import.meta.url), 'utf8');
+
+test('popup presents measurement, conversation and transfer in that order without duplicating controls', () => {
+  const start = popupMarkup.indexOf('id="trackingStart"');
+  const send = popupMarkup.indexOf('id="createReceipt"');
+  const transfer = popupMarkup.indexOf('id="timeLedgerTransfer"');
+  assert.ok(start > -1 && start < send && send < transfer);
+  for (const id of ['trackingSessionTime','trackingFinalizedTime','trackingStop','timeTransferStatus','timeManualCopy']) {
+    assert.equal(popupMarkup.split(`id="${id}"`).length, 2);
+  }
+  assert.match(popupMarkup, /確定済み（累計）/);
+  assert.match(popupMarkup, /計測中に会話を送信/);
+});
 const conversation = { aiService: 'ChatGPT', conversationTitle: '相談 + 100% & 日本語', messages: [{ role: 'user', text: '実際の会話本文' }] };
 function popup({ source = 'https://chatgpt.com/c/example', result = conversation, destination = 'production', storedDestination = '', failure = '', injectionFailure = '', trackingSession = '', trackingSessions = null, previewStates = null } = {}) {
   let click: () => Promise<void>;
