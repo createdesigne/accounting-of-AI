@@ -445,6 +445,7 @@ test('popup refreshes live tracking and separates current from finalized seconds
     destination: { value: 'production', disabled: false, addEventListener() {} },
     trackingStart: listenerElement(), trackingStop: listenerElement(),
     trackingStatus: { textContent: '' },
+    trackingSessionTime: { textContent: '' }, trackingFinalizedTime: { textContent: '' },
     timeLedgerTransfer: undefined, timeTransferStatus: undefined, version: { textContent: '' },
   };
   const sandbox: any = {
@@ -460,10 +461,12 @@ test('popup refreshes live tracking and separates current from finalized seconds
   vm.runInNewContext(script, sandbox);
   await new Promise(resolve => setImmediate(resolve));
   assert.match(elements.trackingStatus.textContent, /計測中/);
-  assert.match(elements.trackingStatus.textContent, /今回 0分12秒/);
-  assert.match(elements.trackingStatus.textContent, /確定済み 1分0秒/);
+  assert.equal(elements.trackingSessionTime.textContent, '0分12秒');
+  assert.equal(elements.trackingFinalizedTime.textContent, '1分0秒');
 
   state = { ok: true, enabled: false, active: false, sessionSeconds: 0, finalizedSeconds: 72, totalSeconds: 72 };
   await poll();
-  assert.equal(elements.trackingStatus.textContent, '停止中（確定済み 1分12秒）');
+  assert.match(elements.trackingStatus.textContent, /停止中/);
+  assert.equal(elements.trackingSessionTime.textContent, '0分0秒');
+  assert.equal(elements.trackingFinalizedTime.textContent, '1分12秒');
 });
