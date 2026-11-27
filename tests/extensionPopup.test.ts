@@ -32,7 +32,7 @@ function popup({ source = 'https://chatgpt.com/c/example', result = conversation
   const elements = { createReceipt: { disabled: false, addEventListener: (_event: string, handler: typeof click) => { click = handler; } }, status: { textContent: '' }, destination: { value: destination, disabled: false, addEventListener: (_event: string, handler: typeof changeDestination) => { changeDestination = handler; } } };
   vm.runInNewContext(script, {
     document: { getElementById: (id: keyof typeof elements) => elements[id] },
-    chrome: { runtime: { getManifest: () => ({ version: '0.5.16' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); return previewStates ? { id: 2, url, status: 'loading' } : undefined; }, get: async () => { const states = previewStates as any[] | null; return states?.[Math.min(previewStateIndex++, states.length - 1)] ?? { id: 2, url: created.at(-1), status: 'complete' }; }, update: async () => {} }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
+    chrome: { runtime: { getManifest: () => ({ version: '0.5.17' }), sendMessage: async () => ({ ok: true, currentSessionId: Array.isArray(trackingSessions) ? (trackingSessions[trackingRequestCount++] ?? '') : trackingSession }) }, storage: { local: { get: async () => ({ ...stored }), set: async (value: Record<string, any>) => Object.assign(stored, value) } }, tabs: { query: async () => [{ id: 1, url: source, title: 'ChatGPT' }], create: async ({ url }: { url: string }) => { if (failure) throw new Error(failure); created.push(url); return previewStates ? { id: 2, url, status: 'loading' } : undefined; }, get: async () => { const states = previewStates as any[] | null; return states?.[Math.min(previewStateIndex++, states.length - 1)] ?? { id: 2, url: created.at(-1), status: 'complete' }; }, update: async () => {} }, scripting: { executeScript: async () => { injected++; if (injectionFailure) throw new Error(injectionFailure); return [{ result }]; } } },
     URL, URLSearchParams, Date, Error, crypto: { randomUUID: () => `capture-test-${++captureCounter}` }, setTimeout: (handler: () => void) => { handler(); return 1; }, console: { error() {} },
   });
   return { run: () => click(), changeDestination: async (value: string) => { elements.destination.value = value; await changeDestination(); }, created, elements, stored, injections: () => injected };
@@ -73,8 +73,8 @@ test('a session change during extraction is never guessed as the conversation me
   const raw = JSON.parse(new URLSearchParams(new URL(page.created[0]).hash.slice(1)).get('draft')!);
   assert.equal(raw.measurementSessionId, undefined);
 });
-test('legacy/preview/local/research destinations preserve the application base path', async () => {
-  for (const [destination, expected] of [['researchPreview', 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/'], ['legacy', 'https://createdesigne.github.io/accounting-of-AI/'], ['preview', 'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/'], ['local', 'http://localhost:5173/accounting-of-AI/'], ['research', 'http://localhost:5174/accounting-of-AI/']]) {
+test('preview/legacy/local/research destinations preserve the application base path', async () => {
+  for (const [destination, expected] of [['integrationPreview', 'https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/'], ['researchPreview', 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/'], ['legacy', 'https://createdesigne.github.io/accounting-of-AI/'], ['preview', 'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/'], ['local', 'http://localhost:5173/accounting-of-AI/'], ['research', 'http://localhost:5174/accounting-of-AI/']]) {
     const page = popup({ destination }); await page.run();
     assert.ok(page.created[0].startsWith(expected + '#draft='));
   }
@@ -110,7 +110,7 @@ test('empty extraction never substitutes title or demo conversation', async () =
   assert.equal(page.created.length, 0);
   assert.match(page.elements.status.textContent, /会話本文が見つかりません/);
   assert.equal(page.elements.createReceipt.disabled, false);
-  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.16/);
+  assert.match(page.elements.status.textContent, /ChatGPT／拡張機能 0\.5\.17/);
   assert.match(page.elements.status.textContent, /回答の生成が終わってから/);
 });
 test('unsupported or lookalike domains are not read', async () => {
@@ -127,7 +127,7 @@ test('navigation failures show an error and allow retry', async () => {
 });
 test('protected research Preview explains Vercel authentication and allows a safe retry', async () => {
   const page = popup({
-    destination: 'researchPreview',
+    destination: 'integrationPreview',
     previewStates: [{ id: 2, url: 'https://vercel.com/sso-api?url=protected-preview', status: 'complete' }],
   });
   await page.run();
@@ -335,6 +335,18 @@ test('time transfer uses the selected research Vercel Preview and its exact host
   assert.deepEqual(JSON.parse(JSON.stringify(page.permissionChecks)), [{ origins: ['https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*'] }]);
 });
 
+test('conversation and time transfer use the selected integration Preview and its exact host permission', async () => {
+  const conversationPage = popup({ destination: 'integrationPreview' });
+  await conversationPage.run();
+  assert.ok(conversationPage.created[0].startsWith('https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/#draft='));
+
+  const timePage = transferPopup('integrationPreview');
+  await timePage.run();
+  assert.equal(timePage.delivered.length, 1);
+  assert.equal(timePage.delivered[0].tabId, 8);
+  assert.deepEqual(JSON.parse(JSON.stringify(timePage.permissionChecks)), [{ origins: ['https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/*'] }]);
+});
+
 test('time transfer can restore the bridge on an authenticated research Vercel Preview tab', async () => {
   const page = transferPopup('researchPreview', {
     existingUrl: 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/',
@@ -353,8 +365,8 @@ test('time transfer can restore the bridge on an authenticated research Vercel P
   assert.match(page.elements.timeTransferStatus.textContent, /1件/);
 });
 
-test('time transfer distinguishes a protected Preview login redirect and keeps finalized time pending', async () => {
-  const page = transferPopup('researchPreview', {
+test('integration Preview time transfer distinguishes a login redirect and keeps finalized time pending', async () => {
+  const page = transferPopup('integrationPreview', {
     targetStates: [{ url: 'https://vercel.com/sso-api?url=protected-preview', status: 'complete' }],
   });
   await page.run();

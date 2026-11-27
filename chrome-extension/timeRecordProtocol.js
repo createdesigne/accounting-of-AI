@@ -28,6 +28,7 @@
   ]);
   const DESTINATIONS = Object.freeze({
     production: "https://accounting-of-ai.vercel.app/accounting-of-AI/",
+    integrationPreview: "https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/",
     researchPreview: "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/",
     legacy: "https://createdesigne.github.io/accounting-of-AI/",
     preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
@@ -43,6 +44,9 @@
         return url.pathname.startsWith("/accounting-of-AI/");
       }
       if (url.origin === "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app") {
+        return url.pathname.startsWith("/accounting-of-AI/");
+      }
+      if (url.origin === "https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app") {
         return url.pathname.startsWith("/accounting-of-AI/");
       }
       if (url.origin === "https://createdesigne.github.io") {
@@ -62,7 +66,7 @@
       const url = new URL(value);
       const expected = new URL(base);
       if (url.origin !== expected.origin) return false;
-      if (destination === "production" || destination === "researchPreview" || destination === "legacy") return url.pathname === expected.pathname;
+      if (destination === "production" || destination === "integrationPreview" || destination === "researchPreview" || destination === "legacy") return url.pathname === expected.pathname;
       return url.pathname.startsWith(expected.pathname);
     } catch {
       return false;
@@ -70,6 +74,7 @@
   }
 
   function destinationForUrl(value) {
+    if (isDestinationUrl(value, "integrationPreview")) return "integrationPreview";
     if (isDestinationUrl(value, "researchPreview")) return "researchPreview";
     if (isDestinationUrl(value, "preview")) return "preview";
     if (isDestinationUrl(value, "research")) return "research";

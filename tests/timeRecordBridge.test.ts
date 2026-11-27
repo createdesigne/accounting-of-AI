@@ -137,6 +137,22 @@ test('research Vercel Preview keeps a separate acknowledgement destination', asy
   assert.equal(app.posted.at(-1)?.message.ok, true);
 });
 
+test('integration Preview keeps a separate acknowledgement destination', async () => {
+  const app = createBridge('https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/');
+  await app.windowListeners[0]({
+    source: app.fakeWindow,
+    origin: app.fakeWindow.location.origin,
+    data: {
+      source: app.protocol.WINDOW_ACK_SOURCE,
+      type: app.protocol.WINDOW_ACK_TYPE,
+      payload: app.payload,
+    },
+  });
+  assert.equal(app.runtimeSent.length, 1);
+  assert.equal(app.runtimeSent[0].destination, 'integrationPreview');
+  assert.equal(app.posted.at(-1)?.message.ok, true);
+});
+
 test('reports acknowledgement failure without changing the transferred records', async () => {
   const app = createBridge(
     'https://createdesigne.github.io/accounting-of-AI/',

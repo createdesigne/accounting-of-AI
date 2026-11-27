@@ -23,6 +23,7 @@ const record = (overrides: Record<string, unknown> = {}) => ({
 test('allows only the configured Web app origins and paths', () => {
   for (const url of [
     'https://accounting-of-ai.vercel.app/accounting-of-AI/',
+    'https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/',
     'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/',
     'https://createdesigne.github.io/accounting-of-AI/',
     'https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/',
@@ -39,10 +40,12 @@ test('allows only the configured Web app origins and paths', () => {
   ]) assert.equal(protocol.isAllowedAppUrl(url), false);
 
   assert.equal(protocol.DESTINATIONS.production, 'https://accounting-of-ai.vercel.app/accounting-of-AI/');
+  assert.equal(protocol.DESTINATIONS.integrationPreview, 'https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/');
   assert.equal(protocol.DESTINATIONS.researchPreview, 'https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/');
   assert.equal(protocol.DESTINATIONS.legacy, 'https://createdesigne.github.io/accounting-of-AI/');
   assert.equal(protocol.DESTINATIONS.research, 'http://localhost:5174/accounting-of-AI/');
   assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.production), 'production');
+  assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.integrationPreview), 'integrationPreview');
   assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.researchPreview), 'researchPreview');
   assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.legacy), 'legacy');
   assert.equal(protocol.destinationForUrl(protocol.DESTINATIONS.research), 'research');
