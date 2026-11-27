@@ -259,6 +259,40 @@ test("consent is mandatory and AIAS Level 1 is never sent for analysis", async (
   } finally { await app.close(); }
 });
 
+test("short and long conversations use the same validated weekly analysis path", async () => {
+  const longMessages = [
+    ...request.messages,
+    ...Array.from({ length: 118 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      text: `${index + 1}番目の検討記録です。${"比較条件と判断理由を確認します。".repeat(10)}`,
+    })),
+  ];
+  const longRequest = {
+    ...request,
+    requestId: "request-weekly-long-1",
+    recordId: "record-weekly-long-1",
+    conversationId: "conversation-weekly-long-1",
+    thoughtReceiptId: "record-weekly-long-1:receipt",
+    conversationFingerprint: "fnv1a32:87654321",
+    messages: longMessages,
+  };
+  const sentMessageCounts: number[] = [];
+  const app = await start(createGeminiProvider({ apiKey: testKey, model, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { input: string };
+    sentMessageCounts.push((JSON.parse(body.input) as typeof request).messages.length);
+    return Response.json(interaction(candidateAnalysis));
+  } }));
+  try {
+    const client = createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model });
+    const shortResult = await client.analyze(request);
+    const longResult = await client.analyze(longRequest);
+    assert.equal(shortResult.analysisStatus, "complete");
+    assert.equal(longResult.analysisStatus, "complete");
+    assert.equal(longResult.conversationId, longRequest.conversationId);
+    assert.deepEqual(sentMessageCounts, [2, 120]);
+  } finally { await app.close(); }
+});
+
 test("invalid JSON remains a safe failed response", async () => {
   const content = { id: "bad", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "not-json" }] }] };
   const app = await start(createGeminiProvider({ apiKey: testKey, model, fetchImpl: async () => Response.json(content) }));

@@ -43,7 +43,7 @@ export function WeeklyJournalScreen({ onOpenRecords, onOpenRecordAccounting }: {
   return <div className="weekly-settlement weekly-journal-screen stack">
     <section className="weekly-settlement-hero">
       <div><p className="eyebrow light">週次仕訳</p><h2>活動時間の仕訳を確認</h2><p>{formatPeriod(anchor, "weekly")}</p></div>
-      <span className="weekly-settlement-status">{preview.journalEntries.length}仕訳</span>
+      {preview.journalEntries.length > 0 && <span className="weekly-settlement-status">{preview.journalEntries.length}仕訳</span>}
     </section>
     <nav className="weekly-week-navigation" aria-label="仕訳対象の週">
       <button type="button" onClick={() => setAnchor((value) => shiftPeriod(value, "weekly", -1))}>← 前の週</button>
@@ -51,7 +51,7 @@ export function WeeklyJournalScreen({ onOpenRecords, onOpenRecordAccounting }: {
       <button type="button" disabled={isCurrentWeek} onClick={() => setAnchor((value) => shiftPeriod(value, "weekly", 1))}>次の週 →</button>
     </nav>
     <section className="weekly-settlement-panel weekly-journal-overview" aria-labelledby="weekly-journal-overview-heading">
-      <div className="weekly-settlement-heading"><div><p className="eyebrow">今週の時間会計</p><h3 id="weekly-journal-overview-heading">記録時間と仕訳の状態</h3></div><span>{preview.settlement.totals.recordCount}件</span></div>
+      <div className="weekly-settlement-heading"><div><p className="eyebrow">今週の時間会計</p><h3 id="weekly-journal-overview-heading">記録時間と仕訳の状態</h3></div>{preview.settlement.totals.recordCount > 0 && <span>{preview.settlement.totals.recordCount}活動</span>}</div>
       <div className="weekly-journal-overview-values"><div><span>記録済み利用時間</span><strong>{formatDuration(preview.settlement.totals.recordSeconds)}</strong></div><div><span>仕訳</span><strong>{preview.journalEntries.length}件</strong></div></div>
       {preview.settlement.totals.recordCount === 0 ? <p className="weekly-journal-classified">今週の仕訳はまだありません。</p> : firstUnclassifiedRecord ? <div className="weekly-journal-classification-waiting"><div><strong>仮仕訳・分類待ち</strong><span>{formatDuration(preview.settlement.totals.unclassifiedSeconds)}・{unclassifiedRecords.length}活動の会計区分が未分類です。</span></div><button className="primary-action" type="button" onClick={() => onOpenRecordAccounting(firstUnclassifiedRecord.id)}>この活動の会計区分を決める</button></div> : <p className="weekly-journal-classified">この週の活動はすべて会計区分を確認済みです。</p>}
     </section>
