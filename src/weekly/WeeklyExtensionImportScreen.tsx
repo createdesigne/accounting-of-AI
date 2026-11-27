@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { AiSettingsButton, useAiSettings } from "../AiSettings.tsx";
 import { buildWeeklyAnalysisRequest } from "../integrations/weeklyAnalysisAdapter.ts";
-import { isWeeklyAnalysisPayloadV2, type WeeklyAnalysisMetricAssessmentV2, type WeeklyAnalysisResponseV1 } from "../integrations/weeklyAnalysisContract.ts";
+import { isWeeklyAnalysisPayloadV2, type WeeklyAnalysisDiagnosticStage, type WeeklyAnalysisMetricAssessmentV2, type WeeklyAnalysisResponseV1, type WeeklyAnalysisValidationRule } from "../integrations/weeklyAnalysisContract.ts";
 import type { AnalysisActivityCategory } from "../integrations/analysisContract.ts";
 import { WEEKLY_ANALYSIS_RUBRIC_VERSION } from "../integrations/weeklyAnalysisRubric.ts";
 import { TIME_ACCOUNTING_CHANGED_EVENT } from "../timeAccountingEvents.ts";
@@ -201,11 +201,17 @@ function AccountingStep({ draft, busy, message, onChange, onSubmit, onBack }: { 
 }
 
 function AnalysisResult({ response }: { response: WeeklyAnalysisResponseV1 }) {
-  if (response.analysisStatus === "failed") return <div className="weekly-analysis-state failed"><strong>分析失敗</strong><span>{analysisErrorLabel(response.error?.code)}</span><span>本人の記録と会計保存は続けられます。</span></div>;
+  if (response.analysisStatus === "failed") return <div className="weekly-analysis-state failed"><strong>分析失敗</strong><span>{analysisErrorLabel(response.error?.code)}</span><span>本人の記録と会計保存は続けられます。</span><AnalysisFailureDetails response={response} /></div>;
   const analysis = response.analysis;
   if (!analysis) return null;
   const v2 = isWeeklyAnalysisPayloadV2(analysis) ? analysis : null;
   return <div className="weekly-staged-analysis"><div className={`weekly-analysis-state ${response.analysisStatus}`}><strong>{response.analysisStatus === "partial" ? "一部未評価" : "分析完了"}</strong><span>{response.analysisStatus === "partial" ? "根拠を確認できた項目だけ表示します。" : "本人の判断とは別のAI分析結果です。"}</span></div><dl className="weekly-analysis-details"><Row label="活動テーマ候補" value={analysis.activityCategory ?? "未評価"} /><Row label="会計区分候補" value={dispositionLabel(analysis.accountingDispositionCandidate)} /><Row label="勘定科目候補" value={analysis.accountCandidate ?? "未評価"} /><Row label="AIの役割" value={analysis.aiRole ?? "未評価"} /></dl>{v2 && <div className="weekly-analysis-metrics"><Metric label="自発性" assessment={v2.metricAssessments.initiative} /><Metric label="論理性" assessment={v2.metricAssessments.reasoning} /><Metric label="独立性" assessment={v2.metricAssessments.independence} /></div>}{response.analysisStatus === "partial" && <ul className="weekly-unresolved-list">{(response.unresolvedFields ?? []).map((item) => <li key={item.field}>{fieldLabel(item.field)}：根拠不足のため未評価</li>)}</ul>}<details className="weekly-record-details"><summary>分析根拠と詳細</summary><p>思考の変化：{analysis.thinkingChange ?? "未評価"}</p><p>発見・学び：{analysis.discovery ?? "未評価"}</p>{analysis.evidence.length > 0 && <ul>{analysis.evidence.map((item, index) => <li key={`${item.target}:${index}`}>会話 {item.messageIndex + 1}：「{item.quote}」</li>)}</ul>}</details></div>;
+}
+
+function AnalysisFailureDetails({ response }: { response: WeeklyAnalysisResponseV1 }) {
+  const error = response.error;
+  if (!error || (!error.diagnosticStage && !error.validationField && !error.validationRule && !error.providerHttpStatus)) return null;
+  return <details className="weekly-record-details"><summary>失敗箇所を確認</summary><dl className="weekly-analysis-details">{error.diagnosticStage && <Row label="失敗した段階" value={diagnosticStageLabel(error.diagnosticStage)} />}{error.validationField && <Row label="検証フィールド" value={error.validationField} />}{error.validationRule && <Row label="違反条件" value={validationRuleLabel(error.validationRule)} />}{error.providerHttpStatus && <Row label="Gemini HTTPステータス" value={String(error.providerHttpStatus)} />}</dl><small>APIキーや会話本文は表示しません。</small></details>;
 }
 
 function Metric({ label, assessment }: { label: string; assessment: WeeklyAnalysisMetricAssessmentV2 }) { return <article><div><strong>{label}</strong><b>{assessment.score === null ? "点数なし" : `${assessment.score}点`}・{metricStatusLabel(assessment.status)}</b></div><p>{assessment.reason}</p><small>証拠充足度：{sufficiencyLabel(assessment.evidenceSufficiency)}</small></article>; }
@@ -246,5 +252,7 @@ function analysisStateLabel(value: WeeklyRecordFlowDraftV1["analysisState"]) { r
 function metricStatusLabel(value: WeeklyAnalysisMetricAssessmentV2["status"]) { return ({ confirmed: "確定", provisional: "暫定", hold: "評価保留", not_applicable: "評価対象外" } as const)[value]; }
 function sufficiencyLabel(value: WeeklyAnalysisMetricAssessmentV2["evidenceSufficiency"]) { return ({ high: "高", medium: "中", low: "低" } as const)[value]; }
 function analysisErrorLabel(value: string | undefined) { return ({ NOT_AUTHENTICATED: "APIキーまたは認証を確認してください。", RATE_LIMITED: "利用上限に達しました。時間を置いて再試行できます。", MODEL_UNAVAILABLE: "選択中のモデルを利用できません。", INVALID_OUTPUT: "分析結果の形式または根拠を確認できませんでした。", TIMEOUT: "分析の応答待ちが時間切れになりました。", PROVIDER_ERROR: "分析サービスに接続できませんでした。" } as Record<string, string>)[value ?? ""] ?? "分析を完了できませんでした。"; }
+function diagnosticStageLabel(value: WeeklyAnalysisDiagnosticStage) { return ({ "provider-response": "Gemini応答の受信", "output-truncated": "出力の途中終了", "interaction-envelope": "API応答構造の読み取り", "json-parse": "JSON解析", "schema-validation": "必須項目・型・列挙値の検証", "evidence-validation": "会話ID・発言位置・引用一致の検証" } as const)[value]; }
+function validationRuleLabel(value: WeeklyAnalysisValidationRule) { return ({ required: "必須項目がない", "unexpected-fields": "許可されていない項目がある", type: "データ型が異なる", enum: "許可された値ではない", integer: "整数ではない", "non-empty": "空文字は許可されない", "max-length": "文字数上限を超えている", "max-items": "件数上限を超えている", "evidence-required": "非nullの分析値に対応する根拠がない", "message-index-range": "発言番号が範囲外", "conversation-id-match": "会話IDが一致しない", "quote-match": "引用が指定発言に一致しない", "score-match": "指標点数と詳細評価が一致しない" } as const)[value]; }
 function fieldLabel(value: string) { return ({ "analysis.activityCategory": "活動テーマ", "analysis.accountCandidate": "勘定科目候補", "analysis.accountingDispositionCandidate": "会計区分候補", "analysis.aiRole": "AIの役割", "analysis.collaborationBehaviors": "協働行動", "analysis.initiative": "自発性", "analysis.reasoning": "論理性", "analysis.independence": "独立性", "analysis.metricAssessments.independence.deliberation": "独立性（検討過程）", "analysis.metricAssessments.independence.finalDecision": "独立性（最終判断）", "analysis.criticalJudgment": "批判的判断（旧形式）", "analysis.thinkingChange": "思考の変化", "analysis.discovery": "発見・学び" } as Record<string, string>)[value] ?? value; }
 function Row({ label, value }: { label: string; value: string }) { return <><dt>{label}</dt><dd>{value}</dd></>; }

@@ -323,6 +323,46 @@ test("missing or invalid evidence nulls only the affected field and returns a pa
   }
 });
 
+test("GenerateContent turns a scored metric without evidence into a partial hold", async () => {
+  const missingMetricEvidence = {
+    ...candidateAnalysis,
+    metricAssessments: {
+      ...candidateAnalysis.metricAssessments,
+      initiative: { ...candidateAnalysis.metricAssessments.initiative, evidence: [] },
+    },
+  };
+  const app = await start(createGeminiProvider({
+    apiKey: testKey, model, apiMethod: "generate-content",
+    fetchImpl: async () => Response.json(generateContent(missingMetricEvidence)),
+  }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+    assert.equal(result.analysisStatus, "partial");
+    assert.equal(result.error, null);
+    assert.equal(result.analysis?.initiative, null);
+    assert.equal(result.analysis?.metricAssessments.initiative.status, "hold");
+    assert.equal(result.analysis?.metricAssessments.reasoning.score, 75);
+    assert.deepEqual(result.unresolvedFields, [{ field: "analysis.initiative", reason: "missing-evidence" }]);
+  } finally { await app.close(); }
+});
+
+test("self-report evidence attributed to an assistant is held without weakening quote matching", () => {
+  const assistantQuote = request.messages[1].text;
+  const result = linkGeminiAnalysisCandidateWithPartial(request, {
+    ...candidateAnalysis,
+    metricAssessments: {
+      ...candidateAnalysis.metricAssessments,
+      initiative: {
+        ...candidateAnalysis.metricAssessments.initiative,
+        evidence: [{ messageIndex: 1, quote: assistantQuote, observedFeature: "自己申告として扱えない発言", source: "self_report" }],
+      },
+    },
+  });
+  assert.equal(result.analysis.initiative, null);
+  assert.equal(result.analysis.metricAssessments.initiative.status, "hold");
+  assert.deepEqual(result.unresolvedFields, [{ field: "analysis.initiative", reason: "invalid-evidence" }]);
+});
+
 test("twelve unsupported evidence fields remain a partial analysis instead of failing", async () => {
   const invalidQuote = "この引用は実際の会話に存在しません";
   const corruptQuotes = <T extends { quote: string }>(rows: readonly T[]) =>
@@ -405,8 +445,13 @@ test("candidate validation reports safe field paths and individual rules", () =>
       return true;
     });
   }
+  const candidateWithoutMetricEvidence = parseGeminiAnalysisCandidate({
+    ...candidateAnalysis,
+    metricAssessments: { ...candidateAnalysis.metricAssessments, initiative: { ...candidateAnalysis.metricAssessments.initiative, evidence: [] } },
+  });
+  assert.equal(candidateWithoutMetricEvidence.metricAssessments.initiative.evidence.length, 0);
   assert.throws(
-    () => parseGeminiAnalysisCandidate({ ...candidateAnalysis, metricAssessments: { ...candidateAnalysis.metricAssessments, initiative: { ...candidateAnalysis.metricAssessments.initiative, evidence: [] } } }),
+    () => parseGeminiAnalysisPayload({ ...analysis, metricAssessments: { ...analysis.metricAssessments, initiative: { ...analysis.metricAssessments.initiative, evidence: [] } } }),
     (error: unknown) => {
       assert.equal((error as { validationField?: string }).validationField, "analysis.metricAssessments.initiative");
       assert.equal((error as { validationRule?: string }).validationRule, "evidence-required");

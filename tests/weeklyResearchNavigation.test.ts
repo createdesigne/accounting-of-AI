@@ -8,6 +8,7 @@ const settings = readFileSync(new URL("../src/weekly/WeeklySettingsScreen.tsx", 
 const settingsCss = readFileSync(new URL("../src/weekly/weeklySettingsScreen.css", import.meta.url), "utf8");
 const diagnostics = readFileSync(new URL("../src/weekly/GeminiConnectionDiagnostics.tsx", import.meta.url), "utf8");
 const aiSettings = readFileSync(new URL("../src/AiSettings.tsx", import.meta.url), "utf8");
+const recordFlow = readFileSync(new URL("../src/weekly/WeeklyExtensionImportScreen.tsx", import.meta.url), "utf8");
 
 test("research mode bottom navigation has exactly four primary destinations", () => {
   const tabsBlock = app.match(/const tabs: Array<\{ key: TabKey; icon: ReactNode \}> = \[([\s\S]*?)\];/)?.[1] ?? "";
@@ -62,6 +63,15 @@ test("settings keeps ephemeral credentials and explicit privacy choices", () => 
   assert.match(settings, /保存しない/);
   assert.match(settings, /Gemini分析を実行する直前/);
   assert.doesNotMatch(settings, /localStorage|sessionStorage|document\.cookie/);
+});
+
+test("record flow exposes privacy-safe INVALID_OUTPUT diagnostics", () => {
+  for (const field of ["diagnosticStage", "validationField", "validationRule", "providerHttpStatus"]) assert.match(recordFlow, new RegExp(field));
+  assert.match(recordFlow, /失敗した段階/);
+  assert.match(recordFlow, /検証フィールド/);
+  assert.match(recordFlow, /違反条件/);
+  assert.match(recordFlow, /APIキーや会話本文は表示しません/);
+  assert.doesNotMatch(recordFlow, /rawResponse|responseText/);
 });
 
 test("research records offer a manual measured-time fallback without putting it on home", () => {
