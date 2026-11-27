@@ -9,12 +9,24 @@ const settingsCss = readFileSync(new URL("../src/weekly/weeklySettingsScreen.css
 const diagnostics = readFileSync(new URL("../src/weekly/GeminiConnectionDiagnostics.tsx", import.meta.url), "utf8");
 const aiSettings = readFileSync(new URL("../src/AiSettings.tsx", import.meta.url), "utf8");
 
-test("research mode bottom navigation has exactly the five requested destinations", () => {
+test("research mode bottom navigation has exactly four primary destinations", () => {
   const tabsBlock = app.match(/const tabs: Array<\{ key: TabKey; icon: ReactNode \}> = \[([\s\S]*?)\];/)?.[1] ?? "";
-  assert.equal((tabsBlock.match(/key:/g) ?? []).length, 5);
-  for (const key of ["home", "weekly", "journal", "tax", "settings"]) assert.match(tabsBlock, new RegExp(`key: "${key}"`));
-  for (const label of ['home: "ホーム"', 'weekly: "記録"', 'journal: "仕訳"', 'tax: "決算"', 'settings: "設定"']) assert.match(app, new RegExp(label));
-  assert.doesNotMatch(tabsBlock, /receipts|analysis/);
+  assert.equal((tabsBlock.match(/key:/g) ?? []).length, 4);
+  for (const key of ["home", "weekly", "journal", "tax"]) assert.match(tabsBlock, new RegExp(`key: "${key}"`));
+  for (const label of ['home: "ホーム"', 'weekly: "記録"', 'journal: "仕訳"', 'tax: "決算"']) assert.match(app, new RegExp(label));
+  assert.doesNotMatch(tabsBlock, /settings|receipts|analysis/);
+  assert.match(styles, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+});
+
+test("research mode opens settings from the header and returns to the prior screen", () => {
+  const header = app.match(/function Header[\s\S]*?function ToastMessage/)?.[0] ?? "";
+  assert.match(header, /researchMode \? <button[\s\S]*aria-label="設定を開く"[\s\S]*onClick=\{onOpenSettings\}[\s\S]*<Settings size=\{20\}/);
+  assert.match(header, /AiSettingsButton[\s\S]*aria-label="決算を開く"/);
+  assert.match(app, /settingsReturnTabRef/);
+  assert.match(app, /function openResearchSettings\(\)/);
+  assert.match(app, /function closeResearchSettings\(\)/);
+  assert.match(app, /onCloseSettings=\{closeResearchSettings\}/);
+  assert.match(settings, /元の画面に戻る/);
 });
 
 test("monthly and annual legacy screens stay in source but are hidden in research mode", () => {

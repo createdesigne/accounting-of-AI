@@ -193,6 +193,17 @@
   white-space: nowrap;
 }
 
+.weekly-settlement-balance-check > small {
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.weekly-settlement-balance-check > small {
+  grid-column: 1 / -1;
+}
+
+
 .weekly-settlement-confirm,
 .weekly-settlement-edit {
   width: 100%;
@@ -701,8 +712,7 @@
   background: #f8fafc;
 }
 
-.weekly-journal-screen .weekly-journal-lines small,
-.weekly-journal-screen .weekly-journal-lines p {
+.weekly-journal-screen .weekly-journal-lines small {
   grid-column: 1 / -1;
 }
 
@@ -725,13 +735,6 @@
   font-size: clamp(1.05rem, 2vw, 1.3rem);
   line-height: 1.35;
   white-space: nowrap;
-}
-
-.weekly-journal-screen .weekly-journal-lines p {
-  margin: 3px 0 0;
-  color: #64748b;
-  font-size: 0.88rem;
-  line-height: 1.55;
 }
 
 @media (max-width: 720px) {
@@ -840,7 +843,6 @@
   }
 
   .weekly-journal-screen .weekly-journal-lines b,
-  .weekly-journal-screen .weekly-journal-lines p,
   .weekly-journal-screen .weekly-journal-lines small {
     grid-column: 1;
   }

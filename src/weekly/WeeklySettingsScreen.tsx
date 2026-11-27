@@ -6,7 +6,7 @@ import "./weeklySettingsScreen.css";
 
 type SettingsView = "menu" | "gemini" | "privacy" | "export";
 
-export function WeeklySettingsScreen({ onOpenRecords }: { onOpenRecords: () => void }) {
+export function WeeklySettingsScreen({ onBack, onOpenRecords }: { onBack: () => void; onOpenRecords: () => void }) {
   const [view, setView] = useState<SettingsView>("menu");
   const { credentials } = useAiSettings();
 
@@ -56,6 +56,7 @@ export function WeeklySettingsScreen({ onOpenRecords }: { onOpenRecords: () => v
   </div>;
 
   return <div className="weekly-settings-screen stack">
+    <button className="weekly-settings-back" type="button" onClick={onBack}>← 元の画面に戻る</button>
     <section className="weekly-intro-card weekly-settings-home-hero">
       <p className="eyebrow light">研究モードの設定</p>
       <h2>設定</h2>

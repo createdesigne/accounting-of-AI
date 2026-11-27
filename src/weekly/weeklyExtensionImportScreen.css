@@ -71,9 +71,11 @@
 .weekly-extension-help > div a {
   display: inline-block;
   margin-top: 10px;
-  color: #2563eb;
+  color: #64748b;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
+  text-decoration-color: #cbd5e1;
+  text-underline-offset: 3px;
 }
 
 .weekly-measurement-usage {

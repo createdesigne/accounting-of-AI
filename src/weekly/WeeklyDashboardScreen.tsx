@@ -34,7 +34,6 @@ export function WeeklyDashboardScreen({
     unclassifiedAccountingCount,
     hasPendingRecordWork,
   });
-  const conversationCount = dashboard.records.filter(({ record }) => record.links.conversationId !== null).length;
 
   const refresh = useCallback(() => {
     try {
@@ -85,14 +84,9 @@ export function WeeklyDashboardScreen({
       </header>
       <div className="weekly-home-status-grid">
         <p><span>記録済み利用時間</span><strong>{formatDuration(dashboard.totalSeconds)}</strong></p>
-        <p><span>記録した会話</span><strong>{conversationCount}件</strong></p>
       </div>
       <small>活動に未紐付けの実測時間は含みません。</small>
     </section>
-    {dashboard.recordCount === 0 && <aside className="weekly-home-guide" aria-label="はじめての方への操作案内">
-      <p>はじめての方へ</p>
-      <ol><li>拡張機能で計測</li><li>会話を記録</li><li>週末に振り返る</li></ol>
-    </aside>}
     {loadError && <p className="weekly-dashboard-error" role="alert">{loadError}</p>}
   </div>;
 }

@@ -12,6 +12,7 @@ test("zero records presents conversation capture as the only primary task", () =
   });
   assert.equal(action.kind, "start-recording");
   assert.equal(action.title, "今日の記録を始めましょう");
+  assert.equal(action.description, "会話と実測時間を取り込みます。");
   assert.equal(action.buttonLabel, "会話を記録する");
 });
 
@@ -64,9 +65,8 @@ test("desktop and 360px home layouts keep one action above a compact weekly stat
   assert.match(source, /weekly-home-action/);
   assert.match(source, /weekly-home-status/);
   assert.match(source, /記録済み利用時間/);
-  assert.match(source, /記録した会話/);
+  assert.doesNotMatch(source, /記録した会話|はじめての方へ|weekly-home-guide/);
   assert.doesNotMatch(source, /<p><span>対象週/);
-  assert.match(source, /record\.links\.conversationId !== null/);
   assert.match(source, /活動に未紐付けの実測時間は含みません/);
   assert.doesNotMatch(source, /weekly-week-navigation|weekly-home-details|moveWeek/);
   assert.match(styles, /@media \(max-width: 390px\)/);
@@ -74,5 +74,5 @@ test("desktop and 360px home layouts keep one action above a compact weekly stat
   assert.match(styles, /color: #1e3a8a;[\s\S]*background: #fff;[\s\S]*font-size: 19px/);
   assert.match(styles, /\.weekly-home-action h2[\s\S]*font-size: 29px/);
   assert.match(styles, /\.weekly-home-status-grid strong[\s\S]*font-size: 30px/);
-  assert.match(styles, /\.weekly-home-status-grid[\s\S]*grid-template-columns: repeat\(2/);
+  assert.match(styles, /\.weekly-home-status-grid[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
 });
