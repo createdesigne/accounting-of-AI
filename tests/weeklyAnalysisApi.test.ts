@@ -564,6 +564,83 @@ test("upstream HTTP diagnostics expose only status and machine error type", asyn
   }
 });
 
+test("503 retries use bounded exponential backoff without changing model, method, or request", async () => {
+  for (const apiMethod of ["interactions", "generate-content"] as const) {
+    let calls = 0;
+    const requests: Array<{ url: string; body: string }> = [];
+    const app = await start(createGeminiProvider({
+      apiKey: testKey, model, apiMethod,
+      fetchImpl: async (url, init) => {
+        calls += 1;
+        requests.push({ url: String(url), body: String(init?.body) });
+        if (calls < 3) return Response.json({ error: { status: "UNAVAILABLE", message: `do not expose ${quote}` } }, { status: 503 });
+        return Response.json(apiMethod === "interactions" ? interaction(candidateAnalysis) : generateContent(candidateAnalysis));
+      },
+    }));
+    try {
+      const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod }).analyze(request);
+      assert.equal(result.analysisStatus, "complete");
+      assert.equal(result.model, model);
+      assert.equal(result.apiMethod, apiMethod);
+      assert.equal(calls, 3);
+      assert.equal(new Set(requests.map(item => item.url)).size, 1);
+      assert.equal(new Set(requests.map(item => item.body)).size, 1);
+      assert.equal(JSON.stringify(result).includes(quote), true);
+    } finally { await app.close(); }
+  }
+});
+
+test("persistent 503 stops after three attempts and keeps only safe diagnostics", async () => {
+  let calls = 0;
+  const upstreamMessage = `never expose ${testKey} or ${quote}`;
+  const app = await start(createGeminiProvider({ apiKey: testKey, model, apiMethod: "generate-content", fetchImpl: async () => {
+    calls += 1;
+    return Response.json({ error: { status: "UNAVAILABLE", message: upstreamMessage } }, { status: 503 });
+  } }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+    assert.equal(calls, 3);
+    assert.equal(result.analysisStatus, "failed");
+    assert.equal(result.error?.code, "PROVIDER_ERROR");
+    assert.equal(result.error?.providerHttpStatus, 503);
+    assert.equal(result.error?.providerErrorCode, "unavailable");
+    assert.equal(result.error?.diagnosticStage, "provider-response");
+    assert.equal(JSON.stringify(result).includes(upstreamMessage), false);
+    assert.equal(JSON.stringify(result).includes(testKey), false);
+    assert.equal(JSON.stringify(result).includes(quote), false);
+  } finally { await app.close(); }
+});
+
+test("401, 403, and invalid analysis output are never retried", async () => {
+  for (const status of [401, 403]) {
+    let calls = 0;
+    const app = await start(createGeminiProvider({ apiKey: testKey, model, apiMethod: "generate-content", fetchImpl: async () => {
+      calls += 1;
+      return Response.json({ error: { status: status === 401 ? "UNAUTHENTICATED" : "PERMISSION_DENIED" } }, { status });
+    } }));
+    try {
+      const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+      assert.equal(result.analysisStatus, "failed");
+      assert.equal(result.error?.code, "NOT_AUTHENTICATED");
+      assert.equal(calls, 1);
+    } finally { await app.close(); }
+  }
+
+  let invalidCalls = 0;
+  const invalidApp = await start(createGeminiProvider({ apiKey: testKey, model, apiMethod: "generate-content", fetchImpl: async () => {
+    invalidCalls += 1;
+    return Response.json(generateContent({ ...candidateAnalysis, reasoning: 60 }));
+  } }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: invalidApp.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+    assert.equal(result.analysisStatus, "failed");
+    assert.equal(result.error?.code, "INVALID_OUTPUT");
+    assert.equal(result.error?.diagnosticStage, "schema-validation");
+    assert.equal(result.error?.validationField, "analysis.reasoning");
+    assert.equal(invalidCalls, 1);
+  } finally { await invalidApp.close(); }
+});
+
 test("network failure is normalized without inventing scores or changing the request", async () => {
   const before = JSON.stringify(request);
   const client = createWeeklyAnalysisClient({ baseUrl: "/api/ai", apiKey: testKey, model, fetchImpl: async () => { throw new Error("offline"); } });
