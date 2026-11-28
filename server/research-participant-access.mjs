@@ -30,7 +30,8 @@ export class ResearchParticipantAccessError extends Error {
   }
 }
 
-export function createResearchParticipantAccess(env = {}, { fetchImpl = fetch } = {}) {
+export function createResearchParticipantAccess(env = {}, { fetchImpl = fetch, quotaTimeoutMs = 3000 } = {}) {
+  if (!Number.isInteger(quotaTimeoutMs) || quotaTimeoutMs < 1 || quotaTimeoutMs > 5000) throw new Error('Invalid quota timeout');
   const configuration = readConfiguration(env);
   return Object.freeze({
     available: configuration !== null,
@@ -47,7 +48,7 @@ export function createResearchParticipantAccess(env = {}, { fetchImpl = fetch } 
       }
       const participantId = matchParticipant(configuration.participants, accessCode);
       if (!participantId) throw new ResearchParticipantAccessError('INVALID_ACCESS_CODE');
-      const allowed = await reserveQuota(configuration, participantId, requestId, requestFingerprint, signal, fetchImpl);
+      const allowed = await reserveQuota(configuration, participantId, requestId, requestFingerprint, signal, fetchImpl, quotaTimeoutMs);
       if (!allowed) throw new ResearchParticipantAccessError('RESEARCH_LIMIT_REACHED');
       return Object.freeze({
         apiKey: configuration.apiKey,
@@ -113,26 +114,34 @@ function matchParticipant(participants, accessCode) {
   return matched;
 }
 
-async function reserveQuota(configuration, participantId, requestId, requestFingerprint, signal, fetchImpl) {
+async function reserveQuota(configuration, participantId, requestId, requestFingerprint, signal, fetchImpl, quotaTimeoutMs) {
   const tag = `{research:${configuration.namespace}}`;
   const participantKey = `${tag}:participant:${participantId}`;
   const globalKey = `${tag}:global`;
   const requestHash = createHash('sha256').update(requestId, 'utf8').update('\0').update(requestFingerprint, 'utf8').digest('hex');
   const idempotencyKey = `${tag}:request:${participantId}:${requestHash}`;
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(abort, quotaTimeoutMs);
   let response;
+  let payload;
   try {
     response = await fetchImpl(configuration.redisUrl, {
-      method: 'POST', redirect: 'error', cache: 'no-store', signal,
+      method: 'POST', redirect: 'error', cache: 'no-store', signal: controller.signal,
       headers: { Authorization: `Bearer ${configuration.redisToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(['EVAL', QUOTA_SCRIPT, '3', participantKey, globalKey, idempotencyKey,
         String(configuration.participantLimit), String(configuration.globalLimit), String(configuration.idempotencyTtlSeconds)]),
     });
+    if (!response?.ok) throw new Error('storage unavailable');
+    payload = await response.json();
   } catch {
     throw new ResearchParticipantAccessError('RESEARCH_SERVICE_UNAVAILABLE');
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
   }
-  if (!response?.ok) throw new ResearchParticipantAccessError('RESEARCH_SERVICE_UNAVAILABLE');
-  let payload;
-  try { payload = await response.json(); } catch { throw new ResearchParticipantAccessError('RESEARCH_SERVICE_UNAVAILABLE'); }
   const result = payload?.result;
   if (!Array.isArray(result) || result.length !== 4 || !result.every(Number.isInteger)) {
     throw new ResearchParticipantAccessError('RESEARCH_SERVICE_UNAVAILABLE');

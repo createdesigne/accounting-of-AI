@@ -86,6 +86,9 @@ test('invalid participant codes, exhausted quotas, missing configuration and sto
   const broken = createResearchParticipantAccess(env, { fetchImpl: async () => { throw new Error('private storage detail'); } });
   await assert.rejects(broken.authorize({ accessCode, requestId: request.requestId, requestFingerprint }),
     error => error instanceof ResearchParticipantAccessError && error.code === 'RESEARCH_SERVICE_UNAVAILABLE' && !error.message.includes('private'));
+  const hanging = createResearchParticipantAccess(env, { quotaTimeoutMs: 10, fetchImpl: async (_url, options) => new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })) });
+  await assert.rejects(hanging.authorize({ accessCode, requestId: request.requestId, requestFingerprint }),
+    error => error instanceof ResearchParticipantAccessError && error.code === 'RESEARCH_SERVICE_UNAVAILABLE');
 });
 
 test('participant mode is limited to weekly analysis, uses the server-selected model and preserves a sanitized provider failure', async () => {
@@ -131,4 +134,18 @@ test('participant client sends only the participant credential header and maps i
   }});
   await assert.rejects(client.analyze(request), error => error instanceof WeeklyAnalysisClientError && error.code === 'INVALID_ACCESS_CODE' && !error.message.includes(accessCode));
   assert.equal(calls, 1);
+});
+
+test('participant credentials are not sent to another production origin', async () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'location');
+  Object.defineProperty(globalThis, 'location', { configurable: true, value: new URL('https://preview.example/accounting-of-AI/') });
+  let calls = 0;
+  try {
+    const client = createWeeklyAnalysisClient({ baseUrl: 'https://other.example/api/ai', authMode: 'participant', participantCode: accessCode, fetchImpl: async () => { calls++; return Response.json({}); } });
+    await assert.rejects(client.analyze(request), error => error instanceof WeeklyAnalysisClientError && error.code === 'FORBIDDEN');
+    assert.equal(calls, 0);
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'location', original);
+    else Reflect.deleteProperty(globalThis, 'location');
+  }
 });

@@ -71,6 +71,7 @@ export function createWeeklyAnalysisClient({
   return {
     async analyze(input: WeeklyAnalysisRequestV1, { signal }: { signal?: AbortSignal } = {}): Promise<WeeklyAnalysisResponseV1> {
       if (!baseUrl) throw new WeeklyAnalysisClientError("PROVIDER_ERROR");
+      if (authMode === "participant" && !participantEndpointAllowed(baseUrl)) throw new WeeklyAnalysisClientError("FORBIDDEN");
       if (authMode === "personal" && !apiKey) throw new WeeklyAnalysisClientError("API_KEY_REQUIRED");
       if (authMode === "participant" && !participantCode) throw new WeeklyAnalysisClientError("ACCESS_CODE_REQUIRED");
       if (authMode === "participant" && !/^[\x21-\x7e]{20,128}$/.test(participantCode)) {
@@ -179,6 +180,16 @@ function validateBaseUrl(baseUrl: string) {
     || (url.protocol !== "https:" && !(url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname)))) {
     throw new Error("Invalid AI server URL");
   }
+}
+
+function participantEndpointAllowed(baseUrl: string) {
+  const current = globalThis.location;
+  if (!current || !baseUrl) return true;
+  const target = new URL(baseUrl, current.href);
+  if (target.origin === current.origin) return true;
+  const localHosts = ["127.0.0.1", "localhost"];
+  return current.protocol === "http:" && target.protocol === "http:"
+    && localHosts.includes(current.hostname) && localHosts.includes(target.hostname);
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
