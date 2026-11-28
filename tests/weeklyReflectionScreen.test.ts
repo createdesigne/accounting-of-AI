@@ -26,6 +26,7 @@ test("reflection UI focuses on personal writing and keeps all four research fiel
   assert.match(screen, /最大3件/);
   assert.match(screen, /利用者の能力評価ではありません/);
   assert.match(screen, /本人の入力はAI分析と別に保存し、分析結果で上書きしません/);
+  assert.match(screen, /自分の言葉で記録します。AIは内容を自動生成・上書きしません/);
   assert.match(screen, /resolveWeeklyAnalysisState/);
   assert.match(screen, /一部未評価.*分析失敗/s);
   assert.doesNotMatch(screen, /思考レシート \{record\.links\.thoughtReceiptId\}/);

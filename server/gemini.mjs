@@ -14,6 +14,8 @@ import { GoogleGenAI, ApiError } from '@google/genai';
 const API_ORIGIN = 'https://generativelanguage.googleapis.com';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash-lite';
 const WEEKLY_ANALYSIS_OUTPUT_LIMIT = 64_000;
+const PROVIDER_ATTEMPT_LIMIT = 3;
+const PROVIDER_RETRY_BASE_DELAY_MS = 250;
 const MINIMAL_JSON_SCHEMA = Object.freeze({
   type: 'object', additionalProperties: false,
   properties: { ok: { type: 'boolean' } }, required: ['ok'],
@@ -123,11 +125,17 @@ export function createGeminiProvider({ apiKey, model, apiMethod = 'interactions'
           ? '/v1beta/interactions'
           : `/v1beta/models/${model}:generateContent`;
         if (target.origin !== API_ORIGIN || target.search || target.pathname !== expectedPath) throw new AiError('PROVIDER_ERROR');
+        const body = await request.text();
         let response;
-        try { response = await fetchImpl(request.url, { method: request.method, headers: request.headers, body: await request.text(), signal: request.signal, redirect: 'error' }); }
-        catch (error) {
-          const timedOut = request.signal.aborted || ['AbortError', 'TimeoutError'].includes(error?.name);
-          throw new AiError(timedOut ? 'TIMEOUT' : 'PROVIDER_ERROR', { diagnosticStage: 'provider-response', timedOut });
+        for (let attempt = 0; attempt < PROVIDER_ATTEMPT_LIMIT; attempt++) {
+          try { response = await fetchImpl(request.url, { method: request.method, headers: request.headers, body, signal: request.signal, redirect: 'error' }); }
+          catch (error) {
+            const timedOut = request.signal.aborted || ['AbortError', 'TimeoutError'].includes(error?.name);
+            throw new AiError(timedOut ? 'TIMEOUT' : 'PROVIDER_ERROR', { diagnosticStage: 'provider-response', timedOut });
+          }
+          if (response.status !== 503 || attempt === PROVIDER_ATTEMPT_LIMIT - 1) break;
+          try { await response.body?.cancel(); } catch { /* Discard transient provider bodies without logging them. */ }
+          await waitForProviderRetry(PROVIDER_RETRY_BASE_DELAY_MS * (2 ** attempt), request.signal);
         }
         if (!response.ok) {
           throw await safeProviderHttpError(response);
@@ -270,6 +278,18 @@ export function createGeminiProvider({ apiKey, model, apiMethod = 'interactions'
       }
     },
   };
+}
+
+function waitForProviderRetry(delayMs, signal) {
+  if (signal.aborted) throw new AiError('TIMEOUT', { diagnosticStage: 'provider-response', timedOut: true });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve(); }, delayMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new AiError('TIMEOUT', { diagnosticStage: 'provider-response', timedOut: true }));
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function extractInteractionText(data, limit) {

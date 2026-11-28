@@ -16,11 +16,13 @@ type ClosingView = "settlement" | "reflection";
 export function WeeklyWorkspaceScreen({
   view = "home",
   onNavigate = () => undefined,
+  onCloseSettings = () => onNavigate("home"),
   recordTools = null,
   hasPendingRecordWork = false,
 }: {
   view?: WeeklyPrimaryView;
   onNavigate?: (view: WeeklyPrimaryView) => void;
+  onCloseSettings?: () => void;
   recordTools?: ReactNode;
   hasPendingRecordWork?: boolean;
 }) {
@@ -59,7 +61,7 @@ export function WeeklyWorkspaceScreen({
 
   if (view === "home") return <WeeklyDashboardScreen onOpenRecords={() => openRecords()} onOpenSavedRecords={() => openRecords(true)} onOpenReflection={openReflection} hasPendingRecordWork={hasPendingRecordWork} />;
   if (view === "journal") return <WeeklyJournalScreen onOpenRecords={() => openRecords(true)} onOpenRecordAccounting={openRecordAccounting} />;
-  if (view === "settings") return <WeeklySettingsScreen onOpenRecords={() => openRecords(true)} />;
+  if (view === "settings") return <WeeklySettingsScreen onBack={onCloseSettings} onOpenRecords={() => openRecords(true)} />;
   if (view === "settlement") return <div className="weekly-workspace">
     <nav className="weekly-context-tabs" aria-label="週次決算の切り替え">
       <button type="button" aria-pressed={closingView === "settlement"} onClick={() => setClosingView("settlement")}>決算・B/S・P/L</button>

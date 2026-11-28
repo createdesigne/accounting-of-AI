@@ -88,7 +88,7 @@ vercel git connect https://github.com/createdesigne/accounting-of-AI.git --proje
 
 RenderのBlueprintは無料プラン・自動デプロイ無効の初期設定。標準URLは `RENDER_EXTERNAL_URL` から使う。その他のNode環境では `PUBLIC_ORIGIN` と `PORT` を指定する。ホスティング代と利用者のGemini API代は別。
 
-全員が自分のキーを持ち込む小規模な試用を対象とする。CORSは認証ではなく、公開APIの第三者からの直接アクセスを防ぐものではない。現状はサイズ・時間・インスタンス内同時実行数を制限しているが、利用者別の回数制限はない。
+従来の個人APIキー方式に加え、週次分析だけは研究参加者コード方式を選べる。参加者方式はサーバー側の研究用キーと永続Redisの原子的な参加者別・研究全体上限がすべて設定済みの場合だけ有効になる。設定手順は [research-participant-gemini-setup.md](research-participant-gemini-setup.md) を参照する。個人APIキー方式にはアプリ独自の分散回数制限はないため、Google側の上限を利用する。CORSは認証ではなく、公開APIの第三者からの直接アクセスを防ぐものではない。
 
 ## 検証
 

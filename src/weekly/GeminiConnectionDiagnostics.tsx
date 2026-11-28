@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAiSettings } from "../AiSettings.tsx";
+import { hasPersonalGeminiCredential, useAiSettings } from "../AiSettings.tsx";
 import { createAiClient } from "../aiClient.ts";
 import type { GeminiApiMethod, WeeklyAnalysisRequestV1 } from "../integrations/weeklyAnalysisContract.ts";
 import { createWeeklyAnalysisClient } from "../weeklyAnalysisClient.ts";
@@ -28,7 +28,7 @@ export function GeminiConnectionDiagnostics() {
   const baseUrl = import.meta.env.VITE_AI_SERVER_URL?.trim() || "/api/ai";
 
   async function run(kind: CheckKind) {
-    if (!credentials.apiKey || running) return;
+    if (!hasPersonalGeminiCredential(credentials) || running) return;
     setRunning(kind);
     setResults(current => ({ ...current, [kind]: { interactions: { status: "running", detail: "実行中" }, "generate-content": { status: "running", detail: "実行中" } } }));
     const request = kind === "weekly-analysis" ? fakeAnalysisRequest() : null;
@@ -89,10 +89,10 @@ export function GeminiConnectionDiagnostics() {
     {([
       ["text", "通常文章生成"], ["minimal-json", "最小JSON構造化出力"], ["weekly-analysis", "研究用構造化分析（架空会話）"],
     ] as const).map(([kind, label]) => <div className="weekly-api-diagnostic-row" key={kind}>
-      <div><strong>{label}</strong><button type="button" className="secondary-action" disabled={!credentials.apiKey || running !== null} onClick={() => void run(kind)}>{results[kind].interactions.status === "idle" && results[kind]["generate-content"].status === "idle" ? "比較する" : "明示的に再試行"}</button></div>
+      <div><strong>{label}</strong><button type="button" className="secondary-action" disabled={!hasPersonalGeminiCredential(credentials) || running !== null} onClick={() => void run(kind)}>{results[kind].interactions.status === "idle" && results[kind]["generate-content"].status === "idle" ? "比較する" : "明示的に再試行"}</button></div>
       <dl>{methods.map(method => <div key={method}><dt>{method === "interactions" ? "Interactions" : "GenerateContent"}</dt><dd data-status={results[kind][method].status}>{results[kind][method].detail}</dd></div>)}</dl>
     </div>)}
-    {!credentials.apiKey && <p className="weekly-muted">先に「Gemini APIを設定」でキー・モデル・週次分析方式を設定してください。</p>}
+    {!hasPersonalGeminiCredential(credentials) && <p className="weekly-muted">技術診断は自分のAPIキー方式でのみ実行できます。参加者方式では、同意後の活動分析だけを利用します。</p>}
   </section>;
 }
 

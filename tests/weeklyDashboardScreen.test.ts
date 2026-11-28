@@ -21,7 +21,7 @@ test("weekly workspace keeps the five research areas and their detailed screens 
 });
 
 test("home focuses on one next action without week navigation or detailed aggregation", () => {
-  for (const text of ["今週のAI利用状況", "次にすること", "記録済み利用時間", "記録した会話"]) {
+  for (const text of ["今週のAI利用状況", "次にすること", "記録済み利用時間"]) {
     assert.ok(screen.includes(text), `missing dashboard label: ${text}`);
   }
   for (const text of [
@@ -33,6 +33,7 @@ test("home focuses on one next action without week navigation or detailed aggreg
   assert.match(workspace, /onOpenSavedRecords=\{\(\) => openRecords\(true\)\}/);
   assert.match(workspace, /recordTools/);
   assert.match(screen, /selectUnlinkedMeasuredTimeCandidates/);
+  assert.doesNotMatch(screen, /はじめての方へ|weekly-home-guide|記録した会話/);
 });
 
 test("dashboard contains no external analysis calls or fabricated fixtures", () => {

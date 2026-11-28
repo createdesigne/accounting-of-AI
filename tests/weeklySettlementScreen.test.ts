@@ -18,6 +18,11 @@ test("settlement UI focuses on the weekly total, classification, balance and con
     "会計区分が未分類の活動があります", "未分類のまま決算を確定することもできます",
   ]) assert.ok(screen.includes(text), `missing settlement label: ${text}`);
   assert.match(screen, /企業会計の財務諸表ではなく/);
+  assert.match(screen, /今週はまだ活動が記録されていません/);
+  assert.match(screen, /recordCount === 0[\s\S]*firstUnclassifiedRecord/);
+  assert.match(screen, /一致は、左右に記録した時間の合計が同じことを示します/);
+  assert.match(screen, /B\/Sは、その週末に費用・資産・未分類として残る時間/);
+  assert.match(screen, /P\/Lは、その週に費用として整理したAI利用時間の内訳/);
   assert.match(screen, /weekly-disclosure/);
   assert.doesNotMatch(screen, /記録ID:/);
   assert.doesNotMatch(screen, /この週の振り返り|週次仕訳一覧/);

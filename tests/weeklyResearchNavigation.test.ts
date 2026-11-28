@@ -8,13 +8,26 @@ const settings = readFileSync(new URL("../src/weekly/WeeklySettingsScreen.tsx", 
 const settingsCss = readFileSync(new URL("../src/weekly/weeklySettingsScreen.css", import.meta.url), "utf8");
 const diagnostics = readFileSync(new URL("../src/weekly/GeminiConnectionDiagnostics.tsx", import.meta.url), "utf8");
 const aiSettings = readFileSync(new URL("../src/AiSettings.tsx", import.meta.url), "utf8");
+const recordFlow = readFileSync(new URL("../src/weekly/WeeklyExtensionImportScreen.tsx", import.meta.url), "utf8");
 
-test("research mode bottom navigation has exactly the five requested destinations", () => {
+test("research mode bottom navigation has exactly four primary destinations", () => {
   const tabsBlock = app.match(/const tabs: Array<\{ key: TabKey; icon: ReactNode \}> = \[([\s\S]*?)\];/)?.[1] ?? "";
-  assert.equal((tabsBlock.match(/key:/g) ?? []).length, 5);
-  for (const key of ["home", "weekly", "journal", "tax", "settings"]) assert.match(tabsBlock, new RegExp(`key: "${key}"`));
-  for (const label of ['home: "ホーム"', 'weekly: "記録"', 'journal: "仕訳"', 'tax: "決算"', 'settings: "設定"']) assert.match(app, new RegExp(label));
-  assert.doesNotMatch(tabsBlock, /receipts|analysis/);
+  assert.equal((tabsBlock.match(/key:/g) ?? []).length, 4);
+  for (const key of ["home", "weekly", "journal", "tax"]) assert.match(tabsBlock, new RegExp(`key: "${key}"`));
+  for (const label of ['home: "ホーム"', 'weekly: "記録"', 'journal: "仕訳"', 'tax: "決算"']) assert.match(app, new RegExp(label));
+  assert.doesNotMatch(tabsBlock, /settings|receipts|analysis/);
+  assert.match(styles, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
+});
+
+test("research mode opens settings from the header and returns to the prior screen", () => {
+  const header = app.match(/function Header[\s\S]*?function ToastMessage/)?.[0] ?? "";
+  assert.match(header, /researchMode \? <button[\s\S]*aria-label="設定を開く"[\s\S]*onClick=\{onOpenSettings\}[\s\S]*<Settings size=\{20\}/);
+  assert.match(header, /AiSettingsButton[\s\S]*aria-label="決算を開く"/);
+  assert.match(app, /settingsReturnTabRef/);
+  assert.match(app, /function openResearchSettings\(\)/);
+  assert.match(app, /function closeResearchSettings\(\)/);
+  assert.match(app, /onCloseSettings=\{closeResearchSettings\}/);
+  assert.match(settings, /元の画面に戻る/);
 });
 
 test("monthly and annual legacy screens stay in source but are hidden in research mode", () => {
@@ -28,7 +41,9 @@ test("settings groups API, privacy and research export, with desktop and mobile 
   for (const label of ["Geminiとの接続", "保存とプライバシー", "研究データの出力"]) assert.match(settings, new RegExp(label));
   assert.match(settings, /type SettingsView = "menu" \| "gemini" \| "privacy" \| "export"/);
   assert.match(settings, /詳細設定・技術診断/);
-  assert.match(settings, /APIキー.*設定済み.*未設定/s);
+  assert.match(settings, /参加者コードまたは個人APIキー/);
+  assert.match(settings, /参加者として設定済み.*個人キー設定済み.*未設定/s);
+  assert.match(aiSettings, /研究参加者として利用する/);
   assert.match(settings, /WeeklyResearchExportScreen/);
   assert.match(settings, /GeminiConnectionDiagnostics/);
   assert.match(aiSettings, /Interactions API/);
@@ -50,6 +65,15 @@ test("settings keeps ephemeral credentials and explicit privacy choices", () => 
   assert.match(settings, /保存しない/);
   assert.match(settings, /Gemini分析を実行する直前/);
   assert.doesNotMatch(settings, /localStorage|sessionStorage|document\.cookie/);
+});
+
+test("record flow exposes privacy-safe INVALID_OUTPUT diagnostics", () => {
+  for (const field of ["diagnosticStage", "validationField", "validationRule", "providerHttpStatus"]) assert.match(recordFlow, new RegExp(field));
+  assert.match(recordFlow, /失敗した段階/);
+  assert.match(recordFlow, /検証フィールド/);
+  assert.match(recordFlow, /違反条件/);
+  assert.match(recordFlow, /APIキーや会話本文は表示しません/);
+  assert.doesNotMatch(recordFlow, /rawResponse|responseText/);
 });
 
 test("research records offer a manual measured-time fallback without putting it on home", () => {

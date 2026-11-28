@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { AiClientError, createAiClient } from './aiClient';
-import { AiSettingsButton, useAiSettings } from './AiSettings';
+import { AiSettingsButton, hasPersonalGeminiCredential, useAiSettings } from './AiSettings';
 
 type FieldKey = 'topic' | 'aiAdded' | 'selfDecision';
 type WritingField = { key: FieldKey; label: string; value: string };
@@ -45,7 +45,7 @@ export function AiWritingPanel({ baseUrl, fields, onApply }: {
   return <section className="ai-writing-panel" aria-labelledby="ai-writing-heading" aria-busy={busy}>
     <h3 id="ai-writing-heading"><Sparkles size={18} aria-hidden="true" />Geminiで文章を整える</h3>
     <p>選んだ項目の文章と編集の依頼だけをGoogleのGeminiに送信します。生成結果を確認してから反映できます。</p>
-    {!credentials.apiKey && <div className="ai-writing-actions"><p>AI設定から自分のAPIキーを入力してください。</p><AiSettingsButton /></div>}
+    {!hasPersonalGeminiCredential(credentials) && <div className="ai-writing-actions"><p>文章編集には自分のGemini APIキーが必要です。</p><AiSettingsButton /></div>}
     <label className="candidate-field"><span>整える項目</span>
       <select value={key} onChange={e => { setKey(e.target.value as FieldKey); setStatus(''); }}>
         {fields.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
@@ -55,7 +55,7 @@ export function AiWritingPanel({ baseUrl, fields, onApply }: {
       <textarea value={instruction} maxLength={500} rows={2} onChange={e => { setInstruction(e.target.value); setStatus(''); }} />
     </label>
     <div className="ai-writing-actions">
-      <button className="secondary-action" type="button" disabled={busy || !credentials.apiKey || !field.value.trim() || field.value.length > 6000} onClick={generate}>Geminiに送信して文章を整える</button>
+      <button className="secondary-action" type="button" disabled={busy || !hasPersonalGeminiCredential(credentials) || !field.value.trim() || field.value.length > 6000} onClick={generate}>Geminiに送信して文章を整える</button>
       {busy && <button className="secondary-action" type="button" onClick={() => pending.current?.abort()}>生成を中止する</button>}
     </div>
     {busy && <p role="status">Geminiの応答を待っています…</p>}

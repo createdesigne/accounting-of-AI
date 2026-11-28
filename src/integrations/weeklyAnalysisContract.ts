@@ -362,13 +362,13 @@ export function parseWeeklyAnalysisResponseV1(value: unknown): WeeklyAnalysisRes
 
 function parseUnresolvedFields(value: unknown): readonly WeeklyAnalysisUnresolvedFieldV1[] {
   const rows = array(value, "Unresolved analysis fields are invalid.");
-  if (rows.length > 10) invalid("Unresolved analysis fields are too large.");
   const allowedFields: readonly WeeklyAnalysisUnresolvedFieldPath[] = [
     "analysis.activityCategory", "analysis.accountCandidate", "analysis.accountingDispositionCandidate",
     "analysis.aiRole", "analysis.collaborationBehaviors", "analysis.initiative", "analysis.reasoning",
     "analysis.independence", "analysis.metricAssessments.independence.deliberation", "analysis.metricAssessments.independence.finalDecision",
     "analysis.criticalJudgment", "analysis.thinkingChange", "analysis.discovery",
   ];
+  if (rows.length > allowedFields.length) invalid("Unresolved analysis fields are too large.");
   const parsed = rows.map(item => {
     const row = object(item, "Unresolved analysis field is invalid.");
     exactKeys(row, ["field", "reason"]);

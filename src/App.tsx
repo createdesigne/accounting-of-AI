@@ -558,6 +558,7 @@ function resetPageScroll(behavior: ScrollBehavior = "auto", extraElement?: HTMLE
 function App() {
   const screenRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>(RESEARCH_WEEKLY_MODE ? "home" : IS_PREVIEW ? "tax" : "home");
+  const settingsReturnTabRef = useRef<TabKey>("home");
   const [receiptData, setReceiptData] = useState<ThoughtReceipt[]>(loadReceipts);
   const [readerStep, setReaderStep] = useState<ReaderStep>("closed");
   const [scannedReceipt, setScannedReceipt] = useState<ThoughtReceipt | null>(null);
@@ -1281,6 +1282,16 @@ function App() {
     scrollScreenToTop("auto");
   }
 
+  function openResearchSettings() {
+    if (activeTab !== "settings") settingsReturnTabRef.current = activeTab;
+    handleTabChange("settings");
+  }
+
+  function closeResearchSettings() {
+    const target = settingsReturnTabRef.current === "settings" ? "home" : settingsReturnTabRef.current;
+    handleTabChange(target);
+  }
+
   function closeSettlement() {
     setIsSettlementOpen(false);
     setActiveTab("home");
@@ -1538,12 +1549,13 @@ function App() {
   return (
     <div className="app-shell">
       <main className={`phone-frame${activeTab === "tax" ? " report-frame" : ""}${RESEARCH_WEEKLY_MODE ? " research-frame" : ""}`}>
-        <Header onOpenSettlement={openSettlement} onOpenSettings={() => handleTabChange("settings")} researchMode={RESEARCH_WEEKLY_MODE} />
+        <Header onOpenSettlement={openSettlement} onOpenSettings={openResearchSettings} researchMode={RESEARCH_WEEKLY_MODE} />
         <div className="screen" ref={screenRef}>
           {!isSettlementOpen && RESEARCH_WEEKLY_MODE && (
             <WeeklyWorkspaceScreen
               view={weeklyPrimaryView}
               onNavigate={(view) => handleTabChange(fromWeeklyPrimaryView(view))}
+              onCloseSettings={closeResearchSettings}
               hasPendingRecordWork={hasPendingRecordWork}
               recordTools={timeRecordTransferTools}
             />
@@ -1709,15 +1721,14 @@ function Header({ onOpenSettlement, onOpenSettings, researchMode }: { onOpenSett
         <h1>私とAIの確定申告</h1>
         {IS_PREVIEW && <p className="preview-notice">確認用プレビュー · 本番の記録には影響しません</p>}
       </div>
-      {!researchMode && <AiSettingsButton />}
-      <button
-        className="icon-button"
-        type="button"
-        aria-label={researchMode ? "設定を開く" : "決算を開く"}
-        onClick={researchMode ? onOpenSettings : onOpenSettlement}
-      >
-        {researchMode ? <Settings size={20} /> : <BookOpenText size={20} />}
-      </button>
+      {researchMode ? <button className="icon-button" type="button" aria-label="設定を開く" onClick={onOpenSettings}>
+        <Settings size={20} />
+      </button> : <>
+        <AiSettingsButton />
+        <button className="icon-button" type="button" aria-label="決算を開く" onClick={onOpenSettlement}>
+          <BookOpenText size={20} />
+        </button>
+      </>}
     </header>
   );
 }
@@ -3807,7 +3818,6 @@ function BottomNav({
     { key: "weekly", icon: <ReceiptText size={20} /> },
     { key: "journal", icon: <BookOpenText size={20} /> },
     { key: "tax", icon: <CalendarDays size={20} /> },
-    { key: "settings", icon: <Settings size={20} /> },
   ];
 
   return (

@@ -211,7 +211,7 @@ export function WeeklyReflectionScreen({
 
       <section className="weekly-reflection-panel" aria-labelledby="reflection-input-heading">
         <div className="weekly-reflection-heading"><div><p className="eyebrow">自分の言葉で記録</p><h3 id="reflection-input-heading">週を振り返る</h3></div></div>
-        <p className="weekly-reflection-note">本人が自分の言葉で入力します。AIが自動生成したり、内容を上書きしたりすることはありません。</p>
+        <p className="weekly-reflection-note">自分の言葉で記録します。AIは内容を自動生成・上書きしません。</p>
         <div className="weekly-reflection-fields">
           <label>今週の大きな発見・学び<textarea disabled={navigation.isFutureWeek} value={draft.discoveryLearning} onChange={(event) => setDraft({ ...draft, discoveryLearning: event.target.value })} placeholder="気づいたこと、学んだことを自分の言葉で記録" /></label>
           <label>AIの提案に対して自分が判断・修正したこと<textarea disabled={navigation.isFutureWeek} value={draft.humanJudgment} onChange={(event) => setDraft({ ...draft, humanJudgment: event.target.value })} placeholder="採用しなかった案、修正した点、最後に自分で決めたこと" /></label>

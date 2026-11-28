@@ -40,7 +40,7 @@ export function selectWeeklyHomeAction(input: Readonly<{
     return Object.freeze({
       kind: "start-recording",
       title: "今日の記録を始めましょう",
-      description: "Chrome拡張機能から会話と実測時間を取り込みます。",
+      description: "会話と実測時間を取り込みます。",
       buttonLabel: "会話を記録する",
     });
   }

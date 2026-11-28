@@ -118,13 +118,14 @@ export function WeeklySettlementScreen({ onOpenRecordAccounting }: { onOpenRecor
           <Summary label="仕掛成果物" seconds={preview.settlement.totals.workInProgressSeconds} />
           <Summary label="未分類" seconds={preview.settlement.totals.unclassifiedSeconds} tone={preview.settlement.totals.unclassifiedSeconds > 0 ? "warning" : "default"} />
         </div>
-        {preview.settlement.totals.unclassifiedSeconds > 0 ? <div className="weekly-settlement-review-warning" role="status">
+        {preview.settlement.totals.recordCount === 0 ? <p className="weekly-closing-classified">今週はまだ活動が記録されていません。</p> : preview.settlement.totals.unclassifiedSeconds > 0 ? <div className="weekly-settlement-review-warning" role="status">
           <strong>未分類のまま確定します</strong>
           <p>{formatDuration(preview.settlement.totals.unclassifiedSeconds)}は費用や資産へ振り替えず、AI仮受品の未確定残高として残ります。</p>
         </div> : <p className="weekly-closing-classified">会計区分はすべて確認済みです。</p>}
         <div className="weekly-settlement-balance-check">
           <div><span>仕訳の借方・貸方</span><strong>{preview.settlement.trialBalance.isBalanced ? "一致" : "不一致"}</strong></div>
           <div><span>B/Sの借方・貸方</span><strong>{preview.settlement.balanceSheet.isBalanced ? "一致" : "不一致"}</strong></div>
+          <small>一致は、左右に記録した時間の合計が同じことを示します。</small>
         </div>
         <div className="weekly-settlement-review-actions">
           <button className="weekly-settlement-back" type="button" disabled={saving} onClick={() => { setReviewing(false); setError(""); }}>戻る</button>
@@ -167,7 +168,7 @@ export function WeeklySettlementScreen({ onOpenRecordAccounting }: { onOpenRecor
           <Summary label="仕掛成果物" seconds={preview.settlement.totals.workInProgressSeconds} />
           <Summary label="未分類" seconds={preview.settlement.totals.unclassifiedSeconds} tone={preview.settlement.totals.unclassifiedSeconds > 0 ? "warning" : "default"} />
         </div>
-        {firstUnclassifiedRecord ? <div className="weekly-closing-unclassified" role="status">
+        {preview.settlement.totals.recordCount === 0 ? <p className="weekly-closing-classified">今週はまだ活動が記録されていません。</p> : firstUnclassifiedRecord ? <div className="weekly-closing-unclassified" role="status">
           <div><strong>会計区分が未分類の活動があります</strong><p>{formatDuration(preview.settlement.totals.unclassifiedSeconds)}・{unclassifiedRecords.length}件は、費用や資産へ移さずAI仮受品に残っています。未分類のまま決算を確定することもできます。</p></div>
           <button type="button" onClick={() => onOpenRecordAccounting(firstUnclassifiedRecord.id)}>この活動の会計区分を決める</button>
         </div> : <p className="weekly-closing-classified">会計区分はすべて確認済みです。</p>}
@@ -177,6 +178,7 @@ export function WeeklySettlementScreen({ onOpenRecordAccounting }: { onOpenRecor
         <div className="weekly-settlement-balance-check">
           <div><span>仕訳の借方・貸方</span><strong>{preview.settlement.trialBalance.isBalanced ? "一致" : "不一致"}</strong></div>
           <div><span>B/Sの借方・貸方</span><strong>{preview.settlement.balanceSheet.isBalanced ? "一致" : "不一致"}</strong></div>
+          <small>一致は、左右に記録した時間の合計が同じことを示します。</small>
         </div>
         <button className="weekly-settlement-confirm" type="button" disabled={!canConfirm || saving} onClick={() => { setReviewing(true); setMessage(""); setError(""); }}>
           {preview.confirmationStatus === "confirmed" ? "この内容で確定済み" : preview.confirmationStatus === "needs-reconfirmation" ? "変更後の決算内容を確認する" : "決算内容を確認する"}
@@ -186,7 +188,7 @@ export function WeeklySettlementScreen({ onOpenRecordAccounting }: { onOpenRecor
       <details className="weekly-settlement-panel weekly-disclosure">
         <summary><span><small>時間会計</small><strong id="weekly-bs-heading">週次B/S</strong></span><b>借方・貸方 {formatDuration(preview.settlement.balanceSheet.debitSeconds)}</b></summary>
         <div className="weekly-disclosure-body">
-          <p className="weekly-settlement-note">企業会計の財務諸表ではなく、秒を単位にした独自の時間会計表示です。</p>
+          <p className="weekly-settlement-note">B/Sは、その週末に費用・資産・未分類として残る時間を示します。企業会計の財務諸表ではなく、秒を単位にした独自の時間会計表示です。</p>
           <div className="weekly-statement-columns">
             <StatementColumn title="借方" lines={preview.settlement.balanceSheet.debit} />
             <StatementColumn title="貸方" lines={preview.settlement.balanceSheet.credit} />
@@ -198,6 +200,7 @@ export function WeeklySettlementScreen({ onOpenRecordAccounting }: { onOpenRecor
       <details className="weekly-settlement-panel weekly-disclosure">
         <summary><span><small>活動費用</small><strong id="weekly-pl-heading">週次P/L</strong></span><b>{formatDuration(preview.settlement.profitAndLoss.totalExpenseSeconds)}</b></summary>
         <div className="weekly-disclosure-body weekly-pl-list">
+          <p className="weekly-settlement-note">P/Lは、その週に費用として整理したAI利用時間の内訳です。</p>
           {preview.settlement.profitAndLoss.expenses.map((line) => <div key={line.account}><span>{line.account}</span><strong>{formatDuration(line.seconds)}</strong></div>)}
         </div>
       </details>

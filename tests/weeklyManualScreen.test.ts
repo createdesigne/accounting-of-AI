@@ -81,7 +81,7 @@ test("analysis and accounting screens use beginner-facing states and selection c
   assert.match(analysisPanel, /AiSettingsButton label="AI設定を開く"/);
   assert.match(analysisPanel, /未評価（点数なし）/);
   assert.match(analysisPanel, /本人の事前記録を見る/);
-  assert.match(analysisPanel, /!credentials\.apiKey \? <div className="weekly-analysis-settings-needed"/);
+  assert.match(analysisPanel, /!hasWeeklyAnalysisCredential\(credentials\) \? <div className="weekly-analysis-settings-needed"/);
   assert.match(analysisPanel, /AiSettingsButton label="AI設定を開く"/);
   assert.match(analysisPanel, /disabled=\{busy \|\| pending \|\| !consented\}/);
   assert.match(analysisPanel, /Geminiで分析する/);

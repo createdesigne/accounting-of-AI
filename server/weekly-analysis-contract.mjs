@@ -154,7 +154,10 @@ function parseMetricAssessment(value, path, linked) {
   const evidence = value.evidence.map((row, index) => parseMetricEvidence(row, `${path}.evidence[${index}]`, linked));
   if (!Array.isArray(value.unconfirmed) || value.unconfirmed.length > 20) invalidAnalysis(`${path}.unconfirmed`, 'type');
   value.unconfirmed.forEach((item, index) => validateRequiredText(item, 2000, `${path}.unconfirmed[${index}]`));
-  if (['confirmed', 'provisional'].includes(value.status) && (value.score === null || value.rubricLevel !== value.score || evidence.length === 0)) invalidAnalysis(path, 'evidence-required');
+  // Provider candidates are linked in a second pass. Allow an empty candidate
+  // evidence list through that pass so it can be converted to a partial/hold
+  // result. Persisted (linked) assessments remain strict.
+  if (['confirmed', 'provisional'].includes(value.status) && (value.score === null || value.rubricLevel !== value.score || (linked && evidence.length === 0))) invalidAnalysis(path, 'evidence-required');
   if (['hold', 'not_applicable'].includes(value.status) && (value.score !== null || value.rubricLevel !== null)) invalidAnalysis(path, 'enum');
   return Object.freeze({ ...value, evidence: Object.freeze(evidence), unconfirmed: Object.freeze([...value.unconfirmed]) });
 }
@@ -232,7 +235,11 @@ function linkMetricAssessment(request, assessment, unresolvedField, unresolvedFi
   let invalidEvidence = false;
   const linked = assessment.evidence.flatMap(row => {
     const message = request.messages[row.messageIndex];
-    if (!message || !message.text.includes(row.quote)) { invalidEvidence = true; return []; }
+    if (!message || !message.text.includes(row.quote)
+      || (row.source === 'self_report' && message.role !== 'user')) {
+      invalidEvidence = true;
+      return [];
+    }
     return [Object.freeze({ ...row, conversationId: request.conversationId, utteranceId: `${request.conversationId}:message:${row.messageIndex}`, speaker: message.role })];
   });
   if (['confirmed', 'provisional'].includes(assessment.status) && linked.length === 0) {
@@ -377,7 +384,7 @@ function providerCode(value) { return typeof value === 'string' && /^[a-z][a-z0-
 function safeValidationField(value) { return typeof value === 'string' && /^analysis(?:\.[a-zA-Z][a-zA-Z0-9]*|\[[0-9]{1,3}\]){0,8}$/.test(value) && value.length <= 192; }
 function validUnresolvedFields(value) {
   const allowedFields = [...Object.values(fieldByTarget).map(field => `analysis.${field}`), 'analysis.initiative', 'analysis.reasoning', 'analysis.independence', 'analysis.metricAssessments.independence.deliberation', 'analysis.metricAssessments.independence.finalDecision'];
-  return Array.isArray(value) && value.length <= 10
+  return Array.isArray(value) && value.length <= allowedFields.length
     && new Set(value.map(row => row?.field)).size === value.length
     && value.every(row => plain(row) && exact(row, ['field', 'reason'])
       && allowedFields.includes(row.field) && WEEKLY_ANALYSIS_PARTIAL_REASONS.includes(row.reason));

@@ -13,6 +13,7 @@ import {
   parseGeminiAnalysisCandidate,
   linkGeminiAnalysisCandidate,
   linkGeminiAnalysisCandidateWithPartial,
+  createWeeklySuccessResponse,
   parseWeeklyAnalysisRequest,
   WEEKLY_ANALYSIS_PROVIDER_API_VERSION,
   WEEKLY_ANALYSIS_PROVIDER_SDK_VERSION,
@@ -258,6 +259,40 @@ test("consent is mandatory and AIAS Level 1 is never sent for analysis", async (
   } finally { await app.close(); }
 });
 
+test("short and long conversations use the same validated weekly analysis path", async () => {
+  const longMessages = [
+    ...request.messages,
+    ...Array.from({ length: 118 }, (_, index) => ({
+      role: index % 2 === 0 ? "user" as const : "assistant" as const,
+      text: `${index + 1}番目の検討記録です。${"比較条件と判断理由を確認します。".repeat(10)}`,
+    })),
+  ];
+  const longRequest = {
+    ...request,
+    requestId: "request-weekly-long-1",
+    recordId: "record-weekly-long-1",
+    conversationId: "conversation-weekly-long-1",
+    thoughtReceiptId: "record-weekly-long-1:receipt",
+    conversationFingerprint: "fnv1a32:87654321",
+    messages: longMessages,
+  };
+  const sentMessageCounts: number[] = [];
+  const app = await start(createGeminiProvider({ apiKey: testKey, model, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(String(init?.body)) as { input: string };
+    sentMessageCounts.push((JSON.parse(body.input) as typeof request).messages.length);
+    return Response.json(interaction(candidateAnalysis));
+  } }));
+  try {
+    const client = createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model });
+    const shortResult = await client.analyze(request);
+    const longResult = await client.analyze(longRequest);
+    assert.equal(shortResult.analysisStatus, "complete");
+    assert.equal(longResult.analysisStatus, "complete");
+    assert.equal(longResult.conversationId, longRequest.conversationId);
+    assert.deepEqual(sentMessageCounts, [2, 120]);
+  } finally { await app.close(); }
+});
+
 test("invalid JSON remains a safe failed response", async () => {
   const content = { id: "bad", status: "completed", steps: [{ type: "model_output", content: [{ type: "text", text: "not-json" }] }] };
   const app = await start(createGeminiProvider({ apiKey: testKey, model, fetchImpl: async () => Response.json(content) }));
@@ -286,6 +321,89 @@ test("missing or invalid evidence nulls only the affected field and returns a pa
       assert.equal(result.analysis?.evidence.some((row) => row.target === "account-candidate"), false);
     } finally { await app.close(); }
   }
+});
+
+test("GenerateContent turns a scored metric without evidence into a partial hold", async () => {
+  const missingMetricEvidence = {
+    ...candidateAnalysis,
+    metricAssessments: {
+      ...candidateAnalysis.metricAssessments,
+      initiative: { ...candidateAnalysis.metricAssessments.initiative, evidence: [] },
+    },
+  };
+  const app = await start(createGeminiProvider({
+    apiKey: testKey, model, apiMethod: "generate-content",
+    fetchImpl: async () => Response.json(generateContent(missingMetricEvidence)),
+  }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+    assert.equal(result.analysisStatus, "partial");
+    assert.equal(result.error, null);
+    assert.equal(result.analysis?.initiative, null);
+    assert.equal(result.analysis?.metricAssessments.initiative.status, "hold");
+    assert.equal(result.analysis?.metricAssessments.reasoning.score, 75);
+    assert.deepEqual(result.unresolvedFields, [{ field: "analysis.initiative", reason: "missing-evidence" }]);
+  } finally { await app.close(); }
+});
+
+test("self-report evidence attributed to an assistant is held without weakening quote matching", () => {
+  const assistantQuote = request.messages[1].text;
+  const result = linkGeminiAnalysisCandidateWithPartial(request, {
+    ...candidateAnalysis,
+    metricAssessments: {
+      ...candidateAnalysis.metricAssessments,
+      initiative: {
+        ...candidateAnalysis.metricAssessments.initiative,
+        evidence: [{ messageIndex: 1, quote: assistantQuote, observedFeature: "自己申告として扱えない発言", source: "self_report" }],
+      },
+    },
+  });
+  assert.equal(result.analysis.initiative, null);
+  assert.equal(result.analysis.metricAssessments.initiative.status, "hold");
+  assert.deepEqual(result.unresolvedFields, [{ field: "analysis.initiative", reason: "invalid-evidence" }]);
+});
+
+test("twelve unsupported evidence fields remain a partial analysis instead of failing", async () => {
+  const invalidQuote = "この引用は実際の会話に存在しません";
+  const corruptQuotes = <T extends { quote: string }>(rows: readonly T[]) =>
+    rows.map(row => ({ ...row, quote: invalidQuote }));
+  const invalidateMetric = <T extends { evidence: readonly { quote: string }[] }>(metric: T) =>
+    ({ ...metric, evidence: corruptQuotes(metric.evidence) });
+  const invalidAnalysis = {
+    ...candidateAnalysis,
+    evidence: corruptQuotes(candidateAnalysis.evidence),
+    metricAssessments: {
+      initiative: invalidateMetric(candidateAnalysis.metricAssessments.initiative),
+      reasoning: invalidateMetric(candidateAnalysis.metricAssessments.reasoning),
+      independence: {
+        ...invalidateMetric(candidateAnalysis.metricAssessments.independence),
+        deliberation: invalidateMetric(candidateAnalysis.metricAssessments.independence.deliberation),
+        finalDecision: invalidateMetric(candidateAnalysis.metricAssessments.independence.finalDecision),
+      },
+    },
+  };
+  const linked = linkGeminiAnalysisCandidateWithPartial(request, invalidAnalysis);
+  assert.equal(linked.unresolvedFields.length, 12);
+  assert.equal(linked.analysis.initiative, null);
+  assert.equal(linked.analysis.reasoning, null);
+  assert.equal(linked.analysis.independence, null);
+  assert.equal(linked.analysis.evidence.length, 0);
+  const response = createWeeklySuccessResponse(request, linked.analysis, {
+    model, apiMethod: "interactions", analysisId: "analysis-12-held-metrics",
+    now: new Date("2026-11-26T02:00:00.000Z"), unresolvedFields: linked.unresolvedFields,
+  });
+  assert.equal(response.analysisStatus, "partial");
+  assert.equal(parseWeeklyAnalysisResponseV1(response).unresolvedFields.length, 12);
+  const app = await start(createGeminiProvider({ apiKey: testKey, model, fetchImpl: async () =>
+    Response.json(interaction(invalidAnalysis)) }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model }).analyze(request);
+    assert.equal(result.analysisStatus, "partial");
+    assert.equal(result.error, null);
+    assert.equal(result.unresolvedFields.length, 12);
+    assert.equal(result.analysis?.initiative, null);
+    assert.equal(result.analysis?.metricAssessments.independence.finalDecision.status, "hold");
+  } finally { await app.close(); }
 });
 
 test("structured schema keeps null distinct from zero and constrains linked evidence IDs", () => {
@@ -327,8 +445,13 @@ test("candidate validation reports safe field paths and individual rules", () =>
       return true;
     });
   }
+  const candidateWithoutMetricEvidence = parseGeminiAnalysisCandidate({
+    ...candidateAnalysis,
+    metricAssessments: { ...candidateAnalysis.metricAssessments, initiative: { ...candidateAnalysis.metricAssessments.initiative, evidence: [] } },
+  });
+  assert.equal(candidateWithoutMetricEvidence.metricAssessments.initiative.evidence.length, 0);
   assert.throws(
-    () => parseGeminiAnalysisCandidate({ ...candidateAnalysis, metricAssessments: { ...candidateAnalysis.metricAssessments, initiative: { ...candidateAnalysis.metricAssessments.initiative, evidence: [] } } }),
+    () => parseGeminiAnalysisPayload({ ...analysis, metricAssessments: { ...analysis.metricAssessments, initiative: { ...analysis.metricAssessments.initiative, evidence: [] } } }),
     (error: unknown) => {
       assert.equal((error as { validationField?: string }).validationField, "analysis.metricAssessments.initiative");
       assert.equal((error as { validationRule?: string }).validationRule, "evidence-required");
@@ -439,6 +562,83 @@ test("upstream HTTP diagnostics expose only status and machine error type", asyn
       assert.equal(serialized.includes(quote), false);
     } finally { await app.close(); }
   }
+});
+
+test("503 retries use bounded exponential backoff without changing model, method, or request", async () => {
+  for (const apiMethod of ["interactions", "generate-content"] as const) {
+    let calls = 0;
+    const requests: Array<{ url: string; body: string }> = [];
+    const app = await start(createGeminiProvider({
+      apiKey: testKey, model, apiMethod,
+      fetchImpl: async (url, init) => {
+        calls += 1;
+        requests.push({ url: String(url), body: String(init?.body) });
+        if (calls < 3) return Response.json({ error: { status: "UNAVAILABLE", message: `do not expose ${quote}` } }, { status: 503 });
+        return Response.json(apiMethod === "interactions" ? interaction(candidateAnalysis) : generateContent(candidateAnalysis));
+      },
+    }));
+    try {
+      const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod }).analyze(request);
+      assert.equal(result.analysisStatus, "complete");
+      assert.equal(result.model, model);
+      assert.equal(result.apiMethod, apiMethod);
+      assert.equal(calls, 3);
+      assert.equal(new Set(requests.map(item => item.url)).size, 1);
+      assert.equal(new Set(requests.map(item => item.body)).size, 1);
+      assert.equal(JSON.stringify(result).includes(quote), true);
+    } finally { await app.close(); }
+  }
+});
+
+test("persistent 503 stops after three attempts and keeps only safe diagnostics", async () => {
+  let calls = 0;
+  const upstreamMessage = `never expose ${testKey} or ${quote}`;
+  const app = await start(createGeminiProvider({ apiKey: testKey, model, apiMethod: "generate-content", fetchImpl: async () => {
+    calls += 1;
+    return Response.json({ error: { status: "UNAVAILABLE", message: upstreamMessage } }, { status: 503 });
+  } }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+    assert.equal(calls, 3);
+    assert.equal(result.analysisStatus, "failed");
+    assert.equal(result.error?.code, "PROVIDER_ERROR");
+    assert.equal(result.error?.providerHttpStatus, 503);
+    assert.equal(result.error?.providerErrorCode, "unavailable");
+    assert.equal(result.error?.diagnosticStage, "provider-response");
+    assert.equal(JSON.stringify(result).includes(upstreamMessage), false);
+    assert.equal(JSON.stringify(result).includes(testKey), false);
+    assert.equal(JSON.stringify(result).includes(quote), false);
+  } finally { await app.close(); }
+});
+
+test("401, 403, and invalid analysis output are never retried", async () => {
+  for (const status of [401, 403]) {
+    let calls = 0;
+    const app = await start(createGeminiProvider({ apiKey: testKey, model, apiMethod: "generate-content", fetchImpl: async () => {
+      calls += 1;
+      return Response.json({ error: { status: status === 401 ? "UNAUTHENTICATED" : "PERMISSION_DENIED" } }, { status });
+    } }));
+    try {
+      const result = await createWeeklyAnalysisClient({ baseUrl: app.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+      assert.equal(result.analysisStatus, "failed");
+      assert.equal(result.error?.code, "NOT_AUTHENTICATED");
+      assert.equal(calls, 1);
+    } finally { await app.close(); }
+  }
+
+  let invalidCalls = 0;
+  const invalidApp = await start(createGeminiProvider({ apiKey: testKey, model, apiMethod: "generate-content", fetchImpl: async () => {
+    invalidCalls += 1;
+    return Response.json(generateContent({ ...candidateAnalysis, reasoning: 60 }));
+  } }));
+  try {
+    const result = await createWeeklyAnalysisClient({ baseUrl: invalidApp.baseUrl, apiKey: testKey, model, apiMethod: "generate-content" }).analyze(request);
+    assert.equal(result.analysisStatus, "failed");
+    assert.equal(result.error?.code, "INVALID_OUTPUT");
+    assert.equal(result.error?.diagnosticStage, "schema-validation");
+    assert.equal(result.error?.validationField, "analysis.reasoning");
+    assert.equal(invalidCalls, 1);
+  } finally { await invalidApp.close(); }
 });
 
 test("network failure is normalized without inventing scores or changing the request", async () => {

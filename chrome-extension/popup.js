@@ -1,5 +1,6 @@
 const WEB_APP_URLS = {
   production: "https://accounting-of-ai.vercel.app/accounting-of-AI/",
+  integrationPreview: "https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/accounting-of-AI/",
   researchPreview: "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/accounting-of-AI/",
   legacy: "https://createdesigne.github.io/accounting-of-AI/",
   preview: "https://createdesigne.github.io/accounting-of-AI/preview/month-ledger/",
@@ -9,6 +10,7 @@ const WEB_APP_URLS = {
 const DESTINATION_STORAGE_KEY = "selectedWebAppDestinationV1";
 const ALLOWED_DESTINATIONS = new Set(Object.keys(WEB_APP_URLS));
 const HOST_PERMISSION_BY_DESTINATION = Object.freeze({
+  integrationPreview: "https://accounting-of-ai-git-codex-research-mvp-d25abe-accounting-of-ai.vercel.app/*",
   researchPreview: "https://accounting-of-ai-git-feature-research-mvp-accounting-of-ai.vercel.app/*",
   research: "http://localhost:5174/*",
 });
@@ -17,6 +19,13 @@ const timeRecordProtocol = globalThis.TimeRecordProtocol;
 const button = document.getElementById("createReceipt");
 const statusText = document.getElementById("status");
 const destination = document.getElementById("destination");
+const advancedDestinations = document.getElementById("advancedDestinations");
+const advancedDestinationOptions = document.getElementById("advancedDestinationOptions");
+function syncAdvancedDestinationOptions() {
+  if (advancedDestinationOptions) advancedDestinationOptions.hidden = !advancedDestinations?.open;
+}
+advancedDestinations?.addEventListener?.("toggle", syncAdvancedDestinationOptions);
+syncAdvancedDestinationOptions();
 const destinationReady = restoreDestination();
 destination?.addEventListener?.("change", persistDestination);
 const extensionVersion = globalThis.chrome?.runtime?.getManifest?.().version || "不明";
@@ -26,6 +35,8 @@ if (versionText) versionText.textContent = `バージョン ${extensionVersion}`
 const trackingStart = document.getElementById("trackingStart");
 const trackingStop = document.getElementById("trackingStop");
 const trackingStatus = document.getElementById("trackingStatus");
+const trackingSessionTime = document.getElementById("trackingSessionTime");
+const trackingFinalizedTime = document.getElementById("trackingFinalizedTime");
 const timeLedgerTransfer = document.getElementById("timeLedgerTransfer");
 const timeTransferStatus = document.getElementById("timeTransferStatus");
 const timeManualCopy = document.getElementById("timeManualCopy");
@@ -93,13 +104,14 @@ button.addEventListener("click", async () => {
     url.hash = new URLSearchParams({ draft: JSON.stringify(rawConversation) }).toString();
     if (url.href.length > 1500000) throw new Error("会話が長すぎるため送れません。短い会話でお試しください。");
 
+    const previewDestination = isProtectedPreviewDestination(destination.value);
     const opened = await chrome.tabs.create({
       url: url.href,
-      ...(destination.value === "researchPreview" ? { active: false } : {}),
+      ...(previewDestination ? { active: false } : {}),
     });
-    if (destination.value === "researchPreview" && opened?.id) {
+    if (previewDestination && opened?.id) {
       try {
-        await waitForPreviewConversationDestination(opened.id);
+        await waitForPreviewConversationDestination(opened.id, destination.value);
       } catch (error) {
         await chrome.tabs.update?.(opened.id, { active: true });
         throw error;
@@ -119,7 +131,11 @@ function createCaptureId() {
   return `capture-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 14)}`;
 }
 
-async function waitForPreviewConversationDestination(tabId) {
+function isProtectedPreviewDestination(destinationName) {
+  return destinationName === "integrationPreview" || destinationName === "researchPreview";
+}
+
+async function waitForPreviewConversationDestination(tabId, destinationName) {
   for (let attempt = 0; attempt < 40; attempt += 1) {
     const tab = await chrome.tabs.get(tabId);
     const currentUrl = typeof tab?.url === "string" && tab.url
@@ -128,8 +144,8 @@ async function waitForPreviewConversationDestination(tabId) {
     if (isVercelAuthenticationUrl(currentUrl)) {
       throw new Error("VERCEL_PREVIEW_AUTH_REQUIRED");
     }
-    if (isSelectedWebAppUrl(currentUrl, "researchPreview") && tab?.status !== "loading") return;
-    if (currentUrl && tab?.status !== "loading" && !isSelectedWebAppUrl(currentUrl, "researchPreview")) {
+    if (isSelectedWebAppUrl(currentUrl, destinationName) && tab?.status !== "loading") return;
+    if (currentUrl && tab?.status !== "loading" && !isSelectedWebAppUrl(currentUrl, destinationName)) {
       throw new Error("研究用Vercel Previewとは異なるページへ移動しました。Previewを開いて認証後、会話ページから再送してください。");
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -220,12 +236,14 @@ function renderTracking(state) {
   trackingStop.disabled = !state.enabled;
   const session = formatDuration(state.sessionSeconds);
   const finalized = formatDuration(state.finalizedSeconds);
+  if (trackingSessionTime) trackingSessionTime.textContent = session;
+  if (trackingFinalizedTime) trackingFinalizedTime.textContent = finalized;
   if (!state.enabled) {
-    trackingStatus.textContent = `停止中（確定済み ${finalized}）`;
+    trackingStatus.textContent = "停止中 · 計測を始めると時間が記録されます";
   } else if (state.active) {
-    trackingStatus.textContent = `計測中（今回 ${session}／確定済み ${finalized}／合計 ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = "計測中 · ChatGPTを操作している時間を記録";
   } else {
-    trackingStatus.textContent = `待機中：ChatGPTで操作すると計測します（今回 ${session}／確定済み ${finalized}／合計 ${formatDuration(state.totalSeconds)}）`;
+    trackingStatus.textContent = "待機中 · ChatGPTを操作すると計測を再開";
   }
 }
 
@@ -312,7 +330,13 @@ async function restoreDestination() {
   try {
     const stored = await chrome.storage?.local?.get?.(DESTINATION_STORAGE_KEY);
     const value = stored?.[DESTINATION_STORAGE_KEY];
-    if (destination && ALLOWED_DESTINATIONS.has(value)) destination.value = value;
+    if (destination && ALLOWED_DESTINATIONS.has(value)) {
+      destination.value = value;
+      if (!["production", "integrationPreview", "researchPreview"].includes(value) && advancedDestinations) {
+        advancedDestinations.open = true;
+        syncAdvancedDestinationOptions();
+      }
+    }
   } catch (error) {
     console.error("送信先を復元できませんでした。", error);
   }
@@ -402,7 +426,7 @@ async function deliverTimePayload(tabId, payload, destinationName, initialAccess
     } catch (error) {
       lastError = error;
       lastStage = "send-message";
-      if ((destinationName === "research" || destinationName === "researchPreview") && isMissingReceiverError(error)
+      if ((destinationName === "research" || isProtectedPreviewDestination(destinationName)) && isMissingReceiverError(error)
         && injectionAttempts < 3 && attempt % 10 === 0) {
         injectionAttempts += 1;
         lastAccess = await inspectTimeDestination(tabId, destinationName);

@@ -16,13 +16,20 @@ test("journal screen explains recorded time and unclassified temporary entries b
   }
   assert.match(screen, /費用は、思考の悪さやAI依存を意味しません/);
   assert.match(screen, /二重計上ではありません/);
+  assert.match(screen, /今週の仕訳はまだありません/);
+  assert.match(screen, /recordCount === 0[\s\S]*firstUnclassifiedRecord/);
+  assert.match(screen, /journalEntries\.length > 0 && <span className="weekly-settlement-status"/);
+  assert.match(screen, /recordCount > 0 && <span>\{preview\.settlement\.totals\.recordCount\}活動<\/span>/);
+  assert.match(screen, /journalEntries\.length > 0 && <section/);
 });
 
 test("journal keeps debit and credit accounts while adding beginner descriptions", () => {
   assert.match(screen, /<small>借方<\/small>/);
   assert.match(screen, /<small>貸方<\/small>/);
-  assert.match(screen, /AI仮受品.*会計区分が決まるまで一時的に置く時間/s);
-  assert.match(screen, /時間拠出.*本人がAIを使う活動に提供した時間/s);
+  assert.match(screen, /AI仮受品.*分類前の時間/s);
+  assert.match(screen, /時間拠出.*本人がAI利用に提供した時間/s);
+  assert.match(screen, /借方と貸方に同じ秒数を記録し、時間の動きをつり合わせます/);
+  assert.doesNotMatch(screen, /accountDescription/);
   assert.match(screen, /entry\.lines\[0\]\.seconds/);
   assert.match(screen, /entry\.lines\[1\]\.seconds/);
   assert.doesNotMatch(screen, /saveWeekly|updateWeekly|confirmWeekly|fetch\(/);
