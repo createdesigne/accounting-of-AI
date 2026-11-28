@@ -41,7 +41,9 @@ test("settings groups API, privacy and research export, with desktop and mobile 
   for (const label of ["Geminiとの接続", "保存とプライバシー", "研究データの出力"]) assert.match(settings, new RegExp(label));
   assert.match(settings, /type SettingsView = "menu" \| "gemini" \| "privacy" \| "export"/);
   assert.match(settings, /詳細設定・技術診断/);
-  assert.match(settings, /APIキー.*設定済み.*未設定/s);
+  assert.match(settings, /参加者コードまたは個人APIキー/);
+  assert.match(settings, /参加者として設定済み.*個人キー設定済み.*未設定/s);
+  assert.match(aiSettings, /研究参加者として利用する/);
   assert.match(settings, /WeeklyResearchExportScreen/);
   assert.match(settings, /GeminiConnectionDiagnostics/);
   assert.match(aiSettings, /Interactions API/);

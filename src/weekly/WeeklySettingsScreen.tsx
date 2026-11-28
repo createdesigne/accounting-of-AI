@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AiSettingsButton, useAiSettings } from "../AiSettings.tsx";
+import { AiSettingsButton, hasWeeklyAnalysisCredential, useAiSettings } from "../AiSettings.tsx";
 import { WeeklyResearchExportScreen } from "./WeeklyResearchExportScreen.tsx";
 import { GeminiConnectionDiagnostics } from "./GeminiConnectionDiagnostics.tsx";
 import "./weeklySettingsScreen.css";
@@ -9,19 +9,21 @@ type SettingsView = "menu" | "gemini" | "privacy" | "export";
 export function WeeklySettingsScreen({ onBack, onOpenRecords }: { onBack: () => void; onOpenRecords: () => void }) {
   const [view, setView] = useState<SettingsView>("menu");
   const { credentials } = useAiSettings();
+  const connectionLabel = credentials.authMode === "participant" && credentials.participantCode
+    ? "参加者として設定済み" : credentials.authMode === "personal" && credentials.apiKey ? "個人キー設定済み" : "未設定";
 
   if (view === "gemini") return <div className="weekly-settings-screen stack">
     <SettingsBack onBack={() => setView("menu")} />
     <section className="weekly-intro-card">
       <p className="eyebrow light">Geminiとの接続</p>
       <h2>AI分析を使う準備</h2>
-      <p>APIキーはこの画面を開いている間だけ使用します。設定しただけでは会話を送信しません。</p>
+      <p>自分のAPIキーまたは研究参加者コードを選べます。設定しただけでは会話を送信しません。</p>
     </section>
     <section className="weekly-panel weekly-settings-api" aria-labelledby="weekly-settings-api-heading">
-      <div className="weekly-settings-status-row"><div><p className="eyebrow">接続準備</p><h3 id="weekly-settings-api-heading">Gemini APIキー</h3></div><strong className={credentials.apiKey ? "configured" : "unconfigured"}>{credentials.apiKey ? "設定済み" : "未設定"}</strong></div>
-      <p>キーはブラウザの保存領域、帳簿、研究データ、Chrome拡張機能には保存しません。再読み込みやタブを閉じた後は、再入力が必要です。</p>
+      <div className="weekly-settings-status-row"><div><p className="eyebrow">接続準備</p><h3 id="weekly-settings-api-heading">Geminiとの接続方法</h3></div><strong className={hasWeeklyAnalysisCredential(credentials) ? "configured" : "unconfigured"}>{connectionLabel}</strong></div>
+      <p>APIキーと参加者コードは、ブラウザの保存領域、帳簿、研究データ、Chrome拡張機能には保存しません。再読み込みやタブを閉じた後は、再入力が必要です。</p>
       <p>会話本文をGeminiへ送るときは、活動ごとに実行直前の明示同意を求めます。</p>
-      <AiSettingsButton label="Gemini APIを設定" />
+      <AiSettingsButton label="Geminiの接続を設定" />
       <details className="weekly-settings-technical">
         <summary>詳細設定・技術診断</summary>
         <div><p>InteractionsとGenerateContentを同じ架空入力で比較し、通常生成・最小JSON・研究用構造化分析を個別に確認できます。診断はAPI利用を伴います。</p><GeminiConnectionDiagnostics /></div>
@@ -63,7 +65,7 @@ export function WeeklySettingsScreen({ onBack, onOpenRecords }: { onBack: () => 
       <p>確認したい項目を1つ選んでください。</p>
     </section>
     <nav className="weekly-settings-menu" aria-label="設定項目">
-      <button type="button" onClick={() => setView("gemini")}><span><small>AI分析の準備</small><strong>Geminiとの接続</strong><p>APIキーの設定と接続診断</p></span><b>{credentials.apiKey ? "設定済み" : "未設定"}</b></button>
+      <button type="button" onClick={() => setView("gemini")}><span><small>AI分析の準備</small><strong>Geminiとの接続</strong><p>参加者コードまたは個人APIキーを設定</p></span><b>{connectionLabel}</b></button>
       <button type="button" onClick={() => setView("privacy")}><span><small>活動ごとに選択</small><strong>保存とプライバシー</strong><p>会話・時間の保存範囲と外部送信</p></span><b>確認する</b></button>
       <button type="button" onClick={() => setView("export")}><span><small>本人の明示操作</small><strong>研究データの出力</strong><p>JSON・CSVの対象と内容を確認</p></span><b>開く</b></button>
     </nav>

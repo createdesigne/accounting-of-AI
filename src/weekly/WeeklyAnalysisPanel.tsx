@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { AiSettingsButton, useAiSettings } from "../AiSettings.tsx";
+import { AiSettingsButton, hasWeeklyAnalysisCredential, useAiSettings } from "../AiSettings.tsx";
 import { buildWeeklyAnalysisRequest } from "../integrations/weeklyAnalysisAdapter.ts";
 import type { AnalysisActivityCategory, AnalysisScore } from "../integrations/analysisContract.ts";
 import {
@@ -113,7 +113,8 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
         const clientError = error instanceof WeeklyAnalysisClientError
           ? error
           : new WeeklyAnalysisClientError("INVALID_OUTPUT");
-        try { await acceptWeeklyAnalysisResponse(createClientFailureResponse(request, clientError, credentials.model, new Date(), credentials.apiMethod)); }
+        const failureModel = credentials.authMode === "participant" ? "gemini-not-invoked" : credentials.model;
+        try { await acceptWeeklyAnalysisResponse(createClientFailureResponse(request, clientError, failureModel, new Date(), credentials.apiMethod)); }
         catch { /* Keep the original error and never mutate the weekly record. */ }
       }
       setMessage(error instanceof Error ? error.message : "分析を実行できませんでした。本人入力と会計データは変更していません。");
@@ -165,7 +166,7 @@ export function WeeklyAnalysisPanel({ record, task, conversation, state, noAi, r
     </details>
     {hasPriorReflection && <details className="weekly-analysis-prior"><summary>本人の事前記録を見る</summary><dl><Row label="やり取りの概要" value={record.manualNotes?.interactionSummary ?? "未入力"} /><Row label="考えたこと・判断したこと" value={record.manualNotes?.ownThoughts ?? record.selfReflection ?? "未入力"} /><Row label="発見・学び" value={record.manualNotes?.discovery ?? "未入力"} /></dl></details>}
     {pending && <span>分析待ちです。本人入力と会計データは変更しません。</span>}
-    {unavailable ? <p className="weekly-analysis-warning">この活動は「時間のみ保存」のため会話本文がなく、Gemini分析を実行できません。本人の記録と会計はそのまま利用できます。</p> : !credentials.apiKey ? <div className="weekly-analysis-settings-needed"><p>Gemini分析を使うにはAI設定が必要です。設定後はこの分析画面に戻り、その都度送信へ同意してから実行します。APIキーは保存されません。</p><AiSettingsButton label="AI設定を開く" /></div> : <>
+    {unavailable ? <p className="weekly-analysis-warning">この活動は「時間のみ保存」のため会話本文がなく、Gemini分析を実行できません。本人の記録と会計はそのまま利用できます。</p> : !hasWeeklyAnalysisCredential(credentials) ? <div className="weekly-analysis-settings-needed"><p>Gemini分析を使うにはAI設定が必要です。自分のAPIキーまたは研究参加者コードを設定し、この画面へ戻って送信へ同意してください。接続情報は保存されません。</p><AiSettingsButton label="AI設定を開く" /></div> : <>
       <label className="weekly-analysis-consent"><input type="checkbox" checked={consented} disabled={busy || pending} onChange={(event) => setConsented(event.target.checked)} />
         <span>この活動の保存済み会話本文をGeminiへ今回だけ送信することに同意します。</span>
       </label>

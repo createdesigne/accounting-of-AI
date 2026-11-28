@@ -1,5 +1,6 @@
 import { createAiHandler } from './app.mjs';
 import { createGeminiProvider } from './gemini.mjs';
+import { createResearchParticipantAccess } from './research-participant-access.mjs';
 
 export function vercelOrigins(env) {
   const origins = [];
@@ -18,7 +19,11 @@ export function vercelOrigins(env) {
   return [...new Set(origins)];
 }
 
-// One handler per warm function instance; credentials are still request scoped.
-// The two-request bound is per instance, not a distributed quota across Vercel.
-const handler = createAiHandler({ providerFactory: createGeminiProvider, allowedOrigins: vercelOrigins(process.env) });
+// Personal credentials remain request scoped. Participant credentials are verified
+// server-side and metered by the configured persistent Redis service.
+const handler = createAiHandler({
+  providerFactory: createGeminiProvider,
+  participantAccess: createResearchParticipantAccess(process.env),
+  allowedOrigins: vercelOrigins(process.env),
+});
 export default handler;

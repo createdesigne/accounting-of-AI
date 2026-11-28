@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { AiSettingsButton, useAiSettings } from "../AiSettings.tsx";
+import { AiSettingsButton, hasWeeklyAnalysisCredential, useAiSettings } from "../AiSettings.tsx";
 import { buildWeeklyAnalysisRequest } from "../integrations/weeklyAnalysisAdapter.ts";
 import { isWeeklyAnalysisPayloadV2, type WeeklyAnalysisDiagnosticStage, type WeeklyAnalysisMetricAssessmentV2, type WeeklyAnalysisResponseV1, type WeeklyAnalysisValidationRule } from "../integrations/weeklyAnalysisContract.ts";
 import type { AnalysisActivityCategory } from "../integrations/analysisContract.ts";
@@ -101,7 +101,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
   async function analyze() {
     if (!draft || !rawConversation || !selectedMeasurement) return;
     if (draft.privacy !== "full") { setMessage("時間のみ保存では会話本文を外部送信しません。"); return; }
-    if (!credentials.apiKey) { setMessage("APIキーが未設定です。設定するか、分析をスキップして進めてください。"); return; }
+    if (!hasWeeklyAnalysisCredential(credentials)) { setMessage("Geminiの接続が未設定です。設定するか、分析をスキップして進めてください。"); return; }
     const now = new Date();
     let clientFailureMessage = "";
     setBusy(true); setMessage("");
@@ -116,7 +116,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
       } catch (error) {
         const failure = error instanceof WeeklyAnalysisClientError ? error : new WeeklyAnalysisClientError("PROVIDER_ERROR");
         clientFailureMessage = failure.message;
-        response = createClientFailureResponse(request, failure, credentials.model, new Date(), credentials.apiMethod);
+        response = createClientFailureResponse(request, failure, credentials.authMode === "participant" ? "gemini-not-invoked" : credentials.model, new Date(), credentials.apiMethod);
       }
       changeDraft({ analysisState: response.analysisStatus, analysisRequest: Object.freeze({ requestId: request.requestId, requestedAt: request.requestedAt, consentedAt: request.consent.consentedAt }), analysisResponse: response });
       setMessage(response.analysisStatus === "complete" ? "分析結果を受信しました。本人の事前回答と会計区分は変更していません。" : response.analysisStatus === "partial" ? "分析できた項目だけ表示します。根拠不足の項目は未評価のままです。" : clientFailureMessage || "分析できませんでした。本人の記録と保存はそのまま続けられます。");
@@ -163,7 +163,7 @@ export function WeeklyExtensionImportScreen({ onOpenRecords }: Props) {
       {draft.step === 1 && <ConversationStep rawConversation={rawConversation} draft={draft} onPrivacyChange={(privacy) => changeDraft({ privacy, analysisState: "not-started", analysisRequest: null, analysisResponse: null, postAnalysisSupplement: "", postAnalysisObjection: "" })} onSubmit={confirmConversation} />}
       {draft.step === 2 && <MeasurementStep measurements={selectableMeasurements} usedMeasurements={usedMeasurements} exactSessionMatches={exactSessionMatches} hasMeasurementSessionHint={hasMeasurementSessionHint} unrelatedUnusedCount={measurements.length - exactSessionMatches.length} selectedId={draft.measurementRecordId} onSelect={(measurementRecordId) => changeDraft({ measurementRecordId })} onSubmit={confirmMeasurement} onBack={() => moveTo(1)} />}
       {draft.step === 3 && <HumanNotesStep draft={draft} tasks={store.tasks} onChange={changeDraft} onSubmit={confirmHumanNotes} onBack={() => moveTo(2)} />}
-      {draft.step === 4 && <AnalysisStep draft={draft} hasApiKey={!!credentials.apiKey} busy={busy} message={message} onConsentAnalyze={analyze} onSkip={skipAnalysis} onContinue={() => moveTo(5)} onChange={changeDraft} onBack={() => moveTo(3)} />}
+      {draft.step === 4 && <AnalysisStep draft={draft} hasApiKey={hasWeeklyAnalysisCredential(credentials)} busy={busy} message={message} onConsentAnalyze={analyze} onSkip={skipAnalysis} onContinue={() => moveTo(5)} onChange={changeDraft} onBack={() => moveTo(3)} />}
       {draft.step === 5 && <AccountingStep draft={draft} busy={busy} message={message} onChange={changeDraft} onSubmit={saveActivity} onBack={() => moveTo(4)} />}
       {draft.step !== 4 && draft.step !== 5 && message && <p className="weekly-form-message" role="status">{message}</p>}
     </>}

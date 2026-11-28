@@ -16,6 +16,10 @@ import {
 
 const messages = {
   API_KEY_REQUIRED: "AI設定からGemini APIキーを入力してください。",
+  ACCESS_CODE_REQUIRED: "研究参加者アクセスコードを入力してください。",
+  INVALID_ACCESS_CODE: "研究参加者アクセスコードを確認してください。",
+  RESEARCH_LIMIT_REACHED: "研究参加者向けGemini分析の利用上限に達しました。記録と会計は引き続き利用できます。",
+  RESEARCH_SERVICE_UNAVAILABLE: "研究参加者向け接続を利用できません。研究者に設定状況を確認してください。記録と会計は保持されています。",
   INVALID_CREDENTIALS: "AI設定のAPIキーとモデルを確認してください。",
   INVALID_INPUT: "分析対象の会話と同意内容を確認してください。",
   TOO_LARGE: "会話が長すぎます。送信範囲を短くしてください。",
@@ -46,6 +50,8 @@ export class WeeklyAnalysisClientError extends Error {
 export function createWeeklyAnalysisClient({
   baseUrl = "",
   apiKey = "",
+  authMode = "personal",
+  participantCode = "",
   model = "gemini-3.5-flash-lite",
   apiMethod = "interactions",
   fetchImpl = fetch,
@@ -53,6 +59,8 @@ export function createWeeklyAnalysisClient({
 }: {
   baseUrl?: string;
   apiKey?: string;
+  authMode?: "personal" | "participant";
+  participantCode?: string;
   model?: string;
   apiMethod?: GeminiApiMethod;
   fetchImpl?: typeof fetch;
@@ -63,9 +71,15 @@ export function createWeeklyAnalysisClient({
   return {
     async analyze(input: WeeklyAnalysisRequestV1, { signal }: { signal?: AbortSignal } = {}): Promise<WeeklyAnalysisResponseV1> {
       if (!baseUrl) throw new WeeklyAnalysisClientError("PROVIDER_ERROR");
-      if (!apiKey) throw new WeeklyAnalysisClientError("API_KEY_REQUIRED");
-      if (!/^[\x21-\x7e]{1,512}$/.test(apiKey) || !/^gemini-[a-zA-Z0-9._-]{1,120}$/.test(model)
-        || !["interactions", "generate-content"].includes(apiMethod)) {
+      if (authMode === "personal" && !apiKey) throw new WeeklyAnalysisClientError("API_KEY_REQUIRED");
+      if (authMode === "participant" && !participantCode) throw new WeeklyAnalysisClientError("ACCESS_CODE_REQUIRED");
+      if (authMode === "participant" && !/^[\x21-\x7e]{20,128}$/.test(participantCode)) {
+        throw new WeeklyAnalysisClientError("INVALID_ACCESS_CODE");
+      }
+      if (!['personal', 'participant'].includes(authMode)
+        || (authMode === "personal" && (!/^[\x21-\x7e]{1,512}$/.test(apiKey)
+          || !/^gemini-[a-zA-Z0-9._-]{1,120}$/.test(model)
+          || !["interactions", "generate-content"].includes(apiMethod)))) {
         throw new WeeklyAnalysisClientError("INVALID_CREDENTIALS");
       }
       let request: WeeklyAnalysisRequestV1;
@@ -85,9 +99,9 @@ export function createWeeklyAnalysisClient({
           cache: "no-store",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`,
-            "X-Gemini-Model": model,
-            "X-Gemini-Api-Method": apiMethod,
+            ...(authMode === "participant"
+              ? { "X-Research-Access-Code": participantCode }
+              : { Authorization: `Bearer ${apiKey}`, "X-Gemini-Model": model, "X-Gemini-Api-Method": apiMethod }),
           },
           body: JSON.stringify(request),
           signal: controller.signal,
@@ -148,7 +162,9 @@ export function createClientFailureResponse(
 }
 
 function mapFailureCode(code: WeeklyAnalysisClientErrorCode): WeeklyAnalysisErrorCode {
-  if (code === "API_KEY_REQUIRED" || code === "INVALID_CREDENTIALS" || code === "AUTH_ERROR" || code === "PREVIEW_AUTH_REQUIRED") return "NOT_AUTHENTICATED";
+  if (code === "API_KEY_REQUIRED" || code === "ACCESS_CODE_REQUIRED" || code === "INVALID_ACCESS_CODE" || code === "INVALID_CREDENTIALS" || code === "AUTH_ERROR" || code === "PREVIEW_AUTH_REQUIRED") return "NOT_AUTHENTICATED";
+  if (code === "RESEARCH_LIMIT_REACHED") return "RATE_LIMITED";
+  if (code === "RESEARCH_SERVICE_UNAVAILABLE") return "PROVIDER_ERROR";
   if (code === "FORBIDDEN") return "NOT_AUTHORIZED";
   if (code === "BUSY") return "RATE_LIMITED";
   if (code === "CANCELLED") return "PROVIDER_ERROR";
